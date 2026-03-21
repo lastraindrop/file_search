@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Context Workbench v4.0</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Highlight.js (Monokai Theme) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai-sublime.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container-fluid vh-100 d-flex flex-column p-0">
+        <!-- Top Navigation -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2 flex-shrink-0">
+            <a class="navbar-brand" href="#">🤖 AI Context Workbench</a>
+            <div class="d-flex ms-auto gap-2">
+                <input type="text" id="projectPath" class="form-control form-control-sm" placeholder="Full Project Path (e.g., C:/Projects/MyApp)" style="width: 300px;">
+                <button class="btn btn-primary btn-sm" onclick="App.openProject()">Open Project</button>
+            </div>
+        </nav>
+
+        <!-- Bulk Actions -->
+        <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light" style="display:none !important;">
+            <div>
+                <input type="checkbox" id="selectAllCb" class="form-check-input me-1" onchange="App.toggleSelectAll(this.checked)">
+                <small id="selectedCount" class="fw-bold text-primary">0</small>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" onclick="App.bulkMove()" title="Batch Move">✂️</button>
+                <button class="btn btn-outline-danger" onclick="App.bulkDelete()" title="Batch Delete">🗑️</button>
+                <button class="btn btn-outline-success" onclick="App.bulkStage()" title="Batch Stage">⬇</button>
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="row g-0 flex-grow-1 overflow-hidden">
+            
+            <!-- Left Panel: File Browser & Search -->
+            <div class="col-md-3 bg-light border-end d-flex flex-column h-100">
+                <!-- Search Box -->
+                <div class="p-2 border-bottom">
+                    <div class="input-group input-group-sm mb-1">
+                        <span class="input-group-text">🔍</span>
+                        <input type="text" id="searchInput" class="form-control" placeholder="Search files...">
+                    </div>
+                    <div class="d-flex gap-2 mb-2">
+                        <select id="searchMode" class="form-select form-select-sm" style="width: 80px;">
+                            <option value="smart">Smart</option>
+                            <option value="exact">Exact</option>
+                            <option value="regex">Regex</option>
+                            <option value="content">Content</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm flex-grow-1" onclick="App.startSearch()">Find</button>
+                    </div>
+                    <div class="d-flex gap-3 px-1">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="isInverse">
+                            <label class="form-check-label small" for="isInverse">Inverse</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="isCaseSensitive">
+                            <label class="form-check-label small" for="isCaseSensitive">Case</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs: Tree vs Search Results -->
+                <ul class="nav nav-tabs nav-fill bg-white" id="leftTabs" role="tablist">
+                    <li class="nav-item">
+                        <button class="nav-link active py-1" id="tab-tree" data-bs-toggle="tab" data-bs-target="#panel-tree" type="button">📁 Tree</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link py-1" id="tab-search" data-bs-toggle="tab" data-bs-target="#panel-search" type="button">Search Results</button>
+                    </li>
+                </ul>
+
+                <!-- Tab Content -->
+                <div class="tab-content flex-grow-1 overflow-auto bg-white" id="leftTabContent">
+                    <!-- Tree Panel -->
+                    <div class="tab-pane fade show active p-2" id="panel-tree">
+                        <div id="fileTreeRoot" class="small">No project loaded.</div>
+                    </div>
+                    <!-- Search Results Panel -->
+                    <div class="tab-pane fade p-2" id="panel-search">
+                        <div id="searchResultsList" class="list-group list-group-flush small"></div>
+                        <div id="searchStatus" class="text-muted small text-center mt-2" style="display:none;">Searching...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel: Preview -->
+            <div class="col-md-6 d-flex flex-column h-100 bg-white">
+                <div class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light">
+                    <span id="currentFileName" class="fw-bold text-secondary text-truncate me-2">Select a file to preview...</span>
+                    <!-- File Operations -->
+                    <div id="fileControls" class="btn-group btn-group-sm me-2" style="display:none;">
+                        <button class="btn btn-outline-secondary" onclick="App.renameFile()" title="Rename">✏️</button>
+                        <button class="btn btn-outline-secondary" onclick="App.moveFile()" title="Move">✂️</button>
+                        <button class="btn btn-outline-danger" onclick="App.deleteFile()" title="Delete">🗑️</button>
+                        <button class="btn btn-outline-primary fw-bold" id="btnEditSave" onclick="App.toggleEdit()">📝 Edit</button>
+                    </div>
+                    <button class="btn btn-success btn-sm" onclick="App.addToStaging()">⬇ Add to Staging</button>
+                </div>
+                <!-- Editor Space -->
+                <div class="flex-grow-1 overflow-auto position-relative bg-dark" id="previewContainer">
+                    <pre class="m-0 h-100" id="preBlock"><code id="codePreview" class="hljs h-100 d-block p-3"></code></pre>
+                    <textarea id="codeEditor" class="form-control w-100 h-100 border-0 rounded-0 p-3" style="display:none; font-family: monospace; background:#1e1e1e; color:#d4d4d4; resize:none;" spellcheck="false"></textarea>
+                </div>
+            </div>
+
+            <!-- Right Panel: Staging (Cart) -->
+            <div class="col-md-3 bg-light border-start d-flex flex-column h-100">
+                <div class="p-2 border-bottom bg-light d-flex justify-content-between align-items-center">
+                    <h6 class="m-0">🛒 Staging Area</h6>
+                    <span id="tokenEstimate" class="badge bg-secondary">0 Tokens</span>
+                </div>
+                
+                <!-- Staging List -->
+                <div class="flex-grow-1 overflow-auto p-2">
+                    <div id="stagingList" class="list-group list-group-flush small"></div>
+                </div>
+
+                <!-- Actions -->
+                <div class="p-2 border-top bg-white">
+                    <button class="btn btn-danger btn-sm w-100 mb-2" onclick="App.clearStaging()">Clear All</button>
+                    <button class="btn btn-dark w-100 py-2 fw-bold" onclick="App.generateContext()">🚀 Copy Context</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Custom App Logic -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

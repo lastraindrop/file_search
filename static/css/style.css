@@ -1,0 +1,61 @@
+/* Global Tweaks */
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden; /* Prevent body scroll, use inner panels */
+}
+
+/* Tree View */
+.tree-node {
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 4px;
+    white-space: nowrap;
+    border-radius: 3px;
+}
+.tree-node:hover {
+    background-color: #e9ecef;
+}
+.tree-node.active {
+    background-color: #0d6efd;
+    color: white;
+}
+.tree-children {
+    margin-left: 18px;
+    border-left: 1px solid #dee2e6;
+}
+.tree-expander {
+    display: inline-block;
+    width: 16px;
+    text-align: center;
+    color: #6c757d;
+    font-size: 0.8em;
+}
+
+/* Code Preview */
+#codePreview {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Staging Area */
+.staging-item {
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #f1f1f1; 
+}
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1; 
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8; 
+}
