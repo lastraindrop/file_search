@@ -40,21 +40,34 @@ class FileWorkbenchApp:
         
         last_dir = self.data_mgr.data.get("last_directory")
         if last_dir and os.path.exists(last_dir):
-            self.load_project(last_dir)
+            try:
+                self.load_project(last_dir)
+            except Exception as e:
+                from core_logic import logger
+                logger.error(f"Failed to auto-load last project {last_dir}: {e}")
             
         self.root.after(SEARCH_POLL_MS, self.process_queue)
 
     def _init_ui(self):
+        self._init_top_bar()
+        self._init_main_body()
+        self._init_status_bar()
+
+    def _init_top_bar(self):
         top_bar = ttk.Frame(self.root, padding=5)
         top_bar.pack(fill=tk.X)
-        ttk.Button(top_bar, text="📂 打开项目", command=self.select_directory).pack(side=tk.LEFT)
-        self.lbl_dir = ttk.Label(top_bar, text="未选择项目", foreground="gray", font=("Consolas", 10))
-        self.lbl_dir.pack(side=tk.LEFT, padx=10, pady=2)
+        ttk.Button(top_bar, text="📁 浏览", command=self.on_browse).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_bar, text="🔄 刷新", command=self.on_refresh).pack(side=tk.LEFT, padx=5)
+        
+        self.lbl_project = ttk.Label(top_bar, text="请打开项目路径", font=("Segoe UI", 9))
+        self.lbl_project.pack(side=tk.LEFT, padx=10, pady=2)
         ttk.Button(top_bar, text="🌲 复制项目结构", command=self.copy_project_tree).pack(side=tk.RIGHT, padx=5)
 
+    def _init_main_body(self):
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+        # Left: Search & Tree
         self.left_nav = ttk.Notebook(self.main_paned)
         self.main_paned.add(self.left_nav, weight=2)
         
@@ -66,6 +79,20 @@ class FileWorkbenchApp:
         self.left_nav.add(self.tab_tree_frame, text="📂 浏览")
         self._init_project_tree_tab()
 
+        # Middle: Preview
+        self._init_preview_area()
+
+        # Right: Staging & Favorites
+        self.right_nav = ttk.Notebook(self.main_paned)
+        self.main_paned.add(self.right_nav, weight=2)
+        self.tab_staging = ttk.Frame(self.right_nav)
+        self.right_nav.add(self.tab_staging, text="🛒 清单")
+        self._init_staging_tab()
+        self.tab_fav = ttk.Frame(self.right_nav)
+        self.right_nav.add(self.tab_fav, text="📚 收藏")
+        self._init_fav_tab()
+
+    def _init_preview_area(self):
         self.preview_frame = ttk.LabelFrame(self.main_paned, text="📄 内容预览 (只读)", padding=5)
         self.main_paned.add(self.preview_frame, weight=4)
         
@@ -78,15 +105,7 @@ class FileWorkbenchApp:
         self.preview_text.pack(fill=tk.BOTH, expand=True)
         self.preview_text.config(state=tk.DISABLED)
 
-        self.right_nav = ttk.Notebook(self.main_paned)
-        self.main_paned.add(self.right_nav, weight=2)
-        self.tab_staging = ttk.Frame(self.right_nav)
-        self.right_nav.add(self.tab_staging, text="🛒 清单")
-        self._init_staging_tab()
-        self.tab_fav = ttk.Frame(self.right_nav)
-        self.right_nav.add(self.tab_fav, text="📚 收藏")
-        self._init_fav_tab()
-        
+    def _init_status_bar(self):
         self.status_frame = ttk.Frame(self.root, relief=tk.SUNKEN, padding=2)
         self.status_frame.pack(fill=tk.X, side=tk.BOTTOM)
         self.lbl_status = ttk.Label(self.status_frame, text="就绪")
@@ -113,9 +132,17 @@ class FileWorkbenchApp:
         ttk.Checkbutton(adv_box, text="区分大小写", variable=self.case_sensitive_var, command=self.on_search_input).pack(side=tk.LEFT, padx=5)
         ttk.Checkbutton(adv_box, text="包括目录", variable=self.search_include_dirs_var, command=self.on_search_input).pack(side=tk.LEFT, padx=5)
         
-        self.tree_search = ttk.Treeview(f, columns=("file", "path"), show="headings", selectmode="extended")
-        self.tree_search.heading("file", text="文件名"); self.tree_search.column("file", width=100)
-        self.tree_search.heading("path", text="路径"); self.tree_search.column("path", width=150)
+        self.tree_search = ttk.Treeview(f, columns=("file", "path", "size", "mtime", "ext"), show="headings", selectmode="extended")
+        self.tree_search.heading("file", text="文件名", command=lambda: self.sort_tree_column(self.tree_search, "file", False))
+        self.tree_search.column("file", width=120)
+        self.tree_search.heading("path", text="相对路径", command=lambda: self.sort_tree_column(self.tree_search, "path", False))
+        self.tree_search.column("path", width=150)
+        self.tree_search.heading("size", text="大小", command=lambda: self.sort_tree_column(self.tree_search, "size", False))
+        self.tree_search.column("size", width=80)
+        self.tree_search.heading("mtime", text="修改时间", command=lambda: self.sort_tree_column(self.tree_search, "mtime", False))
+        self.tree_search.column("mtime", width=120)
+        self.tree_search.heading("ext", text="类型", command=lambda: self.sort_tree_column(self.tree_search, "ext", False))
+        self.tree_search.column("ext", width=60)
         self.tree_search.pack(fill=tk.BOTH, expand=True)
         self.tree_search.bind("<<TreeviewSelect>>", self.on_tree_select_preview)
         self.tree_search.bind("<Double-1>", lambda e: self.add_selected_to_staging())
@@ -153,31 +180,50 @@ class FileWorkbenchApp:
         self.context_menu.add_command(label="📂 所在文件夹", command=self.ctx_open_location)
         self.context_menu.add_command(label="📄 打开文件", command=self.ctx_open_file)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="📋 复制文件 (OS)", command=self.ctx_copy_file_to_os)
+        self.context_menu.add_command(label="🔗 复制路径", command=self.ctx_copy_path_to_clipboard)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="✏️ 重命名", command=self.ctx_rename_file)
         self.context_menu.add_command(label="✂️ 移动至...", command=self.ctx_move_file)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="🗑️ 删除", command=self.ctx_delete_file)
         for t in [self.tree_search, self.tree_fav, self.tree_staging, self.tree_proj]: t.bind("<Button-3>", self.show_context_menu)
 
-    def select_directory(self):
-        path = filedialog.askdirectory()
-        if path: self.load_project(path)
+    def on_browse(self, fixed_path=None):
+        path = fixed_path if fixed_path else filedialog.askdirectory()
+        if not path: return
+        
+        # Clear cache for gitignore if requested via refresh
+        if fixed_path: FileUtils.clear_cache()
+        
+        self.current_dir = pathlib.Path(path)
+        self.lbl_project.config(text=f"📂 {path}")
+        self.load_project(path)
+
+    def on_refresh(self):
+        if self.current_dir:
+            self.on_browse(str(self.current_dir))
+        else:
+            messagebox.showinfo("刷新", "请先浏览一个项目。")
 
     def load_project(self, path_str):
         self.current_dir = pathlib.Path(path_str)
-        self.lbl_dir.config(text=f"项目: {self.current_dir.name}", foreground="black")
+        self.lbl_project.config(text=f"项目: {self.current_dir.name}", foreground="black")
         self.data_mgr.data["last_directory"] = path_str
         self.current_proj_config = self.data_mgr.get_project_data(path_str)
         self.exclude_var.set(self.current_proj_config.get("excludes", ""))
         self.update_group_combo()
         self.current_group_var.set(self.current_proj_config.get("current_group", "默认组"))
-        for item in self.tree_proj.get_children(): self.tree_proj.delete(item)
-        root_node = self.tree_proj.insert("", "end", text=f"📁 {self.current_dir.name}", open=True)
-        self.populate_tree(root_node, self.current_dir)
+        self._refresh_tree() # Call _refresh_tree here
         self.refresh_fav_tree()
         self.data_mgr.save()
         self.on_search_input()
         self.update_stats()
+
+    def _refresh_tree(self):
+        for item in self.tree_proj.get_children(): self.tree_proj.delete(item)
+        root_node = self.tree_proj.insert("", "end", text=f"📁 {self.current_dir.name}", open=True)
+        self.populate_tree(root_node, self.current_dir)
 
     def update_stats(self):
         count = len(self.staging_files)
@@ -202,14 +248,47 @@ class FileWorkbenchApp:
     def process_queue(self):
         try:
             while True:
-                path_str, m_type = self.result_queue.get_nowait()
-                if path_str == "DONE":
+                res = self.result_queue.get_nowait()
+                if isinstance(res, tuple) and res[0] == "DONE":
                     self.lbl_status.config(text=f"就绪 ({len(self.tree_search.get_children())}项)")
                     break
-                p = pathlib.Path(path_str); rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
-                self.tree_search.insert("", "end", values=(("📁 " if p.is_dir() else "📄 ") + p.name, str(rel)))
+                
+                path_str = res["path"]
+                p = pathlib.Path(path_str)
+                rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
+                
+                import datetime
+                dt = datetime.datetime.fromtimestamp(res["mtime"]).strftime('%Y-%m-%d %H:%M')
+                sz_str = f"{res['size']/1024:.1f} KB" if res['size'] < 1024*1024 else f"{res['size']/(1024*1024):.1f} MB"
+                
+                self.tree_search.insert("", "end", values=(
+                    ("📁 " if p.is_dir() else "📄 ") + p.name, 
+                    str(rel), 
+                    sz_str,
+                    dt,
+                    res["ext"]
+                ))
         except queue.Empty: pass
         self.root.after(SEARCH_POLL_MS, self.process_queue)
+
+    def sort_tree_column(self, tree, col, reverse):
+        l = [(tree.set(k, col), k) for k in tree.get_children('')]
+        
+        # Numeric sort for size if possible
+        if col == "size":
+            def parse_sz(s):
+                try:
+                    num = float(s.split()[0])
+                    return num * 1024 if "KB" in s else num * 1024 * 1024
+                except: return 0
+            l.sort(key=lambda t: parse_sz(t[0]), reverse=reverse)
+        else:
+            l.sort(reverse=reverse)
+            
+        for index, (val, k) in enumerate(l):
+            tree.move(k, '', index)
+            
+        tree.heading(col, command=lambda: self.sort_tree_column(tree, col, not reverse))
 
     def on_tree_select_preview(self, event):
         tree = event.widget; sel = tree.selection()
@@ -385,6 +464,26 @@ class FileWorkbenchApp:
         paths = self._get_ctx_paths()
         for p in paths:
             if p.is_file(): os.startfile(p)
+
+    def ctx_copy_file_to_os(self):
+        paths = self._get_ctx_paths()
+        if not paths: return
+        try:
+            # Format paths for PowerShell array: @('C:\path1', 'C:\path2')
+            formatted_paths = ",".join([f"'{str(p)}'" for p in paths])
+            cmd = f"powershell -NoProfile -Command \"Set-Clipboard -Path @({formatted_paths})\""
+            subprocess.run(cmd, shell=True, check=True)
+            self.lbl_status.config(text=f"已将 {len(paths)} 个项目复制到系统剪切板")
+        except Exception as e:
+            messagebox.showerror("剪切板错误", f"无法复制到系统剪切板: {e}")
+
+    def ctx_copy_path_to_clipboard(self):
+        paths = self._get_ctx_paths()
+        if not paths: return
+        path_str = "\n".join([str(p) for p in paths])
+        self.root.clipboard_clear()
+        self.root.clipboard_append(path_str)
+        self.lbl_status.config(text=f"已复制 {len(paths)} 个路径到剪切板")
 
     def ctx_rename_file(self):
         paths = self._get_ctx_paths()

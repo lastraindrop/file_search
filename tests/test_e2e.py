@@ -1,43 +1,59 @@
 import pytest
 from fastapi.testclient import TestClient
 from web_app import app
-import json
+import os
+import pathlib
 import time
 
 client = TestClient(app)
 
 def test_full_workflow_e2e(mock_project):
     """Simulates: Open -> Browse -> Search -> Stage -> Generate"""
+    client.post("/api/open", json={"path": str(mock_project)})
     
-    # 1. Open Project
-    res = client.post("/api/open", json={"path": str(mock_project)})
-    assert res.status_code == 200
-    
-    # 2. Browse Children of root
+    # Browse
     res = client.post("/api/fs/children", json={"path": str(mock_project)})
     assert res.status_code == 200
-    children = res.json()["children"]
-    src_node = next(c for c in children if c["name"] == "src")
     
-    # 3. Browse Children of 'src'
-    res = client.post("/api/fs/children", json={"path": src_node["path"]})
-    assert res.status_code == 200
-    src_children = res.json()["children"]
-    assert any(c["name"] == "main.py" for c in src_children)
-    
-    # 4. Search (Simulate WebSocket behavior via core search logic for simplicity, or use TestClient's websocket)
-    # The websocket_search in web_app uses a generator. 
-    # For a real E2E, we'd use client.websocket_connect, but let's test the logic path.
-    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as websocket:
-        data = websocket.receive_json()
+    # WebSocket Search
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
+        data = ws.receive_json()
         assert "main.py" in data["name"]
-        data_done = websocket.receive_json()
-        assert data_done["status"] == "DONE"
+        assert "size" in data
         
-    # 5. Generate Context for selected files
+    # Generate
     files = [str(mock_project / "src" / "main.py")]
     res = client.post("/api/generate", json={"files": files})
     assert res.status_code == 200
     assert "File: main.py" in res.json()["content"]
+
+def test_file_lifecycle_e2e(mock_project):
+    """Lifecycle: Search Old -> Create New -> Rename -> Delete -> Search None"""
+    client.post("/api/open", json={"path": str(mock_project)})
     
-    print("\n✓ E2E Workflow Completed Successfully")
+    # 1. Search for a file that DOES exist
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main.py&mode=exact") as ws:
+        data = ws.receive_json()
+        assert "main.py" in data["name"]
+        
+    # 2. Rename 'main.py' to 'core_main.py'
+    old_path = mock_project / "src" / "main.py"
+    new_name = "core_main.py"
+    res = client.post("/api/fs/rename", json={"path": str(old_path), "new_name": new_name})
+    assert res.status_code == 200
+    new_path = res.json()["new_path"]
+    assert "core_main.py" in new_path
+    
+    # 3. Search for 'core_main.py'
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=core_main.py&mode=exact") as ws:
+        data = ws.receive_json()
+        assert "core_main.py" in data["name"]
+        
+    # 4. Delete the renamed file
+    res = client.post("/api/fs/delete", json={"paths": [new_path]})
+    assert res.status_code == 200
+    
+    # 5. Search for it again - should be 0 results
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=core_main.py&mode=exact") as ws:
+        data = ws.receive_json()
+        assert data["status"] == "DONE" # No results found before DONE

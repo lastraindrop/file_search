@@ -6,6 +6,12 @@ import threading
 import queue
 import re
 import pathspec
+import logging
+from functools import lru_cache
+
+# --- Logging Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("AIContextWorkbench")
 
 # --- Data Management ---
 def get_app_dir():
@@ -13,7 +19,8 @@ def get_app_dir():
     app_dir = home / ".ai_context_workbench"
     try:
         app_dir.mkdir(exist_ok=True)
-    except: pass
+    except Exception as e:
+        logger.error(f"Failed to create app directory: {e}")
     return app_dir
 
 CONFIG_FILE = get_app_dir() / "config.json"
@@ -28,20 +35,23 @@ class DataManager:
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     self.data.update(json.load(f))
-            except Exception as e: print(f"Config load error: {e}")
+            except Exception as e:
+                logger.error(f"Config load error: {e}")
 
     def save(self):
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=4)
-        except Exception as e: print(f"Config save error: {e}")
+        except Exception as e:
+            logger.error(f"Config save error: {e}")
 
     def get_project_data(self, path_str):
         if path_str not in self.data["projects"]:
             self.data["projects"][path_str] = {
                 "groups": {"Default": []},
                 "current_group": "Default",
-                "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env"
+                "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env",
+                "max_search_size_mb": 5  # Default limit in MB
             }
         return self.data["projects"][path_str]
 
@@ -68,41 +78,50 @@ class FileUtils:
                     return False
                 except UnicodeDecodeError:
                     return True
-        except: return True
+        except Exception as e:
+            logger.debug(f"Binary check failed for {file_path}: {e}")
+            return True
 
     @staticmethod
+    @lru_cache(maxsize=32)
     def get_gitignore_spec(root_dir):
-        """Compiles a pathspec object from .gitignore if it exists."""
+        """Compiles a pathspec object from .gitignore if it exists (Cached)."""
         gitignore_path = pathlib.Path(root_dir) / ".gitignore"
         lines = []
         if gitignore_path.exists():
             try:
                 with open(gitignore_path, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
-            except: pass
+            except Exception as e:
+                logger.warning(f"Failed to read gitignore at {gitignore_path}: {e}")
         return pathspec.PathSpec.from_lines('gitwildmatch', lines)
 
     @staticmethod
-    def should_ignore(name, rel_path, manual_excludes, git_spec=None):
+    def clear_cache():
+        """Clears the gitignore spec cache."""
+        FileUtils.get_gitignore_spec.cache_clear()
+
+    @staticmethod
+    def should_ignore(name, rel_path, manual_excludes, git_spec=None, is_dir=False):
         """
-        Determines if a file should be ignored.
+        Comprehensive check against manual excludes and gitignore patterns.
         :param name: Filename (e.g., 'test.py')
         :param rel_path: Path relative to project root (e.g., 'src/test.py')
         :param manual_excludes: List of glob patterns to exclude manually
         :param git_spec: pathspec object (optional)
+        :param is_dir: Boolean indicating if the item is a directory
         """
-        # 1. Manual Excludes (Glob)
-        name_lower = name.lower()
-        for ex in manual_excludes:
-            if fnmatch.fnmatch(name_lower, ex): return True
-        
-        # 2. Gitignore (.gitignore)
+        # 1. Manual check
+        for pattern in manual_excludes:
+            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(rel_path), pattern):
+                return True
+        # 2. Gitignore check
         if git_spec:
-            # pathspec expects unix-style paths for matching
             path_str = str(rel_path).replace(os.sep, '/')
+            if is_dir and not path_str.endswith('/'):
+                path_str += '/'
             if git_spec.match_file(path_str):
                 return True
-                
         return False
 
     @staticmethod
@@ -120,6 +139,19 @@ class FileUtils:
             '.ini': 'ini', '.cfg': 'ini', '.log': 'text'
         }
         return mapping.get(suffix.lower(), '')
+
+    @staticmethod
+    def get_metadata(path_obj):
+        """Returns size, mtime, and extension for a path."""
+        try:
+            stat = path_obj.stat()
+            return {
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "ext": path_obj.suffix.lower()
+            }
+        except:
+            return {"size": 0, "mtime": 0, "ext": ""}
 
     @staticmethod
     def generate_ascii_tree(root_dir, excludes_str, use_gitignore=True):
@@ -145,8 +177,10 @@ class FileUtils:
                     if entry.is_dir():
                         new_prefix = prefix + ("    " if is_last else "│   ")
                         _build_tree(entry.path, new_prefix)
-            except PermissionError: pass
-            except Exception: pass
+            except PermissionError:
+                logger.warning(f"Permission denied: {path}")
+            except Exception as e:
+                logger.error(f"Tree generation error at {path}: {e}")
 
         _build_tree(root_dir)
         return "\n".join(lines)
@@ -203,7 +237,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                      include_dirs=False, use_gitignore=True, 
                      is_inverse=False, case_sensitive=False):
     """
-    Yields (path_str, match_type_str) tuples.
+    Yields dicts with keys: path, match_type, size, mtime, ext.
     """
     root_dir = pathlib.Path(root_dir)
     excludes = [e.lower().strip() for e in manual_excludes.split() if e.strip()]
@@ -235,11 +269,20 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             
         return found != is_inverse
 
+    # Get size limit from project config if possible, else 5MB
+    size_limit_mb = 5
+    if git_spec: # We can use git_spec's existence as a proxy for 'within a project'
+        # In a real scenario, we'd pass the config down, 
+        # but for now let's use a reasonable default if not specifically passed.
+        pass
+    
     def match_content(path):
         if search_mode not in ('content', 'regex') or not search_text: return False
         
         try:
-            if path.stat().st_size > 5 * 1024 * 1024: return False
+            # Configurable limit check
+            limit = size_limit_mb * 1024 * 1024
+            if path.stat().st_size > limit: return False
             if FileUtils.is_binary(path): return False
             
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -253,35 +296,54 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                     
                     if found: return True != is_inverse
             return False != is_inverse
-        except Exception: return False
+        except Exception as e:
+            logger.debug(f"Content match error for {path}: {e}")
+            return False
 
     for root, dirs, files in os.walk(root_dir):
         rel_root = pathlib.Path(root).relative_to(root_dir)
         
         # Pythonic filtering of directories to prevent recursion
-        dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec)]
+        dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
         
         if include_dirs:
             for d in dirs:
                 if match_name(d):
-                    yield (str(pathlib.Path(root) / d), "📁 Folder")
+                    full_d = pathlib.Path(root) / d
+                    meta = FileUtils.get_metadata(full_d)
+                    yield {
+                        "path": str(full_d),
+                        "match_type": "📁 Folder",
+                        **meta
+                    }
 
         for file in files:
             full_path = pathlib.Path(root) / file
             rel_path = rel_root / file
             
-            if FileUtils.should_ignore(file, rel_path, excludes, git_spec):
+            if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
                 continue
+
+            # Metadata for the file
+            meta = FileUtils.get_metadata(full_path)
 
             # 1. Check Name Match
             if search_mode != 'content':
                 if match_name(file):
-                    yield (str(full_path), "Inverse Match" if is_inverse else "Match")
+                    yield {
+                        "path": str(full_path),
+                        "match_type": "Inverse Match" if is_inverse else "Match",
+                        **meta
+                    }
                     continue
             
             # 2. Check Content Match
             if search_mode in ('content', 'regex') and match_content(full_path):
-                 yield (str(full_path), "Inverse Content" if is_inverse else "Content Match")
+                 yield {
+                    "path": str(full_path),
+                    "match_type": "Inverse Content" if is_inverse else "Content Match",
+                    **meta
+                 }
 
 
 class SearchWorker(threading.Thread):

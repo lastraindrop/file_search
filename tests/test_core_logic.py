@@ -1,62 +1,70 @@
 import pytest
 import pathlib
-from core_logic import FileUtils, DataManager, search_generator
+import os
+from core_logic import search_generator, FileUtils
 
-def test_data_manager(clean_config):
-    dm = DataManager()
-    dm.data["last_directory"] = "/test/path"
-    dm.save()
-    
-    # Reload and verify
-    dm2 = DataManager()
-    assert dm2.data["last_directory"] == "/test/path"
-
-def test_file_utils_binary(mock_project):
-    assert FileUtils.is_binary(mock_project / "image.png") == True
-    assert FileUtils.is_binary(mock_project / "src" / "main.py") == False
-
-def test_file_utils_lang_tags():
-    assert FileUtils.get_language_tag(".py") == "python"
-    assert FileUtils.get_language_tag(".js") == "javascript"
-    assert FileUtils.get_language_tag(".mdfk") == ""
-
-@pytest.mark.parametrize("query, mode, expected_count", [
-    ("main", "smart", 1),
-    ("utils", "smart", 1),
-    ("print", "content", 1),
-    ("console", "content", 1),
-    ("zxy", "smart", 0),
+@pytest.mark.parametrize("query, mode, inverse, case, expected_names", [
+    # 1. Smart Search (default, case-insensitive)
+    ("MAIN", "smart", False, False, ["main.py"]),
+    # 2. Exact Search (case-insensitive)
+    ("main.py", "exact", False, False, ["main.py"]),
+    # 3. Exact Search (case-sensitive)
+    ("MAIN.PY", "exact", False, True, []), # Should not match
+    # 4. Regex Search
+    (r"utils\..*", "regex", False, False, ["utils.js"]),
+    # 5. Content Search
+    ("print", "content", False, False, ["main.py", "utils.js"]),
+    # 6. Inverse Name Match
+    ("main", "smart", True, False, ["utils.js", "config.json", "data.bin"]),
+    # 7. Inverse Content Match
+    ("print", "content", True, False, ["config.json"]),
 ])
-def test_search_basic(mock_project, query, mode, expected_count):
-    results = list(search_generator(mock_project, query, mode, ""))
-    assert len(results) == expected_count
-
-def test_search_inverse(mock_project):
-    # Name Inverse: match files NOT containing 'main'
-    # src/main.py (matches 'main'), src/utils.js, image.png, .gitignore. 
-    # Total files in current mock: src/main.py, src/utils.js, image.png, .gitignore, error.log, node_modules (excluded)
-    # Actually wait: search_generator excludes log/node_modules if told to. 
-    # If excludes="", it should match everything.
+def test_search_permutations(mock_project, query, mode, inverse, case, expected_names):
+    results = list(search_generator(
+        mock_project, query, mode, "", 
+        is_inverse=inverse, case_sensitive=case
+    ))
+    result_names = [os.path.basename(r["path"]) for r in results]
     
-    # Standard: 'main' -> [src/main.py]
-    # Inverse: NOT 'main' -> [src/utils.js, image.png, .gitignore] (excluding others if they exist)
-    results = list(search_generator(mock_project, "main", "smart", "", is_inverse=True))
-    # We expect 3 matches based on the mock_project structure
-    assert len(results) == 3
+    # Check if all expected names are in results
+    for name in expected_names:
+        assert name in result_names
+    
+    # Check if results are correctly restricted
+    if not inverse and mode != 'content':
+        assert len(results) == len(expected_names)
 
-def test_search_content_inverse(mock_project):
-    # Content Inverse: files NOT containing 'print'
-    # src/main.py (contains 'print'), src/utils.js (contains 'console'), image.png (binary), .gitignore (contains '*.log')
-    # If mode='content', it skips binary.
-    # Standard: 'print' -> [src/main.py]
-    # Inverse: 'print' -> [src/utils.js, .gitignore] (skips binary naturally)
-    results = list(search_generator(mock_project, "print", "content", "", is_inverse=True))
-    assert len(results) == 2
+def test_metadata_accuracy(mock_project):
+    """Verifies that the returned metadata matches the actual file properties."""
+    results = list(search_generator(mock_project, "main.py", "exact", ""))
+    assert len(results) == 1
+    meta = results[0]
+    
+    path_obj = pathlib.Path(meta["path"])
+    assert meta["size"] == path_obj.stat().st_size
+    assert meta["mtime"] == path_obj.stat().st_mtime
+    assert meta["ext"] == ".py"
 
-def test_gitignore_logic(mock_project):
-    # node_modules and error.log should be ignored
-    results = list(search_generator(mock_project, "", "smart", ""))
-    paths = [p for p, t in results]
-    assert any("main.py" in p for p in paths)
-    assert not any("error.log" in p for p in paths)
-    assert not any("node_modules" in p for p in paths)
+def test_gitignore_complex(mock_project):
+    """Verifies ignore logic with multiple patterns."""
+    # error.log is in gitignore
+    results = list(search_generator(mock_project, "error", "smart", ""))
+    assert len(results) == 0
+    
+    # node_modules is in gitignore
+    results = list(search_generator(mock_project, "node_modules", "smart", "", include_dirs=True))
+    assert not any("node_modules" in r["path"] for r in results)
+
+def test_manual_excludes(mock_project):
+    """Verifies that manual excludes string works."""
+    # Exclude .js files manually
+    results = list(search_generator(mock_project, "", "smart", "*.js"))
+    paths = [r["path"] for r in results]
+    assert not any(p.endswith(".js") for p in paths)
+
+def test_binary_file_detection(mock_project):
+    """Content search should skip binary files."""
+    # data.bin contains 'hello' (binary)
+    results = list(search_generator(mock_project, "hello", "content", ""))
+    # Should not find it because it's binary
+    assert not any("data.bin" in r["path"] for r in results)

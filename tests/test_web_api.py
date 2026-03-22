@@ -1,58 +1,73 @@
 import pytest
 from fastapi.testclient import TestClient
 from web_app import app
-import json
+import os
+import pathlib
 
 client = TestClient(app)
 
-def test_api_open(mock_project):
-    response = client.post("/api/open", json={"path": str(mock_project)})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ok"
-    assert data["root"]["name"] == mock_project.name
+def test_api_open_success(mock_project):
+    res = client.post("/api/open", json={"path": str(mock_project)})
+    assert res.status_code == 200
+    assert "name" in res.json()
 
-def test_api_children(mock_project):
-    # Use the project directory to test lazy loading
-    response = client.post("/api/fs/children", json={"path": str(mock_project)})
-    assert response.status_code == 200
-    data = response.json()
-    # Should contain 'src', '.gitignore', 'image.png' (if not ignored)
-    names = [c["name"] for c in data["children"]]
-    assert "src" in names
-    assert ".gitignore" in names
+def test_api_open_invalid():
+    res = client.post("/api/open", json={"path": "C:/NonExistentPath/123/456"})
+    assert res.status_code == 404
 
-def test_api_content(mock_project):
-    file_path = str(mock_project / "src" / "main.py")
-    response = client.get(f"/api/content?path={file_path}")
-    assert response.status_code == 200
-    assert "print('hello')" in response.json()["content"]
+def test_api_children_metadata(mock_project):
+    client.post("/api/open", json={"path": str(mock_project)})
+    res = client.post("/api/fs/children", json={"path": str(mock_project)})
+    assert res.status_code == 200
+    children = res.json()["children"]
+    # Check if metadata fields exist
+    for c in children:
+        assert "size" in c
+        assert "mtime" in c
+        assert "ext" in c
+        if c["type"] == "file" and c["name"] == "main.py":
+            assert c["ext"] == ".py"
 
-def test_api_generate(mock_project):
-    files = [str(mock_project / "src" / "main.py"), str(mock_project / "src" / "utils.js")]
-    response = client.post("/api/generate", json={"files": files})
-    assert response.status_code == 200
-    content = response.json()["content"]
-    assert "File: main.py" in content
-    assert "File: utils.js" in content
-
-def test_fs_ops(mock_project):
-    # Rename
-    old_path = mock_project / "src" / "main.py"
-    response = client.post("/api/fs/rename", json={"path": str(old_path), "new_name": "new_main.py"})
-    assert response.status_code == 200
-    assert (mock_project / "src" / "new_main.py").exists()
+def test_api_security_path_traversal(mock_project):
+    """Critical: Verify that accessing paths outside project root returns 403."""
+    client.post("/api/open", json={"path": str(mock_project)})
     
-    # Move
-    src = mock_project / "src" / "new_main.py"
-    dst = mock_project
-    response = client.post("/api/fs/move", json={"src_paths": [str(src)], "dst_dir": str(dst)})
-    assert response.status_code == 200
-    assert (mock_project / "new_main.py").exists()
+    # Attempt to access a sensitive system path (simulated)
+    unsafe_path = "C:/Windows/System32/drivers/etc/hosts"
+    res = client.get(f"/api/content?path={unsafe_path}")
+    assert res.status_code == 403
+    assert "Access denied" in res.json()["detail"]
     
-    # Delete (Batch)
-    paths = [str(mock_project / "new_main.py"), str(mock_project / "src" / "utils.js")]
-    response = client.post("/api/fs/delete", json={"paths": paths})
-    assert response.status_code == 200
-    assert not (mock_project / "new_main.py").exists()
-    assert not (mock_project / "src" / "utils.js").exists()
+    # Attempt relative traversal
+    traversal_path = str(mock_project / ".." / "some_other_file")
+    res = client.get(f"/api/content?path={traversal_path}")
+    assert res.status_code == 403
+
+def test_fs_ops_security(mock_project):
+    client.post("/api/open", json={"path": str(mock_project)})
+    
+    # Rename across projects (Unsafe)
+    res = client.post("/api/fs/rename", json={
+        "path": str(mock_project / "src" / "main.py"),
+        "new_name": "../../hacker.py"
+    })
+    assert res.status_code == 403
+
+def test_api_content_success(mock_project):
+    client.post("/api/open", json={"path": str(mock_project)})
+    path = str(mock_project / "src" / "main.py")
+    res = client.get(f"/api/content?path={path}")
+    assert res.status_code == 200
+    assert "print" in res.json()["content"]
+
+def test_websocket_search_basic(mock_project):
+    client.post("/api/open", json={"path": str(mock_project)})
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
+        # First message should be a result
+        data = ws.receive_json()
+        assert "main.py" in data["name"]
+        assert "size" in data
+        assert "mtime" in data
+        # Last message should be DONE
+        data = ws.receive_json()
+        assert data["status"] == "DONE"

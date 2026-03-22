@@ -1,61 +1,111 @@
-/* Global Tweaks */
-body {
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    overflow: hidden; /* Prevent body scroll, use inner panels */
+:root {
+    --bg-dark: #0f172a;
+    --panel-bg: rgba(30, 41, 59, 0.7);
+    --accent: #38bdf8;
+    --accent-glow: rgba(56, 189, 248, 0.4);
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border: rgba(255, 255, 255, 0.1);
+    --glass-blur: blur(12px);
 }
 
-/* Tree View */
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Inter', -apple-system, sans-serif;
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+    background: var(--panel-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border);
+    transition: all 0.3s ease;
+}
+
+.navbar {
+    background: rgba(15, 23, 42, 0.9) !important;
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+}
+
+/* Tree View Optimization */
 .tree-node {
-    cursor: pointer;
-    user-select: none;
-    padding: 2px 4px;
-    white-space: nowrap;
-    border-radius: 3px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    margin: 2px 0;
+    transition: background 0.2s, transform 0.1s;
+    font-size: 0.9rem;
 }
 .tree-node:hover {
-    background-color: #e9ecef;
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateX(4px);
 }
 .tree-node.active {
-    background-color: #0d6efd;
-    color: white;
+    background: var(--accent) !important;
+    color: white !important;
+    box-shadow: 0 0 15px var(--accent-glow);
 }
-.tree-children {
-    margin-left: 18px;
-    border-left: 1px solid #dee2e6;
-}
+
 .tree-expander {
+    transition: transform 0.3s ease;
     display: inline-block;
-    width: 16px;
-    text-align: center;
-    color: #6c757d;
-    font-size: 0.8em;
-}
-
-/* Code Preview */
-#codePreview {
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-/* Staging Area */
-.staging-item {
-    font-family: monospace;
-    font-size: 0.9em;
 }
 
 /* Scrollbars */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 ::-webkit-scrollbar-track {
-    background: #f1f1f1; 
+    background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-    background: #c1c1c1; 
-    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8; 
+    background: var(--accent);
+}
+
+/* Code Preview Area */
+#previewContainer {
+    background: #000 !important;
+    border-radius: 0 0 12px 12px;
+}
+
+#codePreview {
+    font-family: 'Fira Code', 'Cascadia Code', monospace !important;
+}
+
+/* Input Fields */
+.form-control, .form-select {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid var(--border) !important;
+    color: white !important;
+}
+.form-control:focus {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--accent-glow) !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-in {
+    animation: fadeIn 0.4s ease forwards;
+}
+
+/* Bulk Actions Bar */
+#bulkActions {
+    border-top: 1px solid var(--border);
+    background: rgba(56, 189, 248, 0.1) !important;
 }

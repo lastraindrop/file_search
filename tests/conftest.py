@@ -13,7 +13,11 @@ def mock_project():
     # Standard files
     (base / "src").mkdir()
     (base / "src" / "main.py").write_text("print('hello')", encoding="utf-8")
-    (base / "src" / "utils.js").write_text("console.log('test')", encoding="utf-8")
+    (base / "src" / "utils.js").write_text("console.log('test'); print('done')", encoding="utf-8")
+    
+    # New files for permutations
+    (base / "config.json").write_text("{}", encoding="utf-8")
+    (base / "data.bin").write_bytes(b"\x00\xff\x00\xffhello")
     
     # Binary file
     (base / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")

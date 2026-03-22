@@ -6,7 +6,9 @@ const App = {
         socket: null,
         isEditing: false,
         rawContent: "",
-        selectedFiles: new Set()
+        selectedFiles: new Set(),
+        searchResults: [],
+        sortOrder: { field: 'name', reverse: false }
     },
 
     init: () => {
@@ -40,6 +42,14 @@ const App = {
         }
     },
 
+    refreshProject: async () => {
+        if (!App.state.projectPath) return;
+        const resultsDiv = document.getElementById('searchResultsList');
+        resultsDiv.innerHTML = '';
+        App.state.searchResults = [];
+        await App.openProject();
+    },
+
     renderTree: (node) => {
         const container = document.createElement('div');
         container.className = 'ms-3';
@@ -50,7 +60,7 @@ const App = {
         const isChecked = App.state.selectedFiles.has(node.path) ? 'checked' : '';
         const cb = `<input type="checkbox" class="form-check-input file-checkbox me-2 flex-shrink-0" style="margin-top:0;" value="${node.path}" onclick="event.stopPropagation()" onchange="App.toggleSelect('${node.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', this.checked)" ${isChecked}>`;
 
-        const expanderIcon = node.type === 'dir' ? '▶' : '';
+        const expanderIcon = node.type === 'dir' ? '❯' : '';
         header.innerHTML = `${cb}<span class="tree-expander me-1 flex-shrink-0" style="width:16px; text-align:center;">${expanderIcon}</span><span class="icon me-1 flex-shrink-0">${node.type === 'dir' ? '📁' : '📄'}</span><span class="text-truncate">${node.name}</span>`;
         container.appendChild(header);
 
@@ -86,7 +96,8 @@ const App = {
                 }
                 
                 childrenContainer.style.display = isHidden ? 'block' : 'none';
-                header.querySelector('.tree-expander').innerText = isHidden ? '▼' : '▶';
+                header.querySelector('.tree-expander').style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                header.querySelector('.tree-expander').innerText = '❯'; 
             };
         } else {
             header.onclick = (e) => {
@@ -138,13 +149,7 @@ const App = {
         resultsDiv.innerHTML = '';
         document.getElementById('searchStatus').style.display = 'block';
 
-        // Close existing socket
-        if (App.state.socket) App.state.socket.close();
-
-        // Open WebSocket
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${mode}&inverse=${isInverse}&case_sensitive=${isCaseSensitive}`;
-        
+        App.state.searchResults = [];
         App.state.socket = new WebSocket(wsUrl);
         
         App.state.socket.onmessage = (event) => {
@@ -152,32 +157,73 @@ const App = {
             if (data.status === "DONE") {
                 document.getElementById('searchStatus').style.display = 'none';
                 App.state.socket.close();
+                App.sortSearchResults();
                 return;
             }
-            
-            const item = document.createElement('a');
-            item.className = 'list-group-item list-group-item-action p-2 staging-item';
-            
-            const escPath = data.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            const isChecked = App.state.selectedFiles.has(data.path) ? 'checked' : '';
-            const cb = `<input type="checkbox" class="form-check-input me-2 file-checkbox" value="${data.path}" onclick="event.stopPropagation()" onchange="App.toggleSelect('${escPath}', this.checked)" ${isChecked}>`;
-
-            item.innerHTML = `
-                <div class="d-flex w-100 justify-content-between align-items-center">
-                    <div class="text-truncate">
-                        ${cb}
-                        <span class="fw-bold">${data.name}</span>
-                    </div>
-                    <small class="text-muted ms-2">${data.type}</small>
-                </div>
-                <small class="text-muted text-truncate d-block mt-1">${data.path}</small>
-            `;
-            item.onclick = (e) => {
-                if(e.target.tagName === 'INPUT') return;
-                App.previewFile(data.path);
-            };
-            resultsDiv.appendChild(item);
+            App.state.searchResults.push(data);
+            App.renderSearchResultItem(data);
         };
+    },
+
+    renderSearchResultItem: (data) => {
+        const resultsDiv = document.getElementById('searchResultsList');
+        const item = document.createElement('a');
+        item.className = 'list-group-item list-group-item-action p-2 staging-item bg-transparent text-white border-0 animate-in';
+        
+        const escPath = data.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const isChecked = App.state.selectedFiles.has(data.path) ? 'checked' : '';
+        const cb = `<input type="checkbox" class="form-check-input me-2 file-checkbox" value="${data.path}" onclick="event.stopPropagation()" onchange="App.toggleSelect('${escPath}', this.checked)" ${isChecked}>`;
+
+        const mtime = new Date(data.mtime * 1000).toLocaleString();
+        const size = data.size < 1024 * 1024 
+            ? `${(data.size / 1024).toFixed(1)} KB` 
+            : `${(data.size / (1024 * 1024)).toFixed(1)} MB`;
+
+        item.innerHTML = `
+            <div class="d-flex w-100 justify-content-between align-items-center">
+                <div class="text-truncate">
+                    ${cb}
+                    <span class="fw-bold">${data.name}</span>
+                </div>
+                <span class="badge bg-dark text-info border border-info ms-1" style="font-size:0.7rem; opacity: 0.8;">${data.ext || 'file'}</span>
+            </div>
+            <div class="d-flex justify-content-between small text-muted mt-1" style="font-size:0.75rem">
+                <span>${size} | ${mtime}</span>
+            </div>
+            <small class="text-muted text-truncate d-block mt-1" style="font-size:0.7rem">${data.path}</small>
+        `;
+        item.onclick = (e) => {
+            if(e.target.tagName === 'INPUT') return;
+            App.previewFile(data.path);
+        };
+        resultsDiv.appendChild(item);
+    },
+
+    sortSearchResults: () => {
+        const field = document.getElementById('sortField').value;
+        const reverse = App.state.sortOrder.reverse;
+        App.state.sortOrder.field = field;
+
+        App.state.searchResults.sort((a, b) => {
+            let valA = a[field];
+            let valB = b[field];
+            if (field === 'name') {
+                valA = a.name.toLowerCase();
+                valB = b.name.toLowerCase();
+            }
+            if (valA < valB) return reverse ? 1 : -1;
+            if (valA > valB) return reverse ? -1 : 1;
+            return 0;
+        });
+
+        const resultsDiv = document.getElementById('searchResultsList');
+        resultsDiv.innerHTML = '';
+        App.state.searchResults.forEach(res => App.renderSearchResultItem(res));
+    },
+
+    toggleSortOrder: () => {
+        App.state.sortOrder.reverse = !App.state.sortOrder.reverse;
+        App.sortSearchResults();
     },
 
     toggleSelect: (path, isChecked) => {
