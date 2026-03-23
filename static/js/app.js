@@ -8,19 +8,60 @@ const App = {
         rawContent: "",
         selectedFiles: new Set(),
         searchResults: [],
-        sortOrder: { field: 'name', reverse: false }
+        projConfig: {},
+        isSidebarExpanded: false
     },
 
-    init: () => {
-        // Initial setup if needed
+    init: async () => {
+        App.loadRecentProjects();
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') App.startSearch();
         });
+        
+        // Restore search settings from localStorage
+        const savedExcludes = localStorage.getItem('searchExcludes');
+        if (savedExcludes) document.getElementById('excludeInput').value = savedExcludes;
+        const savedMode = localStorage.getItem('searchMode');
+        if (savedMode) document.getElementById('searchMode').value = savedMode;
+        
+        // Auto-load last project if exists
+        const lastProj = localStorage.getItem('lastProjectPath');
+        if (lastProj) {
+            document.getElementById('projectPath').value = lastProj;
+            App.openProject();
+        }
+    },
+
+    // --- Workspace Logic ---
+    toggleSidebar: () => {
+        const sb = document.getElementById('workspaceSidebar');
+        App.state.isSidebarExpanded = !App.state.isSidebarExpanded;
+        sb.style.width = App.state.isSidebarExpanded ? '200px' : '60px';
+    },
+
+    loadRecentProjects: async () => {
+        try {
+            const res = await fetch('/api/recent_projects');
+            const data = await res.json();
+            const list = document.getElementById('recentProjectsList');
+            list.innerHTML = '';
+            data.forEach(p => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-outline-info btn-sm text-truncate w-100 mb-1';
+                btn.innerText = App.state.isSidebarExpanded ? p.name : p.name[0].toUpperCase();
+                btn.title = p.path;
+                btn.onclick = () => {
+                    document.getElementById('projectPath').value = p.path;
+                    App.openProject();
+                };
+                list.appendChild(btn);
+            });
+        } catch (e) { console.error("Failed to load recent projects", e); }
     },
 
     openProject: async () => {
         const path = document.getElementById('projectPath').value.trim();
-        if (!path) return alert("Please enter a valid path");
+        if (!path) return;
 
         try {
             const res = await fetch('/api/open', {
@@ -28,40 +69,59 @@ const App = {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ path })
             });
-            
             if (!res.ok) throw new Error((await res.json()).detail);
             
             const data = await res.json();
             App.state.projectPath = path;
+            localStorage.setItem('lastProjectPath', path);
+            
+            // Load Project Configuration (Notes, Tags, etc.)
+            const configRes = await fetch(`/api/project/config?path=${encodeURIComponent(path)}`);
+            App.state.projConfig = await configRes.json();
+
             const rootContainer = document.getElementById('fileTreeRoot');
             rootContainer.innerHTML = '';
             rootContainer.appendChild(App.renderTree(data.root));
-            alert(`Project loaded: ${data.name}`);
-        } catch (e) {
-            alert("Error: " + e.message);
-        }
+            App.loadRecentProjects();
+
+            // Sync settings from config if available and UI is empty
+            if (App.state.projConfig.excludes && !document.getElementById('excludeInput').value) {
+                document.getElementById('excludeInput').value = App.state.projConfig.excludes;
+            }
+        } catch (e) { alert("Error: " + e.message); }
     },
 
     refreshProject: async () => {
         if (!App.state.projectPath) return;
-        const resultsDiv = document.getElementById('searchResultsList');
-        resultsDiv.innerHTML = '';
-        App.state.searchResults = [];
-        await App.openProject();
+        // Save current UI state to backend before refreshing tree
+        const excludes = document.getElementById('excludeInput').value;
+        const mode = document.getElementById('searchMode').value;
+        
+        localStorage.setItem('searchExcludes', excludes);
+        localStorage.setItem('searchMode', mode);
+
+        try {
+            await fetch('/api/project/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    settings: { excludes: excludes }
+                })
+            });
+            App.openProject();
+        } catch (e) { App.openProject(); } // Refresh anyway
     },
 
+    // --- File Tree Rendering ---
     renderTree: (node) => {
         const container = document.createElement('div');
-        container.className = 'ms-3';
+        container.className = 'ms-2';
         const header = document.createElement('div');
-        header.className = 'tree-node text-truncate d-flex align-items-center my-1';
-        header.style.cursor = 'pointer';
+        header.className = 'tree-node text-truncate animate-in';
         
-        const isChecked = App.state.selectedFiles.has(node.path) ? 'checked' : '';
-        const cb = `<input type="checkbox" class="form-check-input file-checkbox me-2 flex-shrink-0" style="margin-top:0;" value="${node.path}" onclick="event.stopPropagation()" onchange="App.toggleSelect('${node.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', this.checked)" ${isChecked}>`;
-
-        const expanderIcon = node.type === 'dir' ? '❯' : '';
-        header.innerHTML = `${cb}<span class="tree-expander me-1 flex-shrink-0" style="width:16px; text-align:center;">${expanderIcon}</span><span class="icon me-1 flex-shrink-0">${node.type === 'dir' ? '📁' : '📄'}</span><span class="text-truncate">${node.name}</span>`;
+        const icon = node.type === 'dir' ? '📁' : '📄';
+        header.innerHTML = `<span class="me-1">${icon}</span><span>${node.name}</span>`;
         container.appendChild(header);
 
         if (node.type === 'dir') {
@@ -73,11 +133,8 @@ const App = {
             let loaded = false;
             header.onclick = async (e) => {
                 e.stopPropagation();
-                if (e.target.tagName === 'INPUT') return;
-                
                 const isHidden = childrenContainer.style.display === 'none';
                 if (isHidden && !loaded) {
-                    header.querySelector('.tree-expander').innerText = '...';
                     try {
                         const res = await fetch('/api/fs/children', {
                             method: 'POST',
@@ -86,23 +143,15 @@ const App = {
                         });
                         const data = await res.json();
                         childrenContainer.innerHTML = '';
-                        data.children.forEach(child => {
-                            childrenContainer.appendChild(App.renderTree(child));
-                        });
+                        data.children.forEach(child => childrenContainer.appendChild(App.renderTree(child)));
                         loaded = true;
-                    } catch (err) {
-                        console.error("Failed to load children", err);
-                    }
+                    } catch (err) { console.error(err); }
                 }
-                
                 childrenContainer.style.display = isHidden ? 'block' : 'none';
-                header.querySelector('.tree-expander').style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
-                header.querySelector('.tree-expander').innerText = '❯'; 
             };
         } else {
             header.onclick = (e) => {
                 e.stopPropagation();
-                if (e.target.tagName === 'INPUT') return;
                 document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
                 header.classList.add('active');
                 App.previewFile(node.path);
@@ -111,15 +160,18 @@ const App = {
         return container;
     },
 
+    // --- File Operations ---
     previewFile: async (path) => {
         App.state.currentFile = path;
         App.state.isEditing = false;
         document.getElementById('fileControls').style.display = 'inline-flex';
-        document.getElementById('btnEditSave').innerHTML = '📝 Edit';
+        document.getElementById('btnEditSave').innerText = 'Edit';
         document.getElementById('codeEditor').style.display = 'none';
         document.getElementById('preBlock').style.display = 'block';
 
-        document.getElementById('currentFileName').innerText = path.split(/[\/\\]/).pop();
+        document.getElementById('currentFileName').innerText = path.split(/[\\\/]/).pop();
+        App.updateFileMetaUI(path);
+
         const codeEl = document.getElementById('codePreview');
         codeEl.innerText = "Loading...";
         
@@ -129,262 +181,138 @@ const App = {
             App.state.rawContent = data.content;
             codeEl.innerText = data.content;
             hljs.highlightElement(codeEl);
-        } catch (e) {
-            codeEl.innerText = "Error loading file.";
-        }
+        } catch (e) { codeEl.innerText = "Error loading file."; }
     },
 
+    updateFileMetaUI: (path) => {
+        const tagContainer = document.getElementById('fileTags');
+        tagContainer.innerHTML = '';
+        const tags = App.state.projConfig.tags[path] || [];
+        tags.forEach(tag => {
+            const span = document.createElement('span');
+            span.className = 'badge bg-info text-dark small';
+            span.innerText = tag;
+            tagContainer.appendChild(span);
+        });
+    },
+
+    showFileNote: () => {
+        if (!App.state.currentFile) return;
+        const note = App.state.projConfig.notes[App.state.currentFile] || "";
+        document.getElementById('noteInput').value = note;
+        document.getElementById('noteOverlay').style.display = 'block';
+    },
+
+    hideFileNote: () => { document.getElementById('noteOverlay').style.display = 'none'; },
+
+    saveFileNote: async () => {
+        const note = document.getElementById('noteInput').value.trim();
+        try {
+            await fetch('/api/project/note', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    file_path: App.state.currentFile,
+                    note: note
+                })
+            });
+            App.state.projConfig.notes[App.state.currentFile] = note;
+            App.hideFileNote();
+        } catch (e) { alert("Save failed"); }
+    },
+
+    archiveStaging: async () => {
+        if (App.state.staging.size === 0) return alert("Select files first.");
+        const name = prompt("Archive Name:", "context_backup.zip");
+        if (!name) return;
+        
+        try {
+            const res = await fetch('/api/fs/archive', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paths: Array.from(App.state.staging),
+                    output_name: name,
+                    project_root: App.state.projectPath
+                })
+            });
+            if (!res.ok) throw new Error("Archive failed");
+            alert(`✅ Archived to ${name} in project root.`);
+        } catch (e) { alert(e.message); }
+    },
+
+    renameFile: async () => {
+        if (!App.state.currentFile) return;
+        const newName = prompt("New name:", App.state.currentFile.split(/[\\\/]/).pop());
+        if (!newName) return;
+        const parent = App.state.currentFile.substring(0, App.state.currentFile.lastIndexOf(pathlib_sep)); // Helper needed
+        // Simpler for now:
+        const oldPath = App.state.currentFile;
+        const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + newName;
+        
+        try {
+            await fetch('/api/fs/rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ old_path: oldPath, new_name: newName })
+            });
+            App.openProject(); // Refresh tree
+            App.state.currentFile = null;
+            document.getElementById('fileControls').style.display = 'none';
+        } catch (e) { alert("Rename failed"); }
+    },
+
+    deleteFile: async () => {
+        if (!App.state.currentFile || !confirm("Are you sure?")) return;
+        try {
+            await fetch('/api/fs/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ path: App.state.currentFile })
+            });
+            App.openProject();
+            App.state.currentFile = null;
+            document.getElementById('fileControls').style.display = 'none';
+        } catch (e) { alert("Delete failed"); }
+    },
     startSearch: () => {
-        if (!App.state.projectPath) return alert("Open a project first.");
+        if (!App.state.projectPath) return;
         const query = document.getElementById('searchInput').value;
         const mode = document.getElementById('searchMode').value;
-        const isInverse = document.getElementById('isInverse').checked;
-        const isCaseSensitive = document.getElementById('isCaseSensitive').checked;
-        const resultsDiv = document.getElementById('searchResultsList');
-        
-        // Switch to search tab
         const tab = new bootstrap.Tab(document.getElementById('tab-search'));
         tab.show();
 
-        resultsDiv.innerHTML = '';
-        document.getElementById('searchStatus').style.display = 'block';
+        const resultsDiv = document.getElementById('searchResultsList');
+        resultsDiv.innerHTML = '<div class="text-center p-3">Searching...</div>';
 
-        App.state.searchResults = [];
+        const wsUrl = `ws://${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${mode}`;
         App.state.socket = new WebSocket(wsUrl);
         
+        App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };
         App.state.socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.status === "DONE") {
-                document.getElementById('searchStatus').style.display = 'none';
-                App.state.socket.close();
-                App.sortSearchResults();
-                return;
-            }
-            App.state.searchResults.push(data);
+            if (data.status === "DONE") return App.state.socket.close();
             App.renderSearchResultItem(data);
         };
     },
 
     renderSearchResultItem: (data) => {
-        const resultsDiv = document.getElementById('searchResultsList');
-        const item = document.createElement('a');
-        item.className = 'list-group-item list-group-item-action p-2 staging-item bg-transparent text-white border-0 animate-in';
-        
-        const escPath = data.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const isChecked = App.state.selectedFiles.has(data.path) ? 'checked' : '';
-        const cb = `<input type="checkbox" class="form-check-input me-2 file-checkbox" value="${data.path}" onclick="event.stopPropagation()" onchange="App.toggleSelect('${escPath}', this.checked)" ${isChecked}>`;
-
-        const mtime = new Date(data.mtime * 1000).toLocaleString();
-        const size = data.size < 1024 * 1024 
-            ? `${(data.size / 1024).toFixed(1)} KB` 
-            : `${(data.size / (1024 * 1024)).toFixed(1)} MB`;
-
+        const list = document.getElementById('searchResultsList');
+        const item = document.createElement('div');
+        item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer';
+        item.style.cursor = 'pointer';
         item.innerHTML = `
-            <div class="d-flex w-100 justify-content-between align-items-center">
-                <div class="text-truncate">
-                    ${cb}
-                    <span class="fw-bold">${data.name}</span>
-                </div>
-                <span class="badge bg-dark text-info border border-info ms-1" style="font-size:0.7rem; opacity: 0.8;">${data.ext || 'file'}</span>
-            </div>
-            <div class="d-flex justify-content-between small text-muted mt-1" style="font-size:0.75rem">
-                <span>${size} | ${mtime}</span>
-            </div>
-            <small class="text-muted text-truncate d-block mt-1" style="font-size:0.7rem">${data.path}</small>
+            <div class="fw-bold text-info">${data.name}</div>
+            <div class="small text-muted text-truncate">${data.path}</div>
         `;
-        item.onclick = (e) => {
-            if(e.target.tagName === 'INPUT') return;
-            App.previewFile(data.path);
-        };
-        resultsDiv.appendChild(item);
+        item.onclick = () => App.previewFile(data.path);
+        list.appendChild(item);
     },
 
-    sortSearchResults: () => {
-        const field = document.getElementById('sortField').value;
-        const reverse = App.state.sortOrder.reverse;
-        App.state.sortOrder.field = field;
-
-        App.state.searchResults.sort((a, b) => {
-            let valA = a[field];
-            let valB = b[field];
-            if (field === 'name') {
-                valA = a.name.toLowerCase();
-                valB = b.name.toLowerCase();
-            }
-            if (valA < valB) return reverse ? 1 : -1;
-            if (valA > valB) return reverse ? -1 : 1;
-            return 0;
-        });
-
-        const resultsDiv = document.getElementById('searchResultsList');
-        resultsDiv.innerHTML = '';
-        App.state.searchResults.forEach(res => App.renderSearchResultItem(res));
-    },
-
-    toggleSortOrder: () => {
-        App.state.sortOrder.reverse = !App.state.sortOrder.reverse;
-        App.sortSearchResults();
-    },
-
-    toggleSelect: (path, isChecked) => {
-        if (isChecked) App.state.selectedFiles.add(path);
-        else App.state.selectedFiles.delete(path);
-        App.updateBulkActions();
-    },
-
-    toggleSelectAll: (isChecked) => {
-        const cbs = document.querySelectorAll('.file-checkbox');
-        cbs.forEach(cb => {
-            cb.checked = isChecked;
-            if (isChecked) App.state.selectedFiles.add(cb.value);
-            else App.state.selectedFiles.delete(cb.value);
-        });
-        App.updateBulkActions();
-    },
-
-    updateBulkActions: () => {
-        const count = App.state.selectedFiles.size;
-        const bulkDiv = document.getElementById('bulkActions');
-        const countLabel = document.getElementById('selectedCount');
-        if (count > 0) {
-            bulkDiv.style.setProperty('display', 'flex', 'important');
-            countLabel.innerText = `${count} selected`;
-        } else {
-            bulkDiv.style.setProperty('display', 'none', 'important');
-            document.getElementById('selectAllCb').checked = false;
-        }
-    },
-
-    bulkDelete: async () => {
-        const paths = Array.from(App.state.selectedFiles);
-        if(paths.length === 0) return;
-        if(confirm(`Are you sure you want to PERMANENTLY delete ${paths.length} items?`)) {
-            try {
-                const res = await fetch('/api/fs/delete', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({paths: paths})
-                });
-                if(!res.ok) throw new Error((await res.json()).detail);
-                App.state.selectedFiles.clear();
-                App.updateBulkActions();
-                App.openProject(); // Refresh tree
-            } catch(e) { alert("Error: " + e.message); }
-        }
-    },
-
-    bulkMove: async () => {
-        const paths = Array.from(App.state.selectedFiles);
-        if(paths.length === 0) return;
-        const dstDir = prompt("Enter one destination directory path for all selected items:");
-        if(dstDir) {
-            try {
-                const res = await fetch('/api/fs/move', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({src_paths: paths, dst_dir: dstDir})
-                });
-                if(!res.ok) throw new Error((await res.json()).detail);
-                App.state.selectedFiles.clear();
-                App.updateBulkActions();
-                App.openProject(); // Refresh tree
-            } catch(e) { alert("Error: " + e.message); }
-        }
-    },
-
-    bulkStage: () => {
-        App.state.selectedFiles.forEach(p => App.state.staging.add(p));
-        App.state.selectedFiles.clear();
-        App.updateBulkActions();
-        document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
-        document.getElementById('selectAllCb').checked = false;
-        App.renderStaging();
-    },
-
-    renameFile: async () => {
-        if (!App.state.currentFile) return;
-        const oldName = App.state.currentFile.split(/[\/\\]/).pop();
-        const newName = prompt("Rename to:", oldName);
-        if (newName && newName !== oldName) {
-            try {
-                const res = await fetch('/api/fs/rename', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path: App.state.currentFile, new_name: newName})
-                });
-                if (!res.ok) throw new Error((await res.json()).detail);
-                const data = await res.json();
-                App.state.currentFile = data.new_path;
-                document.getElementById('currentFileName').innerText = data.new_path.split(/[\/\\]/).pop();
-                App.openProject(); // Refresh tree
-            } catch (e) { alert("Error: " + e.message); }
-        }
-    },
-
-    deleteFile: async () => {
-        if (!App.state.currentFile) return;
-        if (confirm(`Are you sure you want to PERMANENTLY delete:\n${App.state.currentFile}?`)) {
-            try {
-                const res = await fetch('/api/fs/delete', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({paths: [App.state.currentFile]})
-                });
-                if (!res.ok) throw new Error((await res.json()).detail);
-                App.state.currentFile = null;
-                document.getElementById('currentFileName').innerText = "Select a file to preview...";
-                document.getElementById('codePreview').innerText = "";
-                document.getElementById('fileControls').style.display = 'none';
-                App.openProject(); // Refresh tree
-            } catch (e) { alert("Error: " + e.message); }
-        }
-    },
-
-    moveFile: async () => {
-        if (!App.state.currentFile) return;
-        const currentDir = App.state.currentFile.substring(0, App.state.currentFile.lastIndexOf('\\') !== -1 ? App.state.currentFile.lastIndexOf('\\') : App.state.currentFile.lastIndexOf('/'));
-        const dstDir = prompt("Enter destination directory path:", currentDir);
-        if (dstDir && dstDir !== currentDir) {
-            try {
-                const res = await fetch('/api/fs/move', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({src_paths: [App.state.currentFile], dst_dir: dstDir})
-                });
-                if (!res.ok) throw new Error((await res.json()).detail);
-                const data = await res.json();
-                App.state.currentFile = data.new_paths[0]; // array response now
-                App.openProject(); // Refresh tree
-            } catch (e) { alert("Error: " + e.message); }
-        }
-    },
-
-    toggleEdit: async () => {
-        if (!App.state.currentFile) return;
-        if (!App.state.isEditing) {
-            App.state.isEditing = true;
-            document.getElementById('preBlock').style.display = 'none';
-            const editor = document.getElementById('codeEditor');
-            editor.value = App.state.rawContent;
-            editor.style.display = 'block';
-            document.getElementById('btnEditSave').innerHTML = '💾 Save';
-        } else {
-            const newContent = document.getElementById('codeEditor').value;
-            try {
-                const res = await fetch('/api/fs/save', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path: App.state.currentFile, content: newContent})
-                });
-                if (!res.ok) throw new Error((await res.json()).detail);
-                App.state.isEditing = false;
-                document.getElementById('codeEditor').style.display = 'none';
-                document.getElementById('preBlock').style.display = 'block';
-                document.getElementById('btnEditSave').innerHTML = '📝 Edit';
-                alert("File saved successfully.");
-                App.previewFile(App.state.currentFile); // re-highlight
-            } catch (e) { alert("Error: " + e.message); }
-        }
-    },
-
+    // --- Staging & Generation ---
     addToStaging: () => {
         if (!App.state.currentFile) return;
-        if (App.state.staging.has(App.state.currentFile)) return;
-        
         App.state.staging.add(App.state.currentFile);
         App.renderStaging();
     },
@@ -392,52 +320,59 @@ const App = {
     renderStaging: () => {
         const list = document.getElementById('stagingList');
         list.innerHTML = '';
-        let totalFiles = 0;
-        
         App.state.staging.forEach(path => {
-            totalFiles++;
             const item = document.createElement('div');
-            item.className = 'list-group-item d-flex justify-content-between align-items-center p-1 staging-item';
-            
-            // Escape path for the onclick event
-            const escPath = path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            item.innerHTML = `
-                <span class="text-truncate" title="${path}">${path.split(/[\/\\]/).pop()}</span>
-                <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="App.removeFromStaging('${escPath}')">×</button>
-            `;
+            item.className = 'list-group-item d-flex justify-content-between p-1 bg-transparent border-0 text-white';
+            item.innerHTML = `<span class="text-truncate small">${path.split(/[\\\/]/).pop()}</span>
+                              <button class="btn btn-sm btn-link text-danger p-0" onclick="App.removeFromStaging('${path.replace(/\\/g, '\\\\')}')">×</button>`;
             list.appendChild(item);
         });
-
-        document.getElementById('tokenEstimate').innerText = `${totalFiles} Files`;
+        document.getElementById('tokenEstimate').innerText = App.state.staging.size;
     },
 
-    removeFromStaging: (path) => {
-        App.state.staging.delete(path);
-        App.renderStaging();
-    },
-
-    clearStaging: () => {
-        App.state.staging.clear();
-        App.renderStaging();
-    },
+    removeFromStaging: (path) => { App.state.staging.delete(path); App.renderStaging(); },
 
     generateContext: async () => {
-        if (App.state.staging.size === 0) return alert("Staging is empty.");
-        
+        if (App.state.staging.size === 0) return;
         try {
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ files: Array.from(App.state.staging) })
             });
-            
             const data = await res.json();
             await navigator.clipboard.writeText(data.content);
-            alert("✅ Context copied to clipboard!");
-        } catch (e) {
-            alert("Error: " + e.message);
+            alert("✅ Context copied!");
+        } catch (e) { alert("Failed to copy"); }
+    },
+
+    toggleEdit: async () => {
+        if (!App.state.currentFile) return;
+        const editor = document.getElementById('codeEditor');
+        const preview = document.getElementById('preBlock');
+        const btn = document.getElementById('btnEditSave');
+
+        if (!App.state.isEditing) {
+            App.state.isEditing = true;
+            editor.value = App.state.rawContent;
+            editor.style.display = 'block';
+            preview.style.display = 'none';
+            btn.innerText = 'Save';
+        } else {
+            try {
+                await fetch('/api/fs/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ path: App.state.currentFile, content: editor.value })
+                });
+                App.state.isEditing = false;
+                editor.style.display = 'none';
+                preview.style.display = 'block';
+                btn.innerText = 'Edit';
+                App.previewFile(App.state.currentFile);
+            } catch (e) { alert("Save failed"); }
         }
     }
 };
 
-App.init();
+window.onload = App.init;

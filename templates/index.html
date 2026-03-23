@@ -39,104 +39,97 @@
         <!-- Main Workspace -->
         <div class="row g-0 flex-grow-1 overflow-hidden">
             
+            <!-- Sidebar: Recent Projects & Sessions -->
+            <div id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="width: 60px; transition: width 0.3s;">
+                <button class="btn btn-outline-light btn-sm mb-3" onclick="App.toggleSidebar()" title="Toggle Sidebar">☰</button>
+                <div id="recentProjectsList" class="d-flex flex-column gap-2 overflow-auto">
+                    <!-- Project icons will appear here -->
+                </div>
+            </div>
+
             <!-- Left Panel: File Browser & Search -->
             <div class="col-md-3 glass-panel border-end d-flex flex-column h-100">
                 <!-- Search Box -->
-                <div class="p-2 border-bottom">
-                    <div class="input-group input-group-sm mb-1">
-                        <span class="input-group-text">🔍</span>
-                        <input type="text" id="searchInput" class="form-control" placeholder="Search files...">
+                <div class="p-3 border-bottom">
+                    <div class="input-group input-group-sm mb-2">
+                        <span class="input-group-text bg-transparent border-end-0 text-muted">🔍</span>
+                        <input type="text" id="searchInput" class="form-control border-start-0" placeholder="Search files...">
                     </div>
-                    <div class="d-flex gap-2 mb-2">
-                        <select id="searchMode" class="form-select form-select-sm" style="width: 80px;">
-                            <option value="smart">Smart</option>
+                    <div class="d-flex gap-2">
+                        <select id="searchMode" class="form-select form-select-sm">
+                            <option value="smart">Smart Scan</option>
                             <option value="exact">Exact</option>
                             <option value="regex">Regex</option>
                             <option value="content">Content</option>
                         </select>
-                        <button class="btn btn-outline-secondary btn-sm flex-grow-1" onclick="App.startSearch()">Find</button>
-                    </div>
-                    <div class="d-flex gap-3 px-1">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="isInverse">
-                            <label class="form-check-label small" for="isInverse">Inverse</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="isCaseSensitive">
-                            <label class="form-check-label small" for="isCaseSensitive">Case</label>
-                        </div>
+                        <button class="btn btn-primary btn-sm px-3" onclick="App.startSearch()">Find</button>
                     </div>
                 </div>
 
-                <!-- Tabs: Tree vs Search Results -->
-                <ul class="nav nav-tabs nav-fill bg-white" id="leftTabs" role="tablist">
+                <!-- Tabs -->
+                <ul class="nav nav-tabs nav-fill" id="leftTabs" role="tablist">
                     <li class="nav-item">
-                        <button class="nav-link active py-1" id="tab-tree" data-bs-toggle="tab" data-bs-target="#panel-tree" type="button">📁 Tree</button>
+                        <button class="nav-link active py-2" id="tab-tree" data-bs-toggle="tab" data-bs-target="#panel-tree" type="button">📁 Files</button>
                     </li>
                     <li class="nav-item">
-                        <button class="nav-link py-1" id="tab-search" data-bs-toggle="tab" data-bs-target="#panel-search" type="button">Search Results</button>
+                        <button class="nav-link py-2" id="tab-search" data-bs-toggle="tab" data-bs-target="#panel-search" type="button">Results</button>
                     </li>
                 </ul>
 
-                <!-- Tab Content -->
-                <div class="tab-content flex-grow-1 overflow-auto bg-white" id="leftTabContent">
-                    <!-- Tree Panel -->
+                <div class="tab-content flex-grow-1 overflow-auto bg-transparent" id="leftTabContent">
                     <div class="tab-pane fade show active p-2" id="panel-tree">
-                        <div id="fileTreeRoot" class="small">No project loaded.</div>
+                        <div id="fileTreeRoot" class="small p-1">No project loaded.</div>
                     </div>
-                    <!-- Search Results Panel -->
                     <div class="tab-pane fade p-2" id="panel-search">
-                        <div class="d-flex gap-2 mb-2">
-                             <select id="sortField" class="form-select form-select-sm" onchange="App.sortSearchResults()">
-                                 <option value="name">Name</option>
-                                 <option value="size">Size</option>
-                                 <option value="mtime">Time</option>
-                                 <option value="ext">Type</option>
-                             </select>
-                             <button class="btn btn-outline-secondary btn-sm" onclick="App.toggleSortOrder()">⇅</button>
-                        </div>
-                        <div id="searchResultsList" class="list-group list-group-flush small border-top"></div>
-                        <div id="searchStatus" class="text-muted small text-center mt-2" style="display:none;">Searching...</div>
+                        <div id="searchResultsList" class="list-group list-group-flush small"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Center Panel: Preview -->
-            <div class="col-md-6 d-flex flex-column h-100 bg-black">
-                <div class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light">
-                    <span id="currentFileName" class="fw-bold text-secondary text-truncate me-2">Select a file to preview...</span>
-                    <!-- File Operations -->
-                    <div id="fileControls" class="btn-group btn-group-sm me-2" style="display:none;">
-                        <button class="btn btn-outline-secondary" onclick="App.renameFile()" title="Rename">✏️</button>
-                        <button class="btn btn-outline-secondary" onclick="App.moveFile()" title="Move">✂️</button>
-                        <button class="btn btn-outline-danger" onclick="App.deleteFile()" title="Delete">🗑️</button>
-                        <button class="btn btn-outline-primary fw-bold" id="btnEditSave" onclick="App.toggleEdit()">📝 Edit</button>
+            <!-- Center Panel: Preview & Info -->
+            <div class="col-md-6 d-flex flex-column h-100">
+                <div class="p-2 border-bottom d-flex justify-content-between align-items-center bg-transparent backdrop-blur">
+                    <div class="d-flex align-items-center me-2 overflow-hidden">
+                        <span id="currentFileName" class="fw-bold text-truncate" style="max-width: 300px;">Selected File</span>
+                        <div id="fileTags" class="ms-2 d-flex gap-1"></div>
                     </div>
-                    <button class="btn btn-success btn-sm" onclick="App.addToStaging()">⬇ Add to Staging</button>
+                    <div id="fileControls" class="btn-group btn-group-sm" style="display:none;">
+                        <button class="btn btn-outline-success" onclick="App.addToStaging()" title="Add to Staging">⬇ Add</button>
+                        <button class="btn btn-outline-info" onclick="App.showFileNote()" title="Notes">📝</button>
+                        <button class="btn btn-outline-light" onclick="App.renameFile()">✏️</button>
+                        <button class="btn btn-outline-danger" onclick="App.deleteFile()">🗑️</button>
+                        <button class="btn btn-primary" id="btnEditSave" onclick="App.toggleEdit()">Edit</button>
+                    </div>
                 </div>
-                <!-- Editor Space -->
-                <div class="flex-grow-1 overflow-auto position-relative bg-dark" id="previewContainer">
-                    <pre class="m-0 h-100" id="preBlock"><code id="codePreview" class="hljs h-100 d-block p-3"></code></pre>
-                    <textarea id="codeEditor" class="form-control w-100 h-100 border-0 rounded-0 p-3" style="display:none; font-family: monospace; background:#1e1e1e; color:#d4d4d4; resize:none;" spellcheck="false"></textarea>
+
+                <!-- Note Overlay -->
+                <div id="noteOverlay" class="glass-panel p-3 m-3 position-absolute start-0 end-0 translate-middle-y shadow-lg" style="display:none; z-index:100; top: 100px;">
+                    <h6>File Notes</h6>
+                    <textarea id="noteInput" class="form-control mb-2" rows="3"></textarea>
+                    <div class="d-flex justify-content-end gap-2">
+                        <button class="btn btn-sm btn-outline-light" onclick="App.hideFileNote()">Cancel</button>
+                        <button class="btn btn-sm btn-primary" onclick="App.saveFileNote()">Save Note</button>
+                    </div>
+                </div>
+
+                <div class="flex-grow-1 overflow-auto bg-black" id="previewContainer">
+                    <pre class="m-0 h-100" id="preBlock"><code id="codePreview" class="hljs h-100 d-block p-4"></code></pre>
+                    <textarea id="codeEditor" class="form-control w-100 h-100 border-0 rounded-0 p-4" style="display:none; background:#0a0a0a; color:#e2e8f0; resize:none;"></textarea>
                 </div>
             </div>
 
-            <!-- Right Panel: Staging (Cart) -->
-            <div class="col-md-3 glass-panel border-start d-flex flex-column h-100">
-                <div class="p-2 border-bottom bg-light d-flex justify-content-between align-items-center">
-                    <h6 class="m-0">🛒 Staging Area</h6>
-                    <span id="tokenEstimate" class="badge bg-secondary">0 Tokens</span>
+            <!-- Right Panel: Staging -->
+            <div class="col-md-2 glass-panel border-start d-flex flex-column h-100">
+                <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold">🛒 Staging</h6>
+                    <span id="tokenEstimate" class="badge bg-info">0</span>
                 </div>
-                
-                <!-- Staging List -->
                 <div class="flex-grow-1 overflow-auto p-2">
                     <div id="stagingList" class="list-group list-group-flush small"></div>
                 </div>
-
-                <!-- Actions -->
-                <div class="p-2 border-top bg-white">
-                    <button class="btn btn-danger btn-sm w-100 mb-2" onclick="App.clearStaging()">Clear All</button>
-                    <button class="btn btn-dark w-100 py-2 fw-bold" onclick="App.generateContext()">🚀 Copy Context</button>
+                <div class="p-3 border-top">
+                    <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="App.archiveStaging()">📦 Archive Selection</button>
+                    <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" onclick="App.generateContext()">🚀 Copy Context</button>
                 </div>
             </div>
         </div>

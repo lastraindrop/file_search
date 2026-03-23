@@ -8,7 +8,6 @@ import re
 import pathspec
 import logging
 from functools import lru_cache
-
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AIContextWorkbench")
@@ -22,6 +21,25 @@ def get_app_dir():
     except Exception as e:
         logger.error(f"Failed to create app directory: {e}")
     return app_dir
+
+# --- Security & Validation ---
+class PathValidator:
+    @staticmethod
+    def is_safe(target_path, root_path):
+        """Strict check to prevent path traversal outside project root."""
+        try:
+            target = pathlib.Path(target_path).resolve()
+            root = pathlib.Path(root_path).resolve()
+            return root in target.parents or root == target
+        except Exception:
+            return False
+
+    @staticmethod
+    def validate_project(path_str):
+        p = pathlib.Path(path_str)
+        if not p.exists(): raise FileNotFoundError(f"Path does not exist: {path_str}")
+        if not p.is_dir(): raise NotADirectoryError(f"Not a directory: {path_str}")
+        return p
 
 CONFIG_FILE = get_app_dir() / "config.json"
 
@@ -51,9 +69,44 @@ class DataManager:
                 "groups": {"Default": []},
                 "current_group": "Default",
                 "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env",
-                "max_search_size_mb": 5  # Default limit in MB
+                "max_search_size_mb": 5,
+                "notes": {},      # File path -> String
+                "tags": {},       # File path -> List[String]
+                "sessions": []    # List of session objects
             }
         return self.data["projects"][path_str]
+
+    def add_note(self, project_path, file_path, note):
+        proj = self.get_project_data(project_path)
+        proj["notes"][file_path] = note
+        self.save()
+
+    def add_tag(self, project_path, file_path, tag):
+        proj = self.get_project_data(project_path)
+        if file_path not in proj["tags"]: proj["tags"][file_path] = []
+        if tag not in proj["tags"][file_path]: proj["tags"][file_path].append(tag)
+        self.save()
+
+    def remove_tag(self, project_path, file_path, tag):
+        proj = self.get_project_data(project_path)
+        if file_path in proj["tags"] and tag in proj["tags"][file_path]:
+            proj["tags"][file_path].remove(tag)
+        self.save()
+
+    def save_session(self, project_path, session_data):
+        """Saves a snapshot of current workspace state."""
+        proj = self.get_project_data(project_path)
+        # Keep only last 5 sessions
+        proj["sessions"].insert(0, session_data)
+        proj["sessions"] = proj["sessions"][:5]
+        self.save()
+
+    def update_project_settings(self, project_path, settings: dict):
+        """Updates project-level settings (excludes, search preferences)."""
+        proj = self.get_project_data(project_path)
+        for k, v in settings.items():
+            proj[k] = v
+        self.save()
 
 # --- File Utilities ---
 class FileUtils:
@@ -154,13 +207,16 @@ class FileUtils:
             return {"size": 0, "mtime": 0, "ext": ""}
 
     @staticmethod
-    def generate_ascii_tree(root_dir, excludes_str, use_gitignore=True):
+    def generate_ascii_tree(root_dir, excludes_str, use_gitignore=True, max_depth=15):
         root_dir = pathlib.Path(root_dir)
         lines = [f"Project: {root_dir.name}"]
         excludes = [e.lower().strip() for e in excludes_str.split() if e.strip()]
         git_spec = FileUtils.get_gitignore_spec(root_dir) if use_gitignore else None
 
-        def _build_tree(path, prefix=""):
+        def _build_tree(path, prefix="", depth=0):
+            if depth > max_depth:
+                lines.append(f"{prefix}└── [Max Depth Reached ({max_depth}) ...]")
+                return
             try:
                 # Sort: directories first, then files
                 entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower()))
@@ -176,7 +232,7 @@ class FileUtils:
                     lines.append(f"{prefix}{connector}{entry.name}")
                     if entry.is_dir():
                         new_prefix = prefix + ("    " if is_last else "│   ")
-                        _build_tree(entry.path, new_prefix)
+                        _build_tree(entry.path, new_prefix, depth + 1)
             except PermissionError:
                 logger.warning(f"Permission denied: {path}")
             except Exception as e:
@@ -184,6 +240,25 @@ class FileUtils:
 
         _build_tree(root_dir)
         return "\n".join(lines)
+
+class ContextFormatter:
+    @staticmethod
+    def to_markdown(paths, root_dir=None):
+        """Converts a list of file paths to a formatted markdown block."""
+        blocks = []
+        for p_str in paths:
+            p = pathlib.Path(p_str)
+            if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
+                continue
+            try:
+                # Use relative path if root_dir is provided
+                display_name = p.relative_to(root_dir) if root_dir and root_dir in p.parents else p.name
+                content = p.read_text('utf-8', 'ignore')
+                lang = FileUtils.get_language_tag(p.suffix)
+                blocks.append(f"File: {display_name}\n```{lang}\n{content}\n```\n\n")
+            except Exception as e:
+                logger.error(f"Failed to format {p_str}: {e}")
+        return "".join(blocks)
 
 # --- File Operations (Safe Handlers) ---
 class FileOps:
@@ -231,6 +306,46 @@ class FileOps:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         return True
+
+    @staticmethod
+    def create_item(parent_path_str, name, is_dir=False):
+        parent_path = pathlib.Path(parent_path_str)
+        if not parent_path.exists() or not parent_path.is_dir():
+            raise FileNotFoundError("Parent directory does not exist.")
+        
+        new_path = parent_path / name
+        if new_path.exists():
+            raise FileExistsError(f"{'Directory' if is_dir else 'File'} already exists.")
+        
+        if is_dir:
+            new_path.mkdir()
+        else:
+            new_path.touch()
+        return str(new_path)
+
+    @staticmethod
+    def archive_selection(paths, output_path_str, root_dir=None):
+        import zipfile
+        output_path = pathlib.Path(output_path_str)
+        
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for p_str in paths:
+                p = pathlib.Path(p_str)
+                if not p.exists(): continue
+                
+                # If root_dir is provided, use it for relative paths in zip
+                arcname = p.relative_to(root_dir) if root_dir and root_dir in p.parents else p.name
+                
+                if p.is_file():
+                    zipf.write(p, arcname)
+                elif p.is_dir():
+                    for root, _, files in os.walk(p):
+                        for file in files:
+                            full_f = pathlib.Path(root) / file
+                            # Maintain structure relative to root_dir or parent of p
+                            rel_base = root_dir if root_dir else p.parent
+                            zipf.write(full_f, full_f.relative_to(rel_base))
+        return str(output_path)
 
 # --- Search Logic (Generator-based) ---
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 

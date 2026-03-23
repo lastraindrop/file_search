@@ -9,6 +9,12 @@
 - **项目树生成**：一键生成并复制整个项目的目录结构。
 - **Token 估算**：实时显示清单内文件的字符统计及估算 Token 数。
 - **深度集成**：支持 `.gitignore` 规则及手动排除。
+- **高安全性**：内核级路径越权防护及 PowerShell 注入隔离。
+
+## 📚 详细文档
+- [开发者说明 (Architecture & Security)](DEVELOPER_GUIDE.md)
+- [项目路线图 (Roadmap)](ROADMAP.md)
+- [Pytest 测试报告](tests/README.md) *(暂未建立)*
 
 ## 🚀 快速开始
 

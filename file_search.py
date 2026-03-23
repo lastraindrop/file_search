@@ -6,7 +6,7 @@ import threading
 import queue
 import sys
 import subprocess
-from core_logic import DataManager, FileUtils, SearchWorker, FileOps
+from core_logic import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter
 
 # --- Constants ---
 PREVIEW_LIMIT = 100000  # Max characters to display in preview
@@ -202,6 +202,12 @@ class FileWorkbenchApp:
 
     def on_refresh(self):
         if self.current_dir:
+            # Save current UI settings to config before refreshing
+            if self.current_proj_config:
+                self.current_proj_config["excludes"] = self.exclude_var.get()
+                self.data_mgr.save()
+            
+            # Re-browse (now with updated config)
             self.on_browse(str(self.current_dir))
         else:
             messagebox.showinfo("刷新", "请先浏览一个项目。")
@@ -211,6 +217,8 @@ class FileWorkbenchApp:
         self.lbl_project.config(text=f"项目: {self.current_dir.name}", foreground="black")
         self.data_mgr.data["last_directory"] = path_str
         self.current_proj_config = self.data_mgr.get_project_data(path_str)
+        # Only overwrite UI if UI is empty (e.g. initial load) or if it's a NEW project
+        # For refresh, the config was updated in on_refresh already.
         self.exclude_var.set(self.current_proj_config.get("excludes", ""))
         self.update_group_combo()
         self.current_group_var.set(self.current_proj_config.get("current_group", "默认组"))
@@ -386,16 +394,11 @@ class FileWorkbenchApp:
         self.update_stats()
 
     def copy_all_staging_content(self):
-        final = []
-        for p_str in self.staging_files:
-            p = pathlib.Path(p_str)
-            if p.is_file():
-                if FileUtils.is_binary(p): continue
-                try:
-                    text = p.read_text('utf-8', 'ignore')
-                    final.append(f"File: {p.name}\n```{FileUtils.get_language_tag(p.suffix)}\n{text}\n```\n\n")
-                except: pass
-        if final: self.root.clipboard_clear(); self.root.clipboard_append("".join(final)); messagebox.showinfo("完成", "内容已复制")
+        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir)
+        if final_text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(final_text)
+            messagebox.showinfo("完成", "内容已复制")
 
     def update_group_combo(self): self.combo_groups['values'] = list(self.current_proj_config["groups"].keys())
     def on_group_changed(self, e): self.refresh_fav_tree()
@@ -469,10 +472,10 @@ class FileWorkbenchApp:
         paths = self._get_ctx_paths()
         if not paths: return
         try:
-            # Format paths for PowerShell array: @('C:\path1', 'C:\path2')
-            formatted_paths = ",".join([f"'{str(p)}'" for p in paths])
-            cmd = f"powershell -NoProfile -Command \"Set-Clipboard -Path @({formatted_paths})\""
-            subprocess.run(cmd, shell=True, check=True)
+            # Secure execution: Use list arguments to avoid shell injection
+            # PowerShell Command uses $args to receive the paths safely
+            cmd = ["powershell", "-NoProfile", "-Command", "Set-Clipboard -Path $args"]
+            subprocess.run(cmd + [str(p) for p in paths], check=True)
             self.lbl_status.config(text=f"已将 {len(paths)} 个项目复制到系统剪切板")
         except Exception as e:
             messagebox.showerror("剪切板错误", f"无法复制到系统剪切板: {e}")

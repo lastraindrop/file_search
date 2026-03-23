@@ -57,3 +57,24 @@ def test_file_lifecycle_e2e(mock_project):
     with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=core_main.py&mode=exact") as ws:
         data = ws.receive_json()
         assert data["status"] == "DONE" # No results found before DONE
+
+def test_settings_and_search_workflow_e2e(mock_project):
+    """Tests: Open -> Update Excludes -> Search -> Verify exclusion is respected."""
+    client.post("/api/open", json={"path": str(mock_project)})
+    
+    # 1. Search initially (should find main.py)
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
+        data = ws.receive_json()
+        assert "main.py" in data["name"]
+        ws.receive_json() # DONE
+
+    # 2. Update settings to exclude .py files
+    client.post("/api/project/settings", json={
+        "project_path": str(mock_project),
+        "settings": {"excludes": "*.py"}
+    })
+    
+    # 3. Search again (should NOT find main.py)
+    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
+        data = ws.receive_json()
+        assert data["status"] == "DONE" # No results found

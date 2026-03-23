@@ -9,7 +9,7 @@ import os
 import pathlib
 import json
 import asyncio
-from core_logic import DataManager, FileUtils, search_generator, FileOps, logger
+from core_logic import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, logger
 
 app = FastAPI(title="AI Context Workbench Web")
 
@@ -41,17 +41,67 @@ class FileSaveRequest(BaseModel):
     path: str
     content: str
 
+class FileCreateRequest(BaseModel):
+    parent_path: str
+    name: str
+    is_dir: bool = False
+
+class FileArchiveRequest(BaseModel):
+    paths: list[str]
+    output_name: str
+    project_root: str
+
 class ChildrenRequest(BaseModel):
     path: str
 
+class NoteRequest(BaseModel):
+    project_path: str
+    file_path: str
+    note: str
+
+class TagRequest(BaseModel):
+    project_path: str
+    file_path: str
+    tag: str
+    action: str  # "add" or "remove"
+
+class SessionRequest(BaseModel):
+    project_path: str
+    data: dict
+
+class ProjectSettingsRequest(BaseModel):
+    project_path: str
+    settings: dict
+
+class ProjectSettingsRequest(BaseModel):
+    project_path: str
+    settings: dict
+
 def is_path_safe(target_path: str, project_root: str) -> bool:
-    """Checks if the target path is within the project root to prevent traversal."""
+    """Delegates to PathValidator for safe traversal checks."""
+    return PathValidator.is_safe(target_path, project_root)
+
+def get_valid_project_root(path_str: str) -> str | None:
+    """
+    Finds the valid project root that contains the given path.
+    Returns None if the path is not authorized/outside any project.
+    """
     try:
-        t = pathlib.Path(target_path).resolve()
-        r = pathlib.Path(project_root).resolve()
-        return r in t.parents or r == t
-    except:
-        return False
+        target = pathlib.Path(path_str).resolve()
+        for p_root in data_mgr.data["projects"]:
+            root = pathlib.Path(p_root).resolve()
+            if root == target or root in target.parents:
+                return str(p_root)
+    except Exception:
+        pass
+    return None
+
+def get_project_config_for_path(path_str: str):
+    """Retrieves project config if path is within a registered project."""
+    root = get_valid_project_root(path_str)
+    if not root:
+        return None, None
+    return root, data_mgr.get_project_data(root)
 
 # --- Helpers ---
 def get_node_info(path_obj, project_root):
@@ -70,29 +120,16 @@ def get_children(path_str):
     path = pathlib.Path(path_str)
     if not path.exists() or not path.is_dir(): return []
     
-    # We need the project root to check ignore rules correctly
-    # For now, let's assume the path is within a project we can find in data_mgr
-    # or just use the path itself if no better context.
-    # In a real app, you'd track the "current project root" in the session or request.
-    project_root = path
-    # Try to find the closest project root from data_mgr
-    project_root = None
-    for p_root in data_mgr.data["projects"]:
-        if path_str.startswith(p_root):
-            project_root = pathlib.Path(p_root)
-            break
-            
-    if not project_root:
-        # Fallback to the path itself or parent if not in a known project
-        project_root = path if path.is_dir() else path.parent
-
-    if not is_path_safe(path_str, str(project_root)):
+    # NEW: Secure project root resolution
+    project_root_str = get_valid_project_root(path_str)
+    if not project_root_str:
         logger.warning(f"Blocking potentially unsafe path access: {path_str}")
         return []
-
-    proj_config = data_mgr.get_project_data(str(project_root))
+    
+    project_root = pathlib.Path(project_root_str)
+    proj_config = data_mgr.get_project_data(project_root_str)
     excludes = proj_config.get("excludes", "").split()
-    git_spec = FileUtils.get_gitignore_spec(str(project_root))
+    git_spec = FileUtils.get_gitignore_spec(project_root_str)
 
     children = []
     try:
@@ -116,20 +153,20 @@ async def index(request: Request):
 
 @app.post("/api/open")
 async def open_project(req: ProjectOpenRequest):
-    p = pathlib.Path(req.path)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="Path does not exist")
-    if not p.is_dir():
-        raise HTTPException(status_code=400, detail="Invalid directory path")
-    
-    # Register project in data_mgr to allow safe path access
-    data_mgr.data["last_project"] = str(p)
-    data_mgr.get_project_data(str(p))
-    data_mgr.save()
-    
-    # Returns only root info
-    root_node = get_node_info(p, p)
-    return {"status": "ok", "name": p.name, "root": root_node}
+    try:
+        # Register project in data_mgr to allow safe path access
+        p = PathValidator.validate_project(req.path)
+        data_mgr.data["last_project"] = str(p)
+        data_mgr.get_project_data(str(p))
+        data_mgr.save()
+        
+        # Returns only root info
+        root_node = get_node_info(p, p)
+        return {"status": "ok", "name": p.name, "root": root_node}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/children")
 async def api_children(req: ChildrenRequest):
@@ -141,13 +178,7 @@ async def get_content(path: str):
     p = pathlib.Path(path)
     
     # Safety Check: Must be within a known project
-    valid_root = None
-    for p_root in data_mgr.data["projects"]:
-        if is_path_safe(path, p_root):
-            valid_root = p_root
-            break
-            
-    if not valid_root:
+    if not get_valid_project_root(path):
         logger.warning(f"Blocking unauthorized content access: {path}")
         raise HTTPException(status_code=403, detail="Access denied (Path not within any project root)")
 
@@ -165,17 +196,8 @@ async def get_content(path: str):
 
 @app.post("/api/generate")
 async def generate_context(req: GenerateRequest):
-    final = []
-    for f in req.files:
-        p = pathlib.Path(f)
-        if p.exists() and p.is_file():
-            if FileUtils.is_binary(p): continue
-            try:
-                text = p.read_text('utf-8', 'ignore')
-                block = f"File: {p.name}\n```{FileUtils.get_language_tag(p.suffix)}\n{text}\n```\n\n"
-                final.append(block)
-            except: pass
-    return {"content": "".join(final)}
+    content = ContextFormatter.to_markdown(req.files)
+    return {"content": content}
 
 # --- File Operations APIs ---
 @app.post("/api/fs/rename")
@@ -185,7 +207,7 @@ async def rename_file(req: FileRenameRequest):
         raise HTTPException(status_code=403, detail="Access denied")
     
     # Check new path for traversal
-    new_path_full = os.path.join(os.path.dirname(req.path), req.new_name)
+    new_path_full = str(pathlib.Path(req.path).parent / req.new_name)
     if not is_path_safe(new_path_full, project_root):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -216,22 +238,11 @@ async def api_move(req: FileMoveRequest):
     try:
         moved_paths = []
         for src in req.src_paths:
-            # Safety Check for src
-            src_project_root = None
-            for p_root in data_mgr.data["projects"]:
-                if src.startswith(p_root):
-                    src_project_root = p_root
-                    break
-            
-            # Safety Check for dst
-            dst_project_root = None
-            for p_root in data_mgr.data["projects"]:
-                if req.dst_dir.startswith(p_root):
-                    dst_project_root = p_root
-                    break
+            # Safety Check for src and dst
+            src_root = get_valid_project_root(src)
+            dst_root = get_valid_project_root(req.dst_dir)
 
-            if not src_project_root or not is_path_safe(src, src_project_root) or \
-               not dst_project_root or not is_path_safe(req.dst_dir, dst_project_root):
+            if not src_root or not dst_root:
                  logger.warning(f"Blocking potentially unsafe move: {src} -> {req.dst_dir}")
                  continue
 
@@ -245,14 +256,8 @@ async def api_move(req: FileMoveRequest):
 async def api_save(req: FileSaveRequest):
     try:
         # Safety Check: Must be within a known project
-        valid_root = None
-        for p_root in data_mgr.data["projects"]:
-            if is_path_safe(req.path, p_root):
-                valid_root = p_root
-                break
-
-        if not valid_root:
-             raise HTTPException(status_code=403, detail="Access denied (Path not within any project root)")
+        if not get_valid_project_root(req.path):
+             raise HTTPException(status_code=403, detail="Access denied")
 
         FileOps.save_content(req.path, req.content)
         return {"status": "ok"}
@@ -261,6 +266,73 @@ async def api_save(req: FileSaveRequest):
         logger.error(f"Save error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.post("/api/fs/create")
+async def api_create(req: FileCreateRequest):
+    try:
+        if not get_valid_project_root(req.parent_path):
+             raise HTTPException(status_code=403, detail="Access denied")
+        new_path = FileOps.create_item(req.parent_path, req.name, req.is_dir)
+        return {"status": "ok", "path": new_path}
+    except HTTPException: raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/fs/archive")
+async def api_archive(req: FileArchiveRequest):
+    try:
+        # project_root itself must be safe
+        if not get_valid_project_root(req.project_root):
+             raise HTTPException(status_code=403, detail="Access denied")
+        
+        for p in req.paths:
+            if not is_path_safe(p, req.project_root):
+                raise HTTPException(status_code=403, detail=f"Unsafe path: {p}")
+        
+        output_file = os.path.join(req.project_root, req.output_name)
+        result_path = FileOps.archive_selection(req.paths, output_file, req.project_root)
+        return {"status": "ok", "archive_path": result_path}
+    except HTTPException: raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- Workspace Memory APIs ---
+@app.get("/api/project/config")
+async def get_proj_config(path: str):
+    if not is_path_safe(path, path): # Basic existence check
+         raise HTTPException(status_code=403, detail="Invalid path")
+    return data_mgr.get_project_data(path)
+
+@app.get("/api/recent_projects")
+async def get_recent_projects():
+    return [{"path": p, "name": os.path.basename(p)} for p in data_mgr.data["projects"].keys()]
+
+@app.post("/api/project/note")
+async def api_add_note(req: NoteRequest):
+    if not is_path_safe(req.file_path, req.project_path):
+        raise HTTPException(status_code=403, detail="Path unsafe")
+    data_mgr.add_note(req.project_path, req.file_path, req.note)
+    return {"status": "ok"}
+
+@app.post("/api/project/tag")
+async def api_manage_tag(req: TagRequest):
+    if not is_path_safe(req.file_path, req.project_path):
+        raise HTTPException(status_code=403, detail="Path unsafe")
+    if req.action == "add":
+        data_mgr.add_tag(req.project_path, req.file_path, req.tag)
+    else:
+        data_mgr.remove_tag(req.project_path, req.file_path, req.tag)
+    return {"status": "ok"}
+
+@app.post("/api/project/session")
+async def api_save_session(req: SessionRequest):
+    data_mgr.save_session(req.project_path, req.data)
+    return {"status": "ok"}
+
+@app.post("/api/project/settings")
+async def update_settings(req: ProjectSettingsRequest):
+    data_mgr.update_project_settings(req.project_path, req.settings)
+    return {"status": "ok"}
+
 # --- WebSocket Search ---
 @app.websocket("/ws/search")
 async def websocket_search(websocket: WebSocket, path: str, query: str, mode: str = "smart", 
@@ -268,22 +340,15 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
     await websocket.accept()
     
     # Safety Check
-    project_root = None
-    for p_root in data_mgr.data["projects"]:
-        if path.startswith(p_root):
-            project_root = p_root
-            break
+    project_root, proj_config = get_project_config_for_path(path)
             
-    if not project_root or not is_path_safe(path, project_root):
+    if not project_root:
         logger.warning(f"Blocking potentially unsafe search access: {path}")
         await websocket.send_json({"status": "ERROR", "msg": "Access denied (Path unsafe)"})
         await websocket.close()
         return
 
     p = pathlib.Path(path)
-    
-    # Get config for excludes
-    proj_config = data_mgr.get_project_data(str(p))
     excludes = proj_config.get("excludes", "")
 
     # Use a thread-safe queue to bridge synchronous generator and async websocket
