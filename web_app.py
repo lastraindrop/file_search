@@ -73,10 +73,6 @@ class ProjectSettingsRequest(BaseModel):
     project_path: str
     settings: dict
 
-class ProjectSettingsRequest(BaseModel):
-    project_path: str
-    settings: dict
-
 def is_path_safe(target_path: str, project_root: str) -> bool:
     """Delegates to PathValidator for safe traversal checks."""
     return PathValidator.is_safe(target_path, project_root)

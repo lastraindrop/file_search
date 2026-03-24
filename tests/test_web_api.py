@@ -15,6 +15,16 @@ def test_api_open_invalid():
     res = client.post("/api/open", json={"path": "C:/NonExistentPath/123/456"})
     assert res.status_code == 404
 
+def test_api_open_system_dir_blocked():
+    """Verify that system directories (e.g. C:/Windows) are rejected."""
+    # Note: On Windows 'C:/Windows' exists, on Linux it doesn't but 'validate_project' 
+    # should catch the keyword or root drive rule.
+    res = client.post("/api/open", json={"path": "C:/"})
+    assert res.status_code == 400
+    
+    res = client.post("/api/open", json={"path": "C:/Windows"})
+    assert res.status_code == 400
+
 def test_api_children_metadata(mock_project):
     client.post("/api/open", json={"path": str(mock_project)})
     res = client.post("/api/fs/children", json={"path": str(mock_project)})
@@ -133,20 +143,65 @@ def test_fs_ops_safety_advanced(mock_project):
     """Ensure advanced operations are also jailed to project root."""
     client.post("/api/open", json={"path": str(mock_project)})
     
-    # Try to create outside
+    # 1. Create outside (Jailed)
     res = client.post("/api/fs/create", json={
-        "parent_path": "C:/Windows",
+        "parent_path": "C:/Windows", # Or /etc on Linux
         "name": "evil.txt"
     })
     assert res.status_code == 403
     
-    # Try to archive outside
+    # 2. Archive outside (Jailed)
+    if os.name == 'nt':
+        unsafe_p = "C:/Windows/system.ini"
+    else:
+        unsafe_p = "/etc/passwd"
+        
     res = client.post("/api/fs/archive", json={
-        "paths": ["C:/Windows/system.ini"],
+        "paths": [unsafe_p],
         "output_name": "stolen.zip",
         "project_root": str(mock_project)
     })
     assert res.status_code == 403
+
+def test_fs_move_safety_permutations(mock_project):
+    """Verify move operation security across multiple scenarios."""
+    client.post("/api/open", json={"path": str(mock_project)})
+    src = str(mock_project / "src" / "main.py")
+    
+    # Move to absolute outside path (Blocked)
+    res = client.post("/api/fs/move", json={
+        "src_paths": [src],
+        "dst_dir": "C:/Windows"
+    })
+    assert res.status_code == 200 # App logic currently returns 200 but skips the move if unsafe
+    # Let's verify results matches "no moves made" if app logic skips or 403 if it errors
+    # Current implementation in web_app.py: api_move returns 200 and moved_paths=[] if skip
+    assert res.json()["new_paths"] == []
+
+def test_api_validation_errors():
+    """Verify Pydantic validation for malformed requests."""
+    # Missing required field 'path'
+    res = client.post("/api/open", json={})
+    assert res.status_code == 422 # Unprocessable Entity
+    
+    # Wrong type for 'files'
+    res = client.post("/api/generate", json={"files": "not-a-list"})
+    assert res.status_code == 422
+
+def test_save_content_no_project_access(mock_project):
+    """Saving content to a file NOT in any registered project should fail."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        temp_path = f.name
+    
+    try:
+        res = client.post("/api/fs/save", json={
+            "path": temp_path,
+            "content": "new content"
+        })
+        assert res.status_code == 403
+    finally:
+        if os.path.exists(temp_path): os.remove(temp_path)
 
 def test_project_settings_persistence(mock_project):
     proj_path = str(mock_project)

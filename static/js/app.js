@@ -246,10 +246,11 @@ const App = {
         if (!App.state.currentFile) return;
         const newName = prompt("New name:", App.state.currentFile.split(/[\\\/]/).pop());
         if (!newName) return;
-        const parent = App.state.currentFile.substring(0, App.state.currentFile.lastIndexOf(pathlib_sep)); // Helper needed
-        // Simpler for now:
         const oldPath = App.state.currentFile;
-        const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + newName;
+        const separator = oldPath.includes('\\') ? '\\' : '/';
+        const parts = oldPath.split(/[\\\/]/);
+        parts[parts.length - 1] = newName;
+        const newPath = parts.join(separator);
         
         try {
             await fetch('/api/fs/rename', {

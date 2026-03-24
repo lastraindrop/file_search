@@ -36,9 +36,21 @@ class PathValidator:
 
     @staticmethod
     def validate_project(path_str):
-        p = pathlib.Path(path_str)
+        p = pathlib.Path(path_str).resolve()
         if not p.exists(): raise FileNotFoundError(f"Path does not exist: {path_str}")
         if not p.is_dir(): raise NotADirectoryError(f"Not a directory: {path_str}")
+        
+        # Block system directories
+        blocked_keywords = ['windows', 'system32', 'program files', 'etc', 'usr/bin', 'usr/sbin', 'boot']
+        p_str_low = str(p).lower().replace('\\', '/')
+        
+        # Check if it's a drive root (e.g., C:/)
+        if len(p.parts) <= 1 or (os.name == 'nt' and len(p.parts) <= 1):
+             raise PermissionError("Cannot register root drive as a project.")
+
+        for kw in blocked_keywords:
+            if kw in p_str_low:
+                raise PermissionError(f"Access to system directory '{kw}' is blocked for security.")
         return p
 
 CONFIG_FILE = get_app_dir() / "config.json"
@@ -64,16 +76,24 @@ class DataManager:
             logger.error(f"Config save error: {e}")
 
     def get_project_data(self, path_str):
+        DEFAULT_SCHEMA = {
+            "groups": {"Default": []},
+            "current_group": "Default",
+            "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env",
+            "max_search_size_mb": 5,
+            "notes": {},
+            "tags": {},
+            "sessions": []
+        }
+        
         if path_str not in self.data["projects"]:
-            self.data["projects"][path_str] = {
-                "groups": {"Default": []},
-                "current_group": "Default",
-                "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env",
-                "max_search_size_mb": 5,
-                "notes": {},      # File path -> String
-                "tags": {},       # File path -> List[String]
-                "sessions": []    # List of session objects
-            }
+            self.data["projects"][path_str] = DEFAULT_SCHEMA.copy()
+        else:
+            # Dynamic Alignment: Update existing project data with missing keys from schema
+            proj = self.data["projects"][path_str]
+            for key, val in DEFAULT_SCHEMA.items():
+                if key not in proj:
+                    proj[key] = val
         return self.data["projects"][path_str]
 
     def add_note(self, project_path, file_path, note):
@@ -415,50 +435,94 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             logger.debug(f"Content match error for {path}: {e}")
             return False
 
-    for root, dirs, files in os.walk(root_dir):
-        rel_root = pathlib.Path(root).relative_to(root_dir)
-        
-        # Pythonic filtering of directories to prevent recursion
-        dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
-        
-        if include_dirs:
-            for d in dirs:
-                if match_name(d):
-                    full_d = pathlib.Path(root) / d
-                    meta = FileUtils.get_metadata(full_d)
-                    yield {
-                        "path": str(full_d),
-                        "match_type": "📁 Folder",
-                        **meta
-                    }
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    # We will use a small pool for content matching to avoid I/O saturation
+    # but still gain from parallel CPU processing (regex/search)
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
+        content_futures = {}
 
-        for file in files:
-            full_path = pathlib.Path(root) / file
-            rel_path = rel_root / file
+        for root, dirs, files in os.walk(root_dir):
+            rel_root = pathlib.Path(root).relative_to(root_dir)
             
-            if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
-                continue
+            # Pythonic filtering of directories to prevent recursion
+            dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
+            
+            if include_dirs:
+                for d in dirs:
+                    if match_name(d):
+                        full_d = pathlib.Path(root) / d
+                        meta = FileUtils.get_metadata(full_d)
+                        yield {
+                            "path": str(full_d),
+                            "match_type": "📁 Folder",
+                            **meta
+                        }
 
-            # Metadata for the file
-            meta = FileUtils.get_metadata(full_path)
-
-            # 1. Check Name Match
-            if search_mode != 'content':
-                if match_name(file):
-                    yield {
-                        "path": str(full_path),
-                        "match_type": "Inverse Match" if is_inverse else "Match",
-                        **meta
-                    }
+            for file in files:
+                full_path = pathlib.Path(root) / file
+                rel_path = rel_root / file
+                
+                if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
                     continue
-            
-            # 2. Check Content Match
-            if search_mode in ('content', 'regex') and match_content(full_path):
-                 yield {
-                    "path": str(full_path),
-                    "match_type": "Inverse Content" if is_inverse else "Content Match",
-                    **meta
-                 }
+
+                # Metadata for the file
+                meta = FileUtils.get_metadata(full_path)
+
+                # 1. Check Name Match
+                if search_mode != 'content':
+                    if match_name(file):
+                        yield {
+                            "path": str(full_path),
+                            "match_type": "Inverse Match" if is_inverse else "Match",
+                            **meta
+                        }
+                        continue
+                
+                # 2. Check Content Match (Queued for parallel processing)
+                if search_mode in ('content', 'regex') and search_text:
+                    future = executor.submit(match_content, full_path)
+                    content_futures[future] = {
+                        "path": str(full_path),
+                        "is_inverse": is_inverse,
+                        **meta
+                    }
+                    
+                    # Yield results in batches to keep the generator responsive
+                    if len(content_futures) >= 20:
+                        # Non-blocking check for completed futures? 
+                        # In a generator, we can wait a bit or just process what's done.
+                        # For now, let's process them to maintain flow.
+                        for f in list(as_completed(content_futures, timeout=0.1)):
+                            try:
+                                is_match = f.result()
+                                info = content_futures.pop(f)
+                                if is_match:
+                                    yield {
+                                        "path": info["path"],
+                                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                                        "size": info["size"],
+                                        "mtime": info["mtime"],
+                                        "ext": info["ext"]
+                                    }
+                            except Exception:
+                                if f in content_futures: content_futures.pop(f)
+
+        # Final flush of remaining futures
+        for f in as_completed(content_futures):
+            try:
+                is_match = f.result()
+                info = content_futures.pop(f)
+                if is_match:
+                    yield {
+                        "path": info["path"],
+                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                        "size": info["size"],
+                        "mtime": info["mtime"],
+                        "ext": info["ext"]
+                    }
+            except Exception:
+                pass
 
 
 class SearchWorker(threading.Thread):

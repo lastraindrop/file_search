@@ -7,13 +7,16 @@
 ### 1. 权限与安全校验
 为了防止路径越权（Path Traversal），本项目采用了 **注册制**。
 *   只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
+*   **黑名单保护**: `PathValidator` 自动拦截对 `Windows`, `System32`, `etc`, `boot` 等系统关键目录的注册。
 *   所有的文件读写、列表、搜索操作必须通过 `get_valid_project_root(path)` 进行二次验证。
 *   **规范**: 禁止使用 `os.path.join` 处理未经过滤的用户输入路径，一律使用 `pathlib` 结合 `is_safe` 方法。
 
 ### 2. 参数一致性与动态对齐 (Consistency)
 由于项目同时维护桌面版 (Tkinter) 和网页版 (FastAPI)，保持参数一致性至关重要：
 *   **核心配置**: 统一存储在 `DataManager.data["projects"]` 下。
+*   **Schema 自动修复 (Self-Healing)**: `DataManager` 在加载旧版本配置时，会自动对比 `DEFAULT_SCHEMA` 并补全缺失字段，确保向后兼容。
 *   **同步机制**: 任何新增的过滤参数（如 `excludes`, `case_sensitive`）必须在 `core_logic.SearchWorker` 和 `web_app.websocket_search` 中同步更新参数列表。
+*   **并发引擎**: 核心搜索引擎基于 `ThreadPoolExecutor`，支持内容搜索的并行化，大幅减少磁盘 I/O 阻塞。
 *   **Pydantic 模型**: Web 端使用 Pydantic 进行强类型检查，桌面端则使用变量绑定。
 
 ## 🧪 测试方法论

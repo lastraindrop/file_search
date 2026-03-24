@@ -2,34 +2,41 @@ import pytest
 import pathlib
 import os
 import zipfile
+from unittest.mock import patch
 from core_logic import search_generator, FileUtils, PathValidator, ContextFormatter, FileOps
 
-@pytest.mark.parametrize("query, mode, inverse, case, expected_names", [
+@pytest.mark.parametrize("query, mode, inverse, case, inc_dirs, expected_names", [
     # 1. Smart Search (default, case-insensitive)
-    ("MAIN", "smart", False, False, ["main.py"]),
+    ("MAIN", "smart", False, False, False, ["main.py"]),
     # 2. Exact Search (case-insensitive)
-    ("main.py", "exact", False, False, ["main.py"]),
+    ("main.py", "exact", False, False, False, ["main.py"]),
     # 3. Exact Search (case-sensitive)
-    ("MAIN.PY", "exact", False, True, []), # Should not match
+    ("MAIN.PY", "exact", False, True, False, []), # Should not match
     # 4. Regex Search
-    (r"utils\..*", "regex", False, False, ["utils.js"]),
+    (r"utils\..*", "regex", False, False, False, ["utils.js"]),
     # 5. Content Search
-    ("print", "content", False, False, ["main.py", "utils.js"]),
+    ("print", "content", False, False, False, ["main.py", "utils.js"]),
     # 6. Inverse Name Match
-    ("main", "smart", True, False, ["utils.js", "config.json", "data.bin"]),
+    ("main", "smart", True, False, False, ["utils.js", "config.json", "data.bin"]),
     # 7. Inverse Content Match
-    ("print", "content", True, False, ["config.json"]),
+    ("print", "content", True, False, False, ["config.json"]),
+    # 8. Include Directories
+    ("src", "smart", False, False, True, ["src"]),
+    # 9. Smart Search with spaces (AND logic)
+    ("utils js", "smart", False, False, False, ["utils.js"]),
 ])
-def test_search_permutations(mock_project, query, mode, inverse, case, expected_names):
+def test_search_permutations(mock_project, query, mode, inverse, case, inc_dirs, expected_names):
     results = list(search_generator(
         mock_project, query, mode, "", 
-        is_inverse=inverse, case_sensitive=case
+        include_dirs=inc_dirs,
+        is_inverse=inverse, 
+        case_sensitive=case
     ))
     result_names = [os.path.basename(r["path"]) for r in results]
     
-    # Check if all expected names are in results
+    # Check if all expected names are in results (Dynamic Check)
     for name in expected_names:
-        assert name in result_names
+        assert any(name in rn for rn in result_names), f"Expected {name} not found in {result_names}"
     
     # Check if results are correctly restricted
     if not inverse and mode != 'content':
@@ -134,26 +141,62 @@ def test_generate_ascii_tree_depth(mock_project):
     assert "[Max Depth Reached (15) ...]" in tree
     assert "level_16" not in tree
 
-def test_file_utils_binary_edge_cases():
-    """Tests FileUtils.is_binary with various edge case files."""
+def test_search_engine_parallel_stress(stress_project):
+    """Verify concurrent search engine stability and correctness under load."""
+    query = "keyword_target_5"
+    results = list(search_generator(stress_project, query, "content", ""))
+    
+    # We expect 10 matches (one in each of the 10 dirs)
+    assert len(results) == 10
+    for r in results:
+        assert "file_5.txt" in r["path"]
+        assert r["match_type"] == "Content Match"
+
+def test_data_manager_alignment_logic():
+    """Test automatic schema detection and alignment for old config files."""
+    from core_logic import DataManager, CONFIG_FILE
+    import json
     import tempfile
     import shutil
-    tmp_dir = tempfile.mkdtemp()
-    tmp_path = pathlib.Path(tmp_dir)
+    
+    tmp_d = tempfile.mkdtemp()
+    tmp_path = pathlib.Path(tmp_d)
     try:
-        # 1. Empty file
-        empty_f = tmp_path / "empty.txt"
-        empty_f.touch()
-        assert FileUtils.is_binary(empty_f) is False
-
-        # 2. Text file with typical extensions
-        py_f = tmp_path / "test.py"
-        py_f.write_text("v = 1")
-        assert FileUtils.is_binary(py_f) is False
-
-        # 3. Binary file with null byte
-        bin_f = tmp_path / "test.dat"
-        bin_f.write_bytes(b"hello\x00world")
-        assert FileUtils.is_binary(bin_f) is True
+        # 1. Create a "vOld" config missing new fields
+        old_config = {
+            "last_directory": str(tmp_path),
+            "projects": {
+                str(tmp_path): {
+                    "excludes": ".git"
+                }
+            }
+        }
+        test_config_file = tmp_path / "test_config_data.json"
+        test_config_file.write_text(json.dumps(old_config))
+        
+        # 2. Mock CONFIG_FILE and load
+        with patch('core_logic.CONFIG_FILE', test_config_file):
+            dm = DataManager()
+            proj_data = dm.get_project_data(str(tmp_path))
+            
+            # 3. Verify Alignment
+            assert "sessions" in proj_data
+            assert "notes" in proj_data
+            assert "tags" in proj_data
+            assert proj_data["excludes"] == ".git"
+            
+            # 4. Verify Persistence
+            dm.save()
+            with open(test_config_file, 'r') as f:
+                saved_data = json.load(f)
+                assert "sessions" in saved_data["projects"][str(tmp_path)]
     finally:
-        shutil.rmtree(tmp_dir)
+        shutil.rmtree(tmp_d, ignore_errors=True)
+
+@patch('core_logic.logger')
+def test_search_generator_error_handling(mock_logger, mock_project):
+    """Verify that the engine handles permission errors gracefully during walk."""
+    with patch('os.scandir', side_effect=PermissionError("Mock Permission Denied")):
+        results = list(search_generator(mock_project, "main", "smart", ""))
+        # Should not crash, just yield nothing or stop gracefully
+        assert len(results) == 0

@@ -33,20 +33,23 @@ def mock_project():
     shutil.rmtree(temp_dir)
 
 @pytest.fixture
-def clean_config():
-    """Ensures a clean config directory for tests."""
-    from core_logic import get_app_dir
-    app_dir = get_app_dir()
-    config_file = app_dir / "config.json"
-    backup_file = app_dir / "config.json.bak"
+def stress_project():
+    """Creates a temporary project with multiple directories and 100+ files."""
+    temp_dir = tempfile.mkdtemp(prefix="ai_workbench_stress_")
+    base = pathlib.Path(temp_dir)
     
-    # Backup existing config
-    if config_file.exists():
-        shutil.copy(config_file, backup_file)
-        os.remove(config_file)
+    # Create 10 directories
+    for i in range(10):
+        d = base / f"dir_{i}"
+        d.mkdir()
+        # Create 10 files in each directory
+        for j in range(10):
+            f = d / f"file_{j}.txt"
+            f.write_text(f"Content in file {i}-{j} with keyword_target_{j}", encoding="utf-8")
+            
+    # Add some binary files and ignored files
+    (base / "ignored.log").write_text("should be ignored", encoding="utf-8")
+    (base / ".gitignore").write_text("*.log", encoding="utf-8")
     
-    yield config_file
-    
-    # Restore backup
-    if backup_file.exists():
-        shutil.move(backup_file, config_file)
+    yield base
+    shutil.rmtree(temp_dir)
