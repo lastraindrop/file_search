@@ -186,6 +186,8 @@ class FileWorkbenchApp:
         self.context_menu.add_command(label="✏️ 重命名", command=self.ctx_rename_file)
         self.context_menu.add_command(label="✂️ 移动至...", command=self.ctx_move_file)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="⭐ 收藏至当前组", command=self.ctx_add_to_favorites)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="🗑️ 删除", command=self.ctx_delete_file)
         for t in [self.tree_search, self.tree_fav, self.tree_staging, self.tree_proj]: t.bind("<Button-3>", self.show_context_menu)
 
@@ -221,7 +223,14 @@ class FileWorkbenchApp:
         # For refresh, the config was updated in on_refresh already.
         self.exclude_var.set(self.current_proj_config.get("excludes", ""))
         self.update_group_combo()
-        self.current_group_var.set(self.current_proj_config.get("current_group", "默认组"))
+        self.current_group_var.set(self.current_proj_config.get("current_group", "Default"))
+        
+        # Restore Staging List from project config
+        self.staging_files = []
+        for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
+        staged = self.current_proj_config.get("staging_list", [])
+        self._add_paths_to_staging(staged, save_to_disk=False)
+
         self._refresh_tree() # Call _refresh_tree here
         self.refresh_fav_tree()
         self.data_mgr.save()
@@ -255,7 +264,8 @@ class FileWorkbenchApp:
 
     def process_queue(self):
         try:
-            while True:
+            processed_in_this_tick = 0
+            while processed_in_this_tick < 100:  # Batch limit: process max 100 items per 100ms
                 res = self.result_queue.get_nowait()
                 if isinstance(res, tuple) and res[0] == "DONE":
                     self.lbl_status.config(text=f"就绪 ({len(self.tree_search.get_children())}项)")
@@ -276,6 +286,7 @@ class FileWorkbenchApp:
                     dt,
                     res["ext"]
                 ))
+                processed_in_this_tick += 1
         except queue.Empty: pass
         self.root.after(SEARCH_POLL_MS, self.process_queue)
 
@@ -366,12 +377,19 @@ class FileWorkbenchApp:
         tree_text = FileUtils.generate_ascii_tree(self.current_dir, self.exclude_var.get(), self.use_gitignore_var.get())
         self.root.clipboard_clear(); self.root.clipboard_append(tree_text); messagebox.showinfo("成功", "结构已复制")
 
-    def _add_paths_to_staging(self, paths):
+    def _add_paths_to_staging(self, paths, save_to_disk=True):
         for p_str in paths:
             if p_str not in self.staging_files:
-                self.staging_files.append(p_str); p = pathlib.Path(p_str)
+                p = pathlib.Path(p_str)
+                if not p.exists(): continue
+                self.staging_files.append(p_str)
                 sz = p.stat().st_size if p.is_file() else 0
                 self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=("", p_str, f"{sz/1024:.1f}KB"))
+        
+        if save_to_disk and self.current_proj_config:
+            self.current_proj_config["staging_list"] = self.staging_files
+            self.data_mgr.save()
+            
         self.update_stats()
 
     def add_selected_to_staging(self):
@@ -391,6 +409,10 @@ class FileWorkbenchApp:
             val = self.tree_staging.item(i)['values'][1]
             if val in self.staging_files: self.staging_files.remove(val)
             self.tree_staging.delete(i)
+        
+        if self.current_proj_config:
+            self.current_proj_config["staging_list"] = self.staging_files
+            self.data_mgr.save()
         self.update_stats()
 
     def copy_all_staging_content(self):
@@ -461,12 +483,12 @@ class FileWorkbenchApp:
         paths = self._get_ctx_paths()
         if paths: 
             p = paths[0]
-            os.startfile(p.parent if p.is_file() else p)
+            FileUtils.open_path_in_os(p.parent if p.is_file() else p)
         
     def ctx_open_file(self):
         paths = self._get_ctx_paths()
         for p in paths:
-            if p.is_file(): os.startfile(p)
+            if p.is_file(): FileUtils.open_path_in_os(p)
 
     def ctx_copy_file_to_os(self):
         paths = self._get_ctx_paths()
@@ -522,6 +544,14 @@ class FileWorkbenchApp:
                     if str(p.parent) != dst_dir: FileOps.move_file(str(p), dst_dir)
                 self.load_project(str(self.current_dir))
             except Exception as e: messagebox.showerror("错误", f"移动中断: {str(e)}")
+
+    def ctx_add_to_favorites(self):
+        paths = self._get_ctx_paths()
+        if not paths: return
+        group = self.current_group_var.get()
+        self.data_mgr.add_to_group(str(self.current_dir), group, [str(p) for p in paths])
+        self.refresh_fav_tree()
+        self.lbl_status.config(text=f"已将 {len(paths)} 个项目添加至收藏组: {group}")
 
     def open_batch_io_dialog(self): pass # 保持原有逻辑
 

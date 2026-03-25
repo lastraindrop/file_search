@@ -200,3 +200,24 @@ def test_search_generator_error_handling(mock_logger, mock_project):
         results = list(search_generator(mock_project, "main", "smart", ""))
         # Should not crash, just yield nothing or stop gracefully
         assert len(results) == 0
+
+def test_data_manager_concurrency(mock_project):
+    from core_logic import DataManager
+    import threading
+    dm = DataManager()
+    
+    def worker(i):
+        dm.update_project_settings(str(mock_project), {f"key_{i}": i})
+        
+    threads = []
+    for i in range(50):
+        t = threading.Thread(target=worker, args=(i,))
+        threads.append(t)
+        t.start()
+        
+    for t in threads:
+        t.join()
+        
+    data = dm.get_project_data(str(mock_project))
+    for i in range(50):
+        assert data[f"key_{i}"] == i

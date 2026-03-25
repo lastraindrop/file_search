@@ -12,6 +12,16 @@ const App = {
         isSidebarExpanded: false
     },
 
+    escapeHtml: (str) => {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    },
+
     init: async () => {
         App.loadRecentProjects();
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
@@ -78,10 +88,17 @@ const App = {
             // Load Project Configuration (Notes, Tags, etc.)
             const configRes = await fetch(`/api/project/config?path=${encodeURIComponent(path)}`);
             App.state.projConfig = await configRes.json();
+            
+            // Restore Staging List from config
+            if (App.state.projConfig.staging_list) {
+                App.state.staging = new Set(App.state.projConfig.staging_list);
+                App.renderStaging();
+            }
 
             const rootContainer = document.getElementById('fileTreeRoot');
             rootContainer.innerHTML = '';
             rootContainer.appendChild(App.renderTree(data.root));
+            App.renderFavorites();
             App.loadRecentProjects();
 
             // Sync settings from config if available and UI is empty
@@ -121,7 +138,7 @@ const App = {
         header.className = 'tree-node text-truncate animate-in';
         
         const icon = node.type === 'dir' ? '📁' : '📄';
-        header.innerHTML = `<span class="me-1">${icon}</span><span>${node.name}</span>`;
+        header.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>`;
         container.appendChild(header);
 
         if (node.type === 'dir') {
@@ -256,7 +273,7 @@ const App = {
             await fetch('/api/fs/rename', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ old_path: oldPath, new_name: newName })
+                body: JSON.stringify({ project_path: App.state.projectPath, path: oldPath, new_name: newName })
             });
             App.openProject(); // Refresh tree
             App.state.currentFile = null;
@@ -270,7 +287,7 @@ const App = {
             await fetch('/api/fs/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ path: App.state.currentFile })
+                body: JSON.stringify({ project_path: App.state.projectPath, paths: [App.state.currentFile] })
             });
             App.openProject();
             App.state.currentFile = null;
@@ -304,8 +321,8 @@ const App = {
         item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer';
         item.style.cursor = 'pointer';
         item.innerHTML = `
-            <div class="fw-bold text-info">${data.name}</div>
-            <div class="small text-muted text-truncate">${data.path}</div>
+            <div class="fw-bold text-info">${App.escapeHtml(data.name)}</div>
+            <div class="small text-muted text-truncate">${App.escapeHtml(data.path)}</div>
         `;
         item.onclick = () => App.previewFile(data.path);
         list.appendChild(item);
@@ -316,6 +333,7 @@ const App = {
         if (!App.state.currentFile) return;
         App.state.staging.add(App.state.currentFile);
         App.renderStaging();
+        App.syncStagingToBackend();
     },
 
     renderStaging: () => {
@@ -323,15 +341,107 @@ const App = {
         list.innerHTML = '';
         App.state.staging.forEach(path => {
             const item = document.createElement('div');
-            item.className = 'list-group-item d-flex justify-content-between p-1 bg-transparent border-0 text-white';
-            item.innerHTML = `<span class="text-truncate small">${path.split(/[\\\/]/).pop()}</span>
+            item.className = 'list-group-item d-flex justify-content-between p-1 bg-transparent border-0 text-white animate-in';
+            item.innerHTML = `<span class="text-truncate small" title="${path}">${App.escapeHtml(path.split(/[\\\/]/).pop())}</span>
                               <button class="btn btn-sm btn-link text-danger p-0" onclick="App.removeFromStaging('${path.replace(/\\/g, '\\\\')}')">×</button>`;
             list.appendChild(item);
         });
-        document.getElementById('tokenEstimate').innerText = App.state.staging.size;
+        App.updateStats();
     },
 
-    removeFromStaging: (path) => { App.state.staging.delete(path); App.renderStaging(); },
+    removeFromStaging: (path) => {
+        App.state.staging.delete(path);
+        App.renderStaging();
+        App.syncStagingToBackend();
+    },
+
+    syncStagingToBackend: async () => {
+        if (!App.state.projectPath) return;
+        await fetch('/api/project/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                project_path: App.state.projectPath,
+                settings: { "staging_list": Array.from(App.state.staging) }
+            })
+        });
+    },
+
+    renderFavorites: () => {
+        const list = document.getElementById('favoritesList');
+        const select = document.getElementById('favGroupSelect');
+        list.innerHTML = '';
+        
+        if (!App.state.projConfig || !App.state.projConfig.groups) return;
+
+        const groups = Object.keys(App.state.projConfig.groups);
+        
+        // Update group selector if empty
+        if (select.options.length === 0) {
+            groups.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g; opt.innerText = g;
+                select.appendChild(opt);
+            });
+            select.value = App.state.projConfig.current_group || "Default";
+        }
+
+        const currentGroup = select.value || "Default";
+        const files = App.state.projConfig.groups[currentGroup] || [];
+        
+        if (files.length === 0) {
+            list.innerHTML = '<div class="text-muted p-2 small">No favorites in this group.</div>';
+            return;
+        }
+
+        files.forEach(path => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item bg-transparent text-white border-0 p-2 cursor-pointer hover-bg d-flex justify-content-between align-items-center';
+            item.innerHTML = `
+                <div class="text-truncate flex-grow-1" onclick="App.previewFile('${path.replace(/\\/g, '\\\\')}')">
+                    <div class="fw-bold text-info small">${App.escapeHtml(path.split(/[\\\/]/).pop())}</div>
+                    <div class="text-muted" style="font-size:0.75rem">${App.escapeHtml(path)}</div>
+                </div>
+                <button class="btn btn-sm btn-link text-danger p-0" title="Unfavorite" onclick="App.toggleFavorite('${path.replace(/\\/g, '\\\\')}', 'remove')">×</button>
+            `;
+            list.appendChild(item);
+        });
+    },
+
+    addToFavorites: async () => {
+        if (!App.state.currentFile) return;
+        const group = document.getElementById('favGroupSelect').value || "Default";
+        await App.toggleFavorite(App.state.currentFile, 'add', group);
+    },
+
+    toggleFavorite: async (path, action, group = null) => {
+        if (!group) group = document.getElementById('favGroupSelect').value || "Default";
+        const res = await fetch('/api/project/favorites', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                project_path: App.state.projectPath,
+                group_name: group,
+                file_paths: [path],
+                action: action
+            })
+        });
+        
+        if (res.ok) {
+            // Hot update local config for instant UI feedback
+            if (!App.state.projConfig.groups[group]) App.state.projConfig.groups[group] = [];
+            if (action === 'add') {
+                if (!App.state.projConfig.groups[group].includes(path)) App.state.projConfig.groups[group].push(path);
+            } else {
+                App.state.projConfig.groups[group] = App.state.projConfig.groups[group].filter(p => p !== path);
+            }
+            App.renderFavorites();
+        }
+    },
+
+    updateStats: () => {
+        document.getElementById('tokenEstimate').innerText = App.state.staging.size;
+    },
 
     generateContext: async () => {
         if (App.state.staging.size === 0) return;

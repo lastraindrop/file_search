@@ -27,10 +27,12 @@ class GenerateRequest(BaseModel):
     files: list[str]
 
 class FileRenameRequest(BaseModel):
+    project_path: str
     path: str
     new_name: str
 
 class FileDeleteRequest(BaseModel):
+    project_path: str
     paths: list[str]
 
 class FileMoveRequest(BaseModel):
@@ -64,6 +66,12 @@ class TagRequest(BaseModel):
     file_path: str
     tag: str
     action: str  # "add" or "remove"
+
+class FavoriteRequest(BaseModel):
+    project_path: str
+    group_name: str
+    file_paths: list[str]
+    action: str # "add" or "remove"
 
 class SessionRequest(BaseModel):
     project_path: str
@@ -198,14 +206,16 @@ async def generate_context(req: GenerateRequest):
 # --- File Operations APIs ---
 @app.post("/api/fs/rename")
 async def rename_file(req: FileRenameRequest):
-    project_root = data_mgr.data.get("last_project")
-    if not project_root or not is_path_safe(req.path, project_root):
+    project_root = get_valid_project_root(req.project_path)
+    if not project_root:
+        raise HTTPException(status_code=403, detail="Access denied (Invalid project path)")
+        
+    if not is_path_safe(req.path, project_root):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    # Check new path for traversal
-    new_path_full = str(pathlib.Path(req.path).parent / req.new_name)
-    if not is_path_safe(new_path_full, project_root):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Path Traversal Check: Ensure new_name is just a name, not a path
+    if any(sep in req.new_name for sep in (os.sep, '/')):
+        raise HTTPException(status_code=400, detail="Invalid characters in new name")
 
     try:
         new_path = FileOps.rename_file(req.path, req.new_name)
@@ -215,9 +225,9 @@ async def rename_file(req: FileRenameRequest):
 
 @app.post("/api/fs/delete")
 async def delete_files(req: FileDeleteRequest):
-    project_root = data_mgr.data.get("last_project")
+    project_root = get_valid_project_root(req.project_path)
     if not project_root:
-        raise HTTPException(status_code=403, detail="No project open to perform delete operation.")
+        raise HTTPException(status_code=403, detail="Access denied (Invalid project path)")
 
     try:
         for p in req.paths:
@@ -284,6 +294,10 @@ async def api_archive(req: FileArchiveRequest):
             if not is_path_safe(p, req.project_root):
                 raise HTTPException(status_code=403, detail=f"Unsafe path: {p}")
         
+        # Ensure output_name is just a name, not a path to prevent traversal
+        if any(sep in req.output_name for sep in (os.sep, '/')):
+            raise HTTPException(status_code=400, detail="Invalid characters in output name")
+
         output_file = os.path.join(req.project_root, req.output_name)
         result_path = FileOps.archive_selection(req.paths, output_file, req.project_root)
         return {"status": "ok", "archive_path": result_path}
@@ -322,6 +336,14 @@ async def api_manage_tag(req: TagRequest):
 @app.post("/api/project/session")
 async def api_save_session(req: SessionRequest):
     data_mgr.save_session(req.project_path, req.data)
+    return {"status": "ok"}
+
+@app.post("/api/project/favorites")
+async def api_manage_favorites(req: FavoriteRequest):
+    if req.action == "add":
+        data_mgr.add_to_group(req.project_path, req.group_name, req.file_paths)
+    else:
+        data_mgr.remove_from_group(req.project_path, req.group_name, req.file_paths)
     return {"status": "ok"}
 
 @app.post("/api/project/settings")

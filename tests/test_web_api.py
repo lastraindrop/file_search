@@ -1,137 +1,131 @@
 import pytest
-from fastapi.testclient import TestClient
-from web_app import app
 import os
 import pathlib
+from fastapi.testclient import TestClient
+from web_app import app
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    return TestClient(app)
 
-def test_api_open_success(mock_project):
+@pytest.fixture
+def registered_client(client, mock_project):
+    client.post("/api/open", json={"path": str(mock_project)})
+    return client
+
+def test_api_open_success(client, mock_project):
     res = client.post("/api/open", json={"path": str(mock_project)})
     assert res.status_code == 200
     assert "name" in res.json()
 
-def test_api_open_invalid():
-    res = client.post("/api/open", json={"path": "C:/NonExistentPath/123/456"})
+def test_api_open_invalid(client):
+    # Cross-platform non-existent path
+    non_existent = str(pathlib.Path("/NonExistentPath/123/456").resolve()) if os.name != 'nt' else "C:/NonExistentPath/123/456"
+    res = client.post("/api/open", json={"path": non_existent})
     assert res.status_code == 404
 
-def test_api_open_system_dir_blocked():
-    """Verify that system directories (e.g. C:/Windows) are rejected."""
-    # Note: On Windows 'C:/Windows' exists, on Linux it doesn't but 'validate_project' 
-    # should catch the keyword or root drive rule.
-    res = client.post("/api/open", json={"path": "C:/"})
-    assert res.status_code == 400
-    
-    res = client.post("/api/open", json={"path": "C:/Windows"})
-    assert res.status_code == 400
+from unittest.mock import patch
 
-def test_api_children_metadata(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
-    res = client.post("/api/fs/children", json={"path": str(mock_project)})
+def test_api_open_system_dir_blocked(client):
+    """Verify that system directories are rejected."""
+    # Root directory
+    root_dir = str(pathlib.Path(os.path.abspath(os.sep)).resolve())
+    res = client.post("/api/open", json={"path": root_dir})
+    assert res.status_code in (400, 403)
+
+    # System directory (cross-platform blocked keywords)
+    sys_dir = "C:/Windows" if os.name == 'nt' else "/etc"
+    with patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.is_dir", return_value=True):
+        res = client.post("/api/open", json={"path": sys_dir})
+        assert res.status_code == 400
+
+def test_api_children_metadata(registered_client, mock_project):
+    res = registered_client.post("/api/fs/children", json={"path": str(mock_project)})
     assert res.status_code == 200
     children = res.json()["children"]
-    # Check if metadata fields exist
     for c in children:
-        assert "size" in c
-        assert "mtime" in c
-        assert "ext" in c
+        assert all(k in c for k in ("size", "mtime", "ext"))
         if c["type"] == "file" and c["name"] == "main.py":
             assert c["ext"] == ".py"
 
-def test_api_security_path_traversal(mock_project):
+def test_api_security_path_traversal(registered_client, mock_project):
     """Critical: Verify that accessing paths outside project root returns 403."""
-    client.post("/api/open", json={"path": str(mock_project)})
-    
-    # Attempt to access a sensitive system path (simulated)
-    unsafe_path = "C:/Windows/System32/drivers/etc/hosts"
-    res = client.get(f"/api/content?path={unsafe_path}")
+    unsafe_path = "C:/Windows/System32/drivers/etc/hosts" if os.name == 'nt' else "/etc/hosts"
+    res = registered_client.get(f"/api/content?path={unsafe_path}")
     assert res.status_code == 403
     assert "Access denied" in res.json()["detail"]
-    
-    # Attempt relative traversal
+
     traversal_path = str(mock_project / ".." / "some_other_file")
-    res = client.get(f"/api/content?path={traversal_path}")
+    res = registered_client.get(f"/api/content?path={traversal_path}")
     assert res.status_code == 403
 
-def test_fs_ops_security(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
-    
-    # Rename across projects (Unsafe)
-    res = client.post("/api/fs/rename", json={
+def test_fs_ops_security(registered_client, mock_project):
+    # Test rename with traversal in new_name (should be 400)
+    res = registered_client.post("/api/fs/rename", json={
+        "project_path": str(mock_project),
         "path": str(mock_project / "src" / "main.py"),
         "new_name": "../../hacker.py"
     })
+    assert res.status_code == 400
+    
+    # Test rename with unsafe source path (should be 403)
+    unsafe_path = "C:/Windows/system.ini" if os.name == 'nt' else "/etc/passwd"
+    res = registered_client.post("/api/fs/rename", json={
+        "project_path": str(mock_project),
+        "path": unsafe_path,
+        "new_name": "normal.py"
+    })
     assert res.status_code == 403
 
-def test_api_content_success(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
+def test_api_content_success(registered_client, mock_project):
     path = str(mock_project / "src" / "main.py")
-    res = client.get(f"/api/content?path={path}")
+    res = registered_client.get(f"/api/content?path={path}")
     assert res.status_code == 200
     assert "print" in res.json()["content"]
 
-def test_websocket_search_basic(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
-    with client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
-        # First message should be a result
+def test_websocket_search_basic(registered_client, mock_project):
+    with registered_client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
         data = ws.receive_json()
         assert "main.py" in data["name"]
-        assert "size" in data
-        assert "mtime" in data
-        # Last message should be DONE
+        assert all(k in data for k in ("size", "mtime"))
         data = ws.receive_json()
         assert data["status"] == "DONE"
 
-# --- Workspace Memory API Tests ---
-
-def test_workspace_memory_endpoints(mock_project):
-    # 1. Open
-    client.post("/api/open", json={"path": str(mock_project)})
-    
-    # 2. Add Note
+def test_workspace_memory_endpoints(registered_client, mock_project):
     test_file = str(mock_project / "src" / "main.py")
-    res = client.post("/api/project/note", json={
+    res = registered_client.post("/api/project/note", json={
         "project_path": str(mock_project),
         "file_path": test_file,
         "note": "Entry point"
     })
     assert res.status_code == 200
-    
-    # 3. Add Tag
-    res = client.post("/api/project/tag", json={
+
+    res = registered_client.post("/api/project/tag", json={
         "project_path": str(mock_project),
         "file_path": test_file,
         "tag": "v1",
         "action": "add"
     })
     assert res.status_code == 200
-    
-    # 4. Verify Config
-    res = client.get(f"/api/project/config?path={str(mock_project)}")
+
+    res = registered_client.get(f"/api/project/config?path={str(mock_project)}")
     data = res.json()
     assert data["notes"][test_file] == "Entry point"
     assert "v1" in data["tags"][test_file]
 
-def test_recent_projects_api(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
-    res = client.get("/api/recent_projects")
+def test_recent_projects_api(registered_client, mock_project):
+    res = registered_client.get("/api/recent_projects")
     assert any(p["path"] == str(mock_project) for p in res.json())
 
-# --- Advanced File Ops API Tests ---
-
-def test_fs_create_archive_api(mock_project):
-    client.post("/api/open", json={"path": str(mock_project)})
-    
-    # Create File
-    res = client.post("/api/fs/create", json={
+def test_fs_create_archive_api(registered_client, mock_project):
+    res = registered_client.post("/api/fs/create", json={
         "parent_path": str(mock_project),
         "name": "api_test.txt"
     })
     assert res.status_code == 200
     assert os.path.exists(mock_project / "api_test.txt")
-    
-    # Archive
-    res = client.post("/api/fs/archive", json={
+
+    res = registered_client.post("/api/fs/archive", json={
         "paths": [str(mock_project / "api_test.txt")],
         "output_name": "api_archive.zip",
         "project_root": str(mock_project)
@@ -139,61 +133,42 @@ def test_fs_create_archive_api(mock_project):
     assert res.status_code == 200
     assert os.path.exists(mock_project / "api_archive.zip")
 
-def test_fs_ops_safety_advanced(mock_project):
-    """Ensure advanced operations are also jailed to project root."""
-    client.post("/api/open", json={"path": str(mock_project)})
-    
-    # 1. Create outside (Jailed)
-    res = client.post("/api/fs/create", json={
-        "parent_path": "C:/Windows", # Or /etc on Linux
+def test_fs_ops_safety_advanced(registered_client, mock_project):
+    unsafe_dir = "C:/Windows" if os.name == 'nt' else "/etc"
+    res = registered_client.post("/api/fs/create", json={
+        "parent_path": unsafe_dir,
         "name": "evil.txt"
     })
     assert res.status_code == 403
-    
-    # 2. Archive outside (Jailed)
-    if os.name == 'nt':
-        unsafe_p = "C:/Windows/system.ini"
-    else:
-        unsafe_p = "/etc/passwd"
-        
-    res = client.post("/api/fs/archive", json={
+
+    unsafe_p = "C:/Windows/system.ini" if os.name == 'nt' else "/etc/passwd"
+    res = registered_client.post("/api/fs/archive", json={
         "paths": [unsafe_p],
         "output_name": "stolen.zip",
         "project_root": str(mock_project)
     })
     assert res.status_code == 403
 
-def test_fs_move_safety_permutations(mock_project):
-    """Verify move operation security across multiple scenarios."""
-    client.post("/api/open", json={"path": str(mock_project)})
+def test_fs_move_safety_permutations(registered_client, mock_project):
     src = str(mock_project / "src" / "main.py")
-    
-    # Move to absolute outside path (Blocked)
-    res = client.post("/api/fs/move", json={
+    unsafe_dir = "C:/Windows" if os.name == 'nt' else "/etc"
+    res = registered_client.post("/api/fs/move", json={
         "src_paths": [src],
-        "dst_dir": "C:/Windows"
+        "dst_dir": unsafe_dir
     })
-    assert res.status_code == 200 # App logic currently returns 200 but skips the move if unsafe
-    # Let's verify results matches "no moves made" if app logic skips or 403 if it errors
-    # Current implementation in web_app.py: api_move returns 200 and moved_paths=[] if skip
+    assert res.status_code == 200
     assert res.json()["new_paths"] == []
 
-def test_api_validation_errors():
-    """Verify Pydantic validation for malformed requests."""
-    # Missing required field 'path'
+def test_api_validation_errors(client):
     res = client.post("/api/open", json={})
-    assert res.status_code == 422 # Unprocessable Entity
-    
-    # Wrong type for 'files'
+    assert res.status_code == 422
     res = client.post("/api/generate", json={"files": "not-a-list"})
     assert res.status_code == 422
 
-def test_save_content_no_project_access(mock_project):
-    """Saving content to a file NOT in any registered project should fail."""
+def test_save_content_no_project_access(client):
     import tempfile
     with tempfile.NamedTemporaryFile(delete=False) as f:
         temp_path = f.name
-    
     try:
         res = client.post("/api/fs/save", json={
             "path": temp_path,
@@ -203,40 +178,30 @@ def test_save_content_no_project_access(mock_project):
     finally:
         if os.path.exists(temp_path): os.remove(temp_path)
 
-def test_project_settings_persistence(mock_project):
+def test_project_settings_persistence(registered_client, mock_project):
     proj_path = str(mock_project)
-    # Open project first to register it
-    client.post("/api/open", json={"path": proj_path})
-    
-    # Update settings
     new_excludes = "*.tmp *.bak"
-    res = client.post("/api/project/settings", json={
+    res = registered_client.post("/api/project/settings", json={
         "project_path": proj_path,
         "settings": {"excludes": new_excludes}
     })
     assert res.status_code == 200
-    
-    # Verify settings are persisted in config
-    res = client.get(f"/api/project/config?path={proj_path}")
+
+    res = registered_client.get(f"/api/project/config?path={proj_path}")
     assert res.status_code == 200
     assert res.json()["excludes"] == new_excludes
 
 def test_get_valid_project_root_logic(mock_project):
-    """Directly tests the helper logic for project root resolution."""
     from web_app import get_valid_project_root, data_mgr
-    
     p1 = str(mock_project)
     data_mgr.data["projects"][p1] = {"excludes": ""}
-    
-    # Subpath should resolve to p1
-    assert get_valid_project_root(str(mock_project / "src")) == p1
-    # Deep subpath should resolve to p1
-    assert get_valid_project_root(str(mock_project / "src" / "main.py")) == p1
-    # Outside path should not resolve
-    assert get_valid_project_root("C:/Windows") is None
 
-def test_multi_project_isolation():
-    """Verify that a path is only valid if it belongs to its registered project."""
+    assert get_valid_project_root(str(mock_project / "src")) == p1
+    assert get_valid_project_root(str(mock_project / "src" / "main.py")) == p1
+    unsafe_dir = "C:/Windows" if os.name == 'nt' else "/etc"
+    assert get_valid_project_root(unsafe_dir) is None
+
+def test_multi_project_isolation(client):
     import tempfile
     import shutil
     tmp_dir = tempfile.mkdtemp()
@@ -245,24 +210,20 @@ def test_multi_project_isolation():
         proj_a = tmp_path / "proj_a"
         proj_a.mkdir()
         (proj_a / "a.txt").touch()
-        
+
         proj_b = tmp_path / "proj_b"
         proj_b.mkdir()
         (proj_b / "b.txt").touch()
-        
-        # Register both
+
         client.post("/api/open", json={"path": str(proj_a)})
         client.post("/api/open", json={"path": str(proj_b)})
-        
-        # Access fine
+
         res = client.get(f"/api/content?path={str(proj_a / 'a.txt')}")
         assert res.status_code == 200
-        
-        # Access fine
+
         res = client.get(f"/api/content?path={str(proj_b / 'b.txt')}")
         assert res.status_code == 200
-        
-        # Fake a path that looks like its inside but isn't
+
         fake_path = str(tmp_path / "proj_c" / "c.txt")
         res = client.get(f"/api/content?path={fake_path}")
         assert res.status_code == 403

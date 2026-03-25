@@ -74,6 +74,9 @@
                     <li class="nav-item">
                         <button class="nav-link py-2" id="tab-search" data-bs-toggle="tab" data-bs-target="#panel-search" type="button">Results</button>
                     </li>
+                    <li class="nav-item">
+                        <button class="nav-link py-2" id="tab-fav" data-bs-toggle="tab" data-bs-target="#panel-fav" type="button">⭐ Favs</button>
+                    </li>
                 </ul>
 
                 <div class="tab-content flex-grow-1 overflow-auto bg-transparent" id="leftTabContent">
@@ -82,6 +85,12 @@
                     </div>
                     <div class="tab-pane fade p-2" id="panel-search">
                         <div id="searchResultsList" class="list-group list-group-flush small"></div>
+                    </div>
+                    <div class="tab-pane fade p-2" id="panel-fav">
+                        <div class="mb-2 d-flex gap-2 p-1">
+                            <select id="favGroupSelect" class="form-select form-select-sm" onchange="App.renderFavorites()"></select>
+                        </div>
+                        <div id="favoritesList" class="list-group list-group-flush small"></div>
                     </div>
                 </div>
             </div>
@@ -95,6 +104,7 @@
                     </div>
                     <div id="fileControls" class="btn-group btn-group-sm" style="display:none;">
                         <button class="btn btn-outline-success" onclick="App.addToStaging()" title="Add to Staging">⬇ Add</button>
+                        <button class="btn btn-outline-warning" onclick="App.addToFavorites()" title="Add to Favorites">⭐</button>
                         <button class="btn btn-outline-info" onclick="App.showFileNote()" title="Notes">📝</button>
                         <button class="btn btn-outline-light" onclick="App.renameFile()">✏️</button>
                         <button class="btn btn-outline-danger" onclick="App.deleteFile()">🗑️</button>

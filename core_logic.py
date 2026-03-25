@@ -41,37 +41,44 @@ class PathValidator:
         if not p.is_dir(): raise NotADirectoryError(f"Not a directory: {path_str}")
         
         # Block system directories
-        blocked_keywords = ['windows', 'system32', 'program files', 'etc', 'usr/bin', 'usr/sbin', 'boot']
-        p_str_low = str(p).lower().replace('\\', '/')
+        blocked_keywords = {'windows', 'system32', 'program files', 'etc', 'usr/bin', 'usr/sbin', 'boot', 'var', 'proc', 'sys', 'root', 'dev'}
         
+        # Exact path components check to avoid substrings matching innocent directories
+        path_parts = {part.lower() for part in p.parts}
+        found_blocks = blocked_keywords.intersection(path_parts)
+
         # Check if it's a drive root (e.g., C:/)
-        if len(p.parts) <= 1 or (os.name == 'nt' and len(p.parts) <= 1):
+        if len(p.parts) <= 1:
              raise PermissionError("Cannot register root drive as a project.")
 
-        for kw in blocked_keywords:
-            if kw in p_str_low:
-                raise PermissionError(f"Access to system directory '{kw}' is blocked for security.")
+        if found_blocks:
+            raise PermissionError(f"Access to system directory '{list(found_blocks)[0]}' is blocked for security.")
         return p
 
 CONFIG_FILE = get_app_dir() / "config.json"
 
 class DataManager:
     def __init__(self):
+        self._lock = threading.Lock()
         self.data = {"last_directory": "", "projects": {}}
         self.load()
 
     def load(self):
         if os.path.exists(CONFIG_FILE):
             try:
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    self.data.update(json.load(f))
+                with self._lock:
+                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                        self.data.update(json.load(f))
             except Exception as e:
                 logger.error(f"Config load error: {e}")
 
     def save(self):
         try:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=4)
+            with self._lock:
+                temp_file = CONFIG_FILE.with_suffix('.json.tmp')
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.data, f, ensure_ascii=False, indent=4)
+                os.replace(temp_file, CONFIG_FILE)
         except Exception as e:
             logger.error(f"Config save error: {e}")
 
@@ -83,7 +90,8 @@ class DataManager:
             "max_search_size_mb": 5,
             "notes": {},
             "tags": {},
-            "sessions": []
+            "sessions": [],
+            "staging_list": []
         }
         
         if path_str not in self.data["projects"]:
@@ -128,8 +136,37 @@ class DataManager:
             proj[k] = v
         self.save()
 
+    def add_to_group(self, project_path, group_name, file_paths):
+        """Adds a list of files to a specific group (favorites)."""
+        proj = self.get_project_data(project_path)
+        if group_name not in proj["groups"]:
+            proj["groups"][group_name] = []
+        for path in file_paths:
+            if path not in proj["groups"][group_name]:
+                proj["groups"][group_name].append(path)
+        self.save()
+
+    def remove_from_group(self, project_path, group_name, file_paths):
+        """Removes a list of files from a specific group."""
+        proj = self.get_project_data(project_path)
+        if group_name in proj["groups"]:
+            for path in file_paths:
+                if path in proj["groups"][group_name]:
+                    proj["groups"][group_name].remove(path)
+            self.save()
+
 # --- File Utilities ---
 class FileUtils:
+    @staticmethod
+    def open_path_in_os(path_str):
+        import sys, subprocess
+        if sys.platform == 'win32':
+            os.startfile(path_str)
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', str(path_str)], check=False)
+        else:
+            subprocess.run(['xdg-open', str(path_str)], check=False)
+
     @staticmethod
     def is_binary(file_path):
         """Checks if a file is binary by extension or content analysis."""
@@ -208,7 +245,7 @@ class FileUtils:
             '.bat': 'batch', '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'toml',
             '.dockerfile': 'dockerfile', 'dockerfile': 'dockerfile',
             '.vue': 'vue', '.svelte': 'svelte', '.php': 'php', '.rb': 'ruby',
-            '.rs': 'rust', '.swift': 'swift', '.kt': 'kotlin', '.dart': 'dart',
+            '.swift': 'swift', '.kt': 'kotlin', '.dart': 'dart',
             '.ini': 'ini', '.cfg': 'ini', '.log': 'text'
         }
         return mapping.get(suffix.lower(), '')
