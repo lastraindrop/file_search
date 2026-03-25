@@ -109,14 +109,19 @@ def get_project_config_for_path(path_str: str):
 
 # --- Helpers ---
 def get_node_info(path_obj, project_root):
-    """Returns a single node's info (non-recursive)."""
+    """Returns a single node's info (non-recursive) with formatted metadata."""
     rel = path_obj.relative_to(project_root) if project_root in path_obj.parents or project_root == path_obj else path_obj.name
     meta = FileUtils.get_metadata(path_obj)
+    
+    import datetime
+    mtime_fmt = datetime.datetime.fromtimestamp(meta["mtime"]).strftime('%Y-%m-%d %H:%M') if meta["mtime"] else ""
+    
     return {
         "name": path_obj.name,
         "path": str(path_obj),
         "type": "dir" if path_obj.is_dir() else "file",
         "has_children": path_obj.is_dir() and any(os.scandir(path_obj)) if path_obj.is_dir() else False,
+        "mtime_fmt": mtime_fmt,
         **meta
     }
 
@@ -160,6 +165,7 @@ async def open_project(req: ProjectOpenRequest):
     try:
         # Register project in data_mgr to allow safe path access
         p = PathValidator.validate_project(req.path)
+        logger.info(f"AUDIT - Opening project: {p}")
         data_mgr.data["last_project"] = str(p)
         data_mgr.get_project_data(str(p))
         data_mgr.save()
@@ -218,6 +224,7 @@ async def rename_file(req: FileRenameRequest):
         raise HTTPException(status_code=400, detail="Invalid characters in new name")
 
     try:
+        logger.info(f"AUDIT - Renaming: {req.path} -> {req.new_name}")
         new_path = FileOps.rename_file(req.path, req.new_name)
         return {"status": "ok", "new_path": new_path}
     except Exception as e:
@@ -234,6 +241,7 @@ async def delete_files(req: FileDeleteRequest):
             if not is_path_safe(p, project_root):
                 logger.warning(f"Blocking potentially unsafe delete access: {p}")
                 raise HTTPException(status_code=403, detail=f"Access denied for {p}")
+            logger.info(f"AUDIT - Deleting: {p}")
             FileOps.delete_file(p)
         return {"status": "ok"}
     except Exception as e:
@@ -252,6 +260,7 @@ async def api_move(req: FileMoveRequest):
                  logger.warning(f"Blocking potentially unsafe move: {src} -> {req.dst_dir}")
                  continue
 
+            logger.info(f"AUDIT - Moving: {src} -> {req.dst_dir}")
             new_path = FileOps.move_file(src, req.dst_dir)
             moved_paths.append(new_path)
         return {"status": "ok", "new_paths": moved_paths}
@@ -265,6 +274,7 @@ async def api_save(req: FileSaveRequest):
         if not get_valid_project_root(req.path):
              raise HTTPException(status_code=403, detail="Access denied")
 
+        logger.info(f"AUDIT - Saving content to: {req.path}")
         FileOps.save_content(req.path, req.content)
         return {"status": "ok"}
     except HTTPException: raise
@@ -277,6 +287,7 @@ async def api_create(req: FileCreateRequest):
     try:
         if not get_valid_project_root(req.parent_path):
              raise HTTPException(status_code=403, detail="Access denied")
+        logger.info(f"AUDIT - Creating {'dir' if req.is_dir else 'file'}: {req.name} in {req.parent_path}")
         new_path = FileOps.create_item(req.parent_path, req.name, req.is_dir)
         return {"status": "ok", "path": new_path}
     except HTTPException: raise
@@ -298,6 +309,7 @@ async def api_archive(req: FileArchiveRequest):
         if any(sep in req.output_name for sep in (os.sep, '/')):
             raise HTTPException(status_code=400, detail="Invalid characters in output name")
 
+        logger.info(f"AUDIT - Archiving {len(req.paths)} items to {req.output_name} in {req.project_root}")
         output_file = os.path.join(req.project_root, req.output_name)
         result_path = FileOps.archive_selection(req.paths, output_file, req.project_root)
         return {"status": "ok", "archive_path": result_path}

@@ -138,7 +138,8 @@ const App = {
         header.className = 'tree-node text-truncate animate-in';
         
         const icon = node.type === 'dir' ? '📁' : '📄';
-        header.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>`;
+        header.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>
+                            <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}</span>`;
         container.appendChild(header);
 
         if (node.type === 'dir') {
@@ -186,7 +187,8 @@ const App = {
         document.getElementById('codeEditor').style.display = 'none';
         document.getElementById('preBlock').style.display = 'block';
 
-        document.getElementById('currentFileName').innerText = path.split(/[\\\/]/).pop();
+        const fileName = path.split(/[\\\/]/).pop();
+        document.getElementById('currentFileName').innerText = fileName;
         App.updateFileMetaUI(path);
 
         const codeEl = document.getElementById('codePreview');
@@ -199,6 +201,17 @@ const App = {
             codeEl.innerText = data.content;
             hljs.highlightElement(codeEl);
         } catch (e) { codeEl.innerText = "Error loading file."; }
+    },
+
+    copyPath: async () => {
+        if (!App.state.currentFile) return;
+        try {
+            await navigator.clipboard.writeText(App.state.currentFile);
+            const btn = document.querySelector('[onclick="App.copyPath()"]');
+            const originalText = btn.innerText;
+            btn.innerText = "✅";
+            setTimeout(() => btn.innerText = "🔗", 1000);
+        } catch (e) { alert("Failed to copy path"); }
     },
 
     updateFileMetaUI: (path) => {
@@ -321,7 +334,10 @@ const App = {
         item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer';
         item.style.cursor = 'pointer';
         item.innerHTML = `
-            <div class="fw-bold text-info">${App.escapeHtml(data.name)}</div>
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="fw-bold text-info">${App.escapeHtml(data.name)}</div>
+                <div class="text-muted x-small" style="font-size:0.7rem">${data.mtime_fmt || ''}</div>
+            </div>
             <div class="small text-muted text-truncate">${App.escapeHtml(data.path)}</div>
         `;
         item.onclick = () => App.previewFile(data.path);

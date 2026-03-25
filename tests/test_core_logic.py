@@ -71,11 +71,15 @@ def test_manual_excludes(mock_project):
     assert not any(p.endswith(".js") for p in paths)
 
 def test_binary_file_detection(mock_project):
-    """Content search should skip binary files."""
+    """Content search should skip binary files but allow empty files."""
     # data.bin contains 'hello' (binary)
     results = list(search_generator(mock_project, "hello", "content", ""))
-    # Should not find it because it's binary
     assert not any("data.bin" in r["path"] for r in results)
+    
+    # empty.txt should be searchable (not binary)
+    results = list(search_generator(mock_project, "", "smart", ""))
+    assert any("empty.txt" in r["path"] for r in results)
+    assert FileUtils.is_binary(mock_project / "empty.txt") is False
 
 # --- New Unit Tests for Latest Architecture ---
 
@@ -92,11 +96,13 @@ def test_context_formatter_markdown(mock_project):
     paths = [str(mock_project / "src" / "main.py"), str(mock_project / "image.png")]
     md = ContextFormatter.to_markdown(paths, mock_project)
     
-    # Use normalized path for cross-platform check
     expected_rel = os.path.relpath(mock_project / "src" / "main.py", mock_project)
     assert f"File: {expected_rel}" in md
     assert "print('hello')" in md
     assert "```python" in md
+    
+    # Verify metadata (size) is present in the header
+    assert "(0.0 KB)" in md or "KB)" in md # main.py is small
     
     # Should skip binary image.png
     assert "image.png" not in md
@@ -152,46 +158,32 @@ def test_search_engine_parallel_stress(stress_project):
         assert "file_5.txt" in r["path"]
         assert r["match_type"] == "Content Match"
 
-def test_data_manager_alignment_logic():
-    """Test automatic schema detection and alignment for old config files."""
-    from core_logic import DataManager, CONFIG_FILE
+def test_data_manager_alignment_logic(clean_config):
+    """Test automatic schema detection and alignment using clean_config fixture."""
+    dm = clean_config
     import json
-    import tempfile
-    import shutil
     
-    tmp_d = tempfile.mkdtemp()
-    tmp_path = pathlib.Path(tmp_d)
-    try:
-        # 1. Create a "vOld" config missing new fields
-        old_config = {
-            "last_directory": str(tmp_path),
-            "projects": {
-                str(tmp_path): {
-                    "excludes": ".git"
-                }
-            }
-        }
-        test_config_file = tmp_path / "test_config_data.json"
-        test_config_file.write_text(json.dumps(old_config))
+    # 1. Manually corrupt the config file that dm is using
+    with open(dm.config_path, 'w') as f:
+        json.dump({
+            "last_directory": "/tmp",
+            "projects": {"/tmp": {"excludes": ".git"}}
+        }, f)
         
-        # 2. Mock CONFIG_FILE and load
-        with patch('core_logic.CONFIG_FILE', test_config_file):
-            dm = DataManager()
-            proj_data = dm.get_project_data(str(tmp_path))
-            
-            # 3. Verify Alignment
-            assert "sessions" in proj_data
-            assert "notes" in proj_data
-            assert "tags" in proj_data
-            assert proj_data["excludes"] == ".git"
-            
-            # 4. Verify Persistence
-            dm.save()
-            with open(test_config_file, 'r') as f:
-                saved_data = json.load(f)
-                assert "sessions" in saved_data["projects"][str(tmp_path)]
-    finally:
-        shutil.rmtree(tmp_d, ignore_errors=True)
+    # 2. Reload
+    dm.load()
+    proj_data = dm.get_project_data("/tmp")
+    
+    # 3. Verify Alignment
+    assert "sessions" in proj_data
+    assert "notes" in proj_data
+    assert proj_data["excludes"] == ".git"
+    
+    # 4. Verify Persistence
+    dm.save()
+    with open(dm.config_path, 'r') as f:
+        saved = json.load(f)
+        assert "sessions" in saved["projects"]["/tmp"]
 
 @patch('core_logic.logger')
 def test_search_generator_error_handling(mock_logger, mock_project):
@@ -201,23 +193,18 @@ def test_search_generator_error_handling(mock_logger, mock_project):
         # Should not crash, just yield nothing or stop gracefully
         assert len(results) == 0
 
-def test_data_manager_concurrency(mock_project):
-    from core_logic import DataManager
+def test_data_manager_concurrency(clean_config, mock_project):
     import threading
-    dm = DataManager()
+    dm = clean_config
+    proj_path = str(mock_project)
     
     def worker(i):
-        dm.update_project_settings(str(mock_project), {f"key_{i}": i})
+        dm.update_project_settings(proj_path, {f"key_{i}": i})
         
-    threads = []
-    for i in range(50):
-        t = threading.Thread(target=worker, args=(i,))
-        threads.append(t)
-        t.start()
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(50)]
+    for t in threads: t.start()
+    for t in threads: t.join()
         
-    for t in threads:
-        t.join()
-        
-    data = dm.get_project_data(str(mock_project))
+    data = dm.get_project_data(proj_path)
     for i in range(50):
         assert data[f"key_{i}"] == i

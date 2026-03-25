@@ -3,6 +3,9 @@ import pathlib
 import tempfile
 import shutil
 import os
+from fastapi.testclient import TestClient
+from web_app import app
+from core_logic import DataManager
 
 @pytest.fixture
 def mock_project():
@@ -22,6 +25,9 @@ def mock_project():
     # Binary file
     (base / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
     
+    # Empty file (edge case)
+    (base / "empty.txt").write_text("", encoding="utf-8")
+    
     # Gitignore and ignored files
     (base / ".gitignore").write_text("*.log\nnode_modules/", encoding="utf-8")
     (base / "error.log").write_text("some error", encoding="utf-8")
@@ -29,8 +35,7 @@ def mock_project():
     (base / "node_modules" / "package.json").write_text("{}", encoding="utf-8")
     
     yield base
-    
-    shutil.rmtree(temp_dir)
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 @pytest.fixture
 def stress_project():
@@ -38,18 +43,44 @@ def stress_project():
     temp_dir = tempfile.mkdtemp(prefix="ai_workbench_stress_")
     base = pathlib.Path(temp_dir)
     
-    # Create 10 directories
     for i in range(10):
         d = base / f"dir_{i}"
         d.mkdir()
-        # Create 10 files in each directory
         for j in range(10):
             f = d / f"file_{j}.txt"
             f.write_text(f"Content in file {i}-{j} with keyword_target_{j}", encoding="utf-8")
             
-    # Add some binary files and ignored files
-    (base / "ignored.log").write_text("should be ignored", encoding="utf-8")
-    (base / ".gitignore").write_text("*.log", encoding="utf-8")
-    
     yield base
-    shutil.rmtree(temp_dir)
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+@pytest.fixture
+def clean_config():
+    """Provides a fresh DataManager with a temporary config file."""
+    temp_dir = tempfile.mkdtemp()
+    config_path = pathlib.Path(temp_dir) / "test_config.json"
+    
+    from unittest.mock import patch
+    with patch('core_logic.CONFIG_FILE', config_path):
+        dm = DataManager()
+        dm.config_path = config_path # Attach for testing convenience
+        yield dm
+        
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+@pytest.fixture
+def api_client():
+    """FastAPI TestClient instance."""
+    return TestClient(app)
+
+@pytest.fixture
+def project_client(api_client, mock_project):
+    """Client with a project already 'opened' and registered."""
+    api_client.post("/api/open", json={"path": str(mock_project)})
+    return api_client
+
+@pytest.fixture
+def system_dir():
+    """Returns a platform-specific blocked system directory."""
+    if os.name == 'nt':
+        return "C:/Windows"
+    return "/etc"

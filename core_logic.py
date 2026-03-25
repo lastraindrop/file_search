@@ -172,6 +172,12 @@ class FileUtils:
         """Checks if a file is binary by extension or content analysis."""
         path = pathlib.Path(file_path)
         
+        # 0. Handle non-existent or zero-byte files
+        try:
+            if not path.exists(): return False
+            if path.stat().st_size == 0: return False # Empty files are text-safe
+        except Exception: return True # Locked or inaccessible
+
         # 1. Fast path: Common text extensions
         text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', '.xml', '.sql', '.c', '.cpp', '.h', '.java'}
         if path.suffix.lower() in text_exts:
@@ -301,7 +307,7 @@ class FileUtils:
 class ContextFormatter:
     @staticmethod
     def to_markdown(paths, root_dir=None):
-        """Converts a list of file paths to a formatted markdown block."""
+        """Converts a list of file paths to a formatted markdown block with metadata."""
         blocks = []
         for p_str in paths:
             p = pathlib.Path(p_str)
@@ -310,9 +316,17 @@ class ContextFormatter:
             try:
                 # Use relative path if root_dir is provided
                 display_name = p.relative_to(root_dir) if root_dir and root_dir in p.parents else p.name
+                
+                # Get metadata
+                stat = p.stat()
+                size_kb = stat.st_size / 1024
+                
                 content = p.read_text('utf-8', 'ignore')
                 lang = FileUtils.get_language_tag(p.suffix)
-                blocks.append(f"File: {display_name}\n```{lang}\n{content}\n```\n\n")
+                
+                # Enhanced format with metadata header
+                header = f"File: {display_name} ({size_kb:.1f} KB)\n"
+                blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
             except Exception as e:
                 logger.error(f"Failed to format {p_str}: {e}")
         return "".join(blocks)
@@ -468,6 +482,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                     
                     if found: return True != is_inverse
             return False != is_inverse
+        except PermissionError:
+            logger.debug(f"Permission denied for content match: {path}")
+            return False
         except Exception as e:
             logger.debug(f"Content match error for {path}: {e}")
             return False
@@ -525,12 +542,17 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         **meta
                     }
                     
-                    # Yield results in batches to keep the generator responsive
+                    # Adaptive Batching: Yield if we have enough results or after a short timeout
                     if len(content_futures) >= 20:
-                        # Non-blocking check for completed futures? 
-                        # In a generator, we can wait a bit or just process what's done.
-                        # For now, let's process them to maintain flow.
-                        for f in list(as_completed(content_futures, timeout=0.1)):
+                        # Process completed futures
+                        batch = [f for f in content_futures if f.done()]
+                        if not batch: # If none are done, wait briefly for at least one
+                            try:
+                                next(as_completed(content_futures, timeout=0.05))
+                                batch = [f for f in content_futures if f.done()]
+                            except: pass
+                            
+                        for f in batch:
                             try:
                                 is_match = f.result()
                                 info = content_futures.pop(f)

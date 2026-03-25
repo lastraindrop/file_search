@@ -11,13 +11,13 @@
 *   **文件名隔离**: 在重命名和归档操作中，严格限制文件名不得包含路径分隔符。
 *   **XSS 防护**: Web 前端在渲染任何用户可控的文件名/路径时，必须通过 `App.escapeHtml` 进行转义，禁止直接使用 `.innerHTML` 拼接。
 *   **规范**: 禁止使用 `os.path.join` 处理未经过滤的用户输入路径，一律使用 `pathlib` 结合 `is_safe` 方法。
+*   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志，注明发起路径与目标动作。
 
 ### 2. 参数一致性与动态对齐 (Consistency)
 保持跨端 (Tkinter/Web) 参数一致性是维护的核心：
-*   **无状态 API (Statelessness)**: Web 端接口严禁依赖后台全局变量（如 `last_project`）。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
-*   **Schema 动态对齐**: `DataManager.get_project_data` 在加载配置时，会自动对比 `DEFAULT_SCHEMA` 并补全缺失字段（如 `staging_list`, `notes`），确保旧版配置无缝升级至最新架构。
-*   **数据一致性**: 待处理清单 (Staging) 变动时需立即调用持久化接口，确保在异常崩溃或跨端切换时数据不丢失。
-*   **Pydantic 模型**: Web 端强制使用 Pydantic 提供严格的入参类型校验。
+*   **无状态 API (Statelessness)**: Web 端接口严禁依赖后台全局变量。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
+*   **Schema 动态对齐**: `DataManager` 具备“故障自愈”能力。加载配置时，会自动对比 `DEFAULT_SCHEMA` 并补全缺失字段（如 `mtime_fmt`, `tags`），确保旧版配置无缝升级至最新架构，避免因字段缺失导致的运行时错误。
+*   **数据原子性**: 采用 `os.replace` 确保配置在写入瞬间的完整性，防止断电或崩溃导致 JSON 文件损坏。
 
 ### 3. 并发安全与数据一致性 (Concurrency Safety)
 *   **线程锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load` 和 `save` 操作均处于线程安全上下文中，防止多端或高频 API 请求引发的竞态条件。
@@ -25,10 +25,10 @@
 *   **跨平台 IO 分发**: 避免直接使用如 `os.startfile` 等强依赖系统的 API。所有的原生系统调用均已抽象入 `FileUtils.open_path_in_os`，依据 `sys.platform` 进行动态分发。
 
 ## 🧪 测试方法论
-本项目坚持 **100% 关键路径覆盖**。
-*   **Mock 系统**: 使用 `pytest` 配合 `unittest.mock` 对操作系统级指令（如 PowerShell）进行隔离测试。
-*   **跨平台 Fixtures**: 测试用例内部严禁硬编码特定的操作系统路径（如 `C:/Windows`）。采用动态路径生成与 `mock.patch` 探测相结合，确保测试可以在任何 OS 甚至无环境磁盘上运行，杜绝 False Negative。
-*   **并发压力测试**: 对核心引擎（如多线程搜索、配置读写锁）进行高强度并发（Stress Testing）覆盖。
+本项目坚持 **100% 关键路径覆盖** 且遵循 **“零硬编码”原则**。
+*   **零硬编码 (Zero Hardcoding)**: 测试 fixture 严禁直接定义驱动器号或系统绝对路径（如 `C:/Windows`）。应使用 `system_dir` 等动态感知 fixture，确保测试在任何环境下皆可即插即用，杜绝 False Negative。
+*   **Mock 边界**: 使用 `pytest` 对 PowerShell 或 subprocess 调用进行隔离 Mock，确保逻辑验证不依赖于特定宿主环境的权限。
+*   **并发压力测试**: 对核心引擎（如自适应检索、配置读写锁）进行 Stress Testing 覆盖。
 *   **测试运行**: 
     ```bash
     python -m pytest
