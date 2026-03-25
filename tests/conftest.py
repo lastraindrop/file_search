@@ -10,7 +10,7 @@ from core_logic import DataManager
 @pytest.fixture
 def mock_project():
     """Creates a temporary project directory with various files."""
-    temp_dir = tempfile.mkdtemp(prefix="ai_workbench_mock_")
+    temp_dir = tempfile.mkdtemp(prefix="fctx_mock_")
     base = pathlib.Path(temp_dir)
     
     # Standard files
@@ -40,7 +40,7 @@ def mock_project():
 @pytest.fixture
 def stress_project():
     """Creates a temporary project with multiple directories and 100+ files."""
-    temp_dir = tempfile.mkdtemp(prefix="ai_workbench_stress_")
+    temp_dir = tempfile.mkdtemp(prefix="fctx_stress_")
     base = pathlib.Path(temp_dir)
     
     for i in range(10):

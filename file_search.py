@@ -6,16 +6,16 @@ import threading
 import queue
 import sys
 import subprocess
-from core_logic import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter
+from core_logic import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge
 
 # --- Constants ---
 PREVIEW_LIMIT = 100000  # Max characters to display in preview
 TOKEN_RATIO = 4         # Character to token ratio estimate
 SEARCH_POLL_MS = 100    # Queue polling interval
-class FileWorkbenchApp:
+class FileCortexApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Python 上下文收集助手 v3.1 (Core 分离版)")
+        self.root.title("FileCortex v5.0 | 工作区编排助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -91,6 +91,9 @@ class FileWorkbenchApp:
         self.tab_fav = ttk.Frame(self.right_nav)
         self.right_nav.add(self.tab_fav, text="📚 收藏")
         self._init_fav_tab()
+        self.tab_tools = ttk.Frame(self.right_nav)
+        self.right_nav.add(self.tab_tools, text="⚙️ 工具")
+        self._init_tools_tab()
 
     def _init_preview_area(self):
         self.preview_frame = ttk.LabelFrame(self.main_paned, text="📄 内容预览 (只读)", padding=5)
@@ -171,9 +174,34 @@ class FileWorkbenchApp:
         self.tree_staging.pack(fill=tk.BOTH, expand=True)
         
         act = ttk.Frame(self.tab_staging, padding=5); act.pack(fill=tk.X)
-        ttk.Button(act, text="🚀 生成 AI 上下文", command=self.copy_all_staging_content).pack(fill=tk.X, pady=2)
+        ttk.Button(act, text="🚀 导出工作区上下文", command=self.copy_all_staging_content).pack(fill=tk.X, pady=2)
         ttk.Button(act, text="清空", command=self.clear_staging).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(act, text="移除", command=self.remove_staging_selection).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+
+    def _init_tools_tab(self):
+        f = self.tab_tools
+        self.tools_scroll = scrolledtext.ScrolledText(f, height=5, font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
+        self.tools_scroll.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.tools_scroll.config(state=tk.DISABLED)
+        # Visual Tags for Logs
+        self.tools_scroll.tag_config('green', foreground='#4ade80')
+        self.tools_scroll.tag_config('red', foreground='#f87171')
+        self.tools_scroll.tag_config('cyan', foreground='#38bdf8')
+        self.tools_scroll.tag_config('yellow', foreground='#facc15')
+        
+        # Action Group Panels
+        action_frame = ttk.Frame(f, padding=5)
+        action_frame.pack(fill=tk.X)
+        
+        cat_group = ttk.LabelFrame(action_frame, text="⚡ 快速分类 (移动)", padding=5)
+        cat_group.pack(fill=tk.X, pady=(0, 5))
+        self.cat_btn_frame = ttk.Frame(cat_group)
+        self.cat_btn_frame.pack(fill=tk.X)
+        
+        tool_group = ttk.LabelFrame(action_frame, text="🛠️ 工具集 (脚本)", padding=5)
+        tool_group.pack(fill=tk.X)
+        self.tool_btn_frame = ttk.Frame(tool_group)
+        self.tool_btn_frame.pack(fill=tk.X)
 
     def _init_context_menu(self):
         self.context_menu = tk.Menu(self.root, tearoff=0)
@@ -233,9 +261,59 @@ class FileWorkbenchApp:
 
         self._refresh_tree() # Call _refresh_tree here
         self.refresh_fav_tree()
+        self.refresh_tools_ui()
         self.data_mgr.save()
         self.on_search_input()
         self.update_stats()
+
+    def refresh_tools_ui(self):
+        for w in self.cat_btn_frame.winfo_children(): w.destroy()
+        for w in self.tool_btn_frame.winfo_children(): w.destroy()
+        
+        cats = self.current_proj_config.get("quick_categories", {})
+        for name in cats:
+            ttk.Button(self.cat_btn_frame, text=name, width=10, 
+                       command=lambda n=name: self.on_categorize_staged(n)).pack(side=tk.LEFT, padx=2)
+        
+        tools = self.current_proj_config.get("custom_tools", {})
+        for name in tools:
+            ttk.Button(self.tool_btn_frame, text=name, width=10, 
+                       command=lambda n=name: self.on_execute_tool_staged(n)).pack(side=tk.LEFT, padx=2)
+
+    def on_categorize_staged(self, cat_name):
+        if not self.staging_files: return
+        try:
+            moved = FileOps.batch_categorize(str(self.current_dir), self.staging_files, cat_name)
+            messagebox.showinfo("成功", f"已将 {len(moved)} 个文件移动至 {cat_name}")
+            self.clear_staging()
+            self.on_refresh()
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def on_execute_tool_staged(self, tool_name):
+        if not self.staging_files:
+            messagebox.showwarning("提示", "执行工具前，请先添加文件到清单。")
+            return
+        
+        template = self.current_proj_config.get("custom_tools", {}).get(tool_name)
+        if not template: return
+        
+        self.tools_scroll.config(state=tk.NORMAL)
+        self.tools_scroll.insert(tk.END, f"\n> 执行: {tool_name}\n", 'cyan')
+        for p_str in self.staging_files:
+            file_name = pathlib.Path(p_str).name
+            res = ActionBridge.execute_tool(template, p_str, self.current_dir)
+            if "error" in res:
+                self.tools_scroll.insert(tk.END, f"FAIL: {file_name} - {res['error']}\n", 'red')
+            else:
+                tag = 'green' if res['exit_code'] == 0 else 'red'
+                self.tools_scroll.insert(tk.END, f"DONE: {file_name} (Exit: {res['exit_code']})\n", tag)
+                if res['stdout']:
+                    out_text = res['stdout'][:200]
+                    self.tools_scroll.insert(tk.END, f"  └ {out_text.strip()}\n", 'yellow')
+        
+        self.tools_scroll.config(state=tk.DISABLED)
+        self.tools_scroll.see(tk.END)
 
     def _refresh_tree(self):
         for item in self.tree_proj.get_children(): self.tree_proj.delete(item)
@@ -275,9 +353,8 @@ class FileWorkbenchApp:
                 p = pathlib.Path(path_str)
                 rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
                 
-                import datetime
-                dt = datetime.datetime.fromtimestamp(res["mtime"]).strftime('%Y-%m-%d %H:%M')
-                sz_str = f"{res['size']/1024:.1f} KB" if res['size'] < 1024*1024 else f"{res['size']/(1024*1024):.1f} MB"
+                sz_str = FormatUtils.format_size(res['size'])
+                dt = FormatUtils.format_datetime(res['mtime'])
                 
                 self.tree_search.insert("", "end", values=(
                     ("📁 " if p.is_dir() else "📄 ") + p.name, 
@@ -383,8 +460,8 @@ class FileWorkbenchApp:
                 p = pathlib.Path(p_str)
                 if not p.exists(): continue
                 self.staging_files.append(p_str)
-                sz = p.stat().st_size if p.is_file() else 0
-                self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=("", p_str, f"{sz/1024:.1f}KB"))
+                sz_str = FormatUtils.format_size(sz)
+                self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=("", p_str, sz_str))
         
         if save_to_disk and self.current_proj_config:
             self.current_proj_config["staging_list"] = self.staging_files
@@ -556,4 +633,4 @@ class FileWorkbenchApp:
     def open_batch_io_dialog(self): pass # 保持原有逻辑
 
 if __name__ == "__main__":
-    root = tk.Tk(); ttk.Style().theme_use('clam'); app = FileWorkbenchApp(root); root.mainloop()
+    root = tk.Tk(); ttk.Style().theme_use('clam'); app = FileCortexApp(root); root.mainloop()

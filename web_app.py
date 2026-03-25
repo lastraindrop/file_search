@@ -9,9 +9,9 @@ import os
 import pathlib
 import json
 import asyncio
-from core_logic import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, logger
+from core_logic import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, FormatUtils, ActionBridge, logger
 
-app = FastAPI(title="AI Context Workbench Web")
+app = FastAPI(title="FileCortex v5.0 API")
 
 # --- Static & Templates ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -81,6 +81,16 @@ class ProjectSettingsRequest(BaseModel):
     project_path: str
     settings: dict
 
+class CategorizeRequest(BaseModel):
+    project_path: str
+    paths: list[str]
+    category_name: str
+
+class ToolExecuteRequest(BaseModel):
+    project_path: str
+    paths: list[str]
+    tool_name: str
+
 def is_path_safe(target_path: str, project_root: str) -> bool:
     """Delegates to PathValidator for safe traversal checks."""
     return PathValidator.is_safe(target_path, project_root)
@@ -113,8 +123,7 @@ def get_node_info(path_obj, project_root):
     rel = path_obj.relative_to(project_root) if project_root in path_obj.parents or project_root == path_obj else path_obj.name
     meta = FileUtils.get_metadata(path_obj)
     
-    import datetime
-    mtime_fmt = datetime.datetime.fromtimestamp(meta["mtime"]).strftime('%Y-%m-%d %H:%M') if meta["mtime"] else ""
+    mtime_fmt = FormatUtils.format_datetime(meta["mtime"])
     
     return {
         "name": path_obj.name,
@@ -122,6 +131,7 @@ def get_node_info(path_obj, project_root):
         "type": "dir" if path_obj.is_dir() else "file",
         "has_children": path_obj.is_dir() and any(os.scandir(path_obj)) if path_obj.is_dir() else False,
         "mtime_fmt": mtime_fmt,
+        "size_fmt": FormatUtils.format_size(meta["size"]),
         **meta
     }
 
@@ -326,7 +336,7 @@ async def get_proj_config(path: str):
 
 @app.get("/api/recent_projects")
 async def get_recent_projects():
-    return [{"path": p, "name": os.path.basename(p)} for p in data_mgr.data["projects"].keys()]
+    return [{"path": p, "name": os.path.basename(p)} for p in data_mgr.data["projects"].keys() if os.path.exists(p)]
 
 @app.post("/api/project/note")
 async def api_add_note(req: NoteRequest):
@@ -362,6 +372,42 @@ async def api_manage_favorites(req: FavoriteRequest):
 async def update_settings(req: ProjectSettingsRequest):
     data_mgr.update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
+
+# --- FileCortex Action APIs ---
+@app.post("/api/actions/categorize")
+async def api_categorize(req: CategorizeRequest):
+    try:
+        if not get_valid_project_root(req.project_path):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        logger.info(f"AUDIT - Batch categorizing {len(req.paths)} items to '{req.category_name}'")
+        moved = FileOps.batch_categorize(req.project_path, req.paths, req.category_name)
+        return {"status": "ok", "moved_count": len(moved), "paths": moved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/actions/execute")
+async def api_execute_tool(req: ToolExecuteRequest):
+    try:
+        project_root = get_valid_project_root(req.project_path)
+        if not project_root:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        proj_config = data_mgr.get_project_data(req.project_path)
+        template = proj_config["custom_tools"].get(req.tool_name)
+        if not template:
+            raise HTTPException(status_code=404, detail="Tool template not found")
+        
+        results = []
+        for p in req.paths:
+            if not is_path_safe(p, project_root):
+                continue
+            res = ActionBridge.execute_tool(template, p, project_root)
+            results.append({"path": p, **res})
+            
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # --- WebSocket Search ---
 @app.websocket("/ws/search")

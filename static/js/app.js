@@ -22,6 +22,25 @@ const App = {
             .replace(/'/g, "&#039;");
     },
 
+    showToast: (message, type = 'success') => {
+        const container = document.querySelector('.toast-container');
+        const toastEl = document.createElement('div');
+        toastEl.className = `toast align-items-center text-bg-${type} border-0 animate-in mb-2`;
+        toastEl.setAttribute('role', 'alert');
+        toastEl.setAttribute('aria-live', 'assertive');
+        toastEl.setAttribute('aria-atomic', 'true');
+        toastEl.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body fw-bold">${App.escapeHtml(message)}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        `;
+        container.appendChild(toastEl);
+        const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+        toast.show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    },
+
     init: async () => {
         App.loadRecentProjects();
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
@@ -33,6 +52,10 @@ const App = {
         if (savedExcludes) document.getElementById('excludeInput').value = savedExcludes;
         const savedMode = localStorage.getItem('searchMode');
         if (savedMode) document.getElementById('searchMode').value = savedMode;
+        
+        // Restore sidebar state
+        const sidebarState = localStorage.getItem('sidebarExpanded');
+        if (sidebarState === 'true') App.toggleSidebar();
         
         // Auto-load last project if exists
         const lastProj = localStorage.getItem('lastProjectPath');
@@ -46,7 +69,8 @@ const App = {
     toggleSidebar: () => {
         const sb = document.getElementById('workspaceSidebar');
         App.state.isSidebarExpanded = !App.state.isSidebarExpanded;
-        sb.style.width = App.state.isSidebarExpanded ? '200px' : '60px';
+        sb.style.width = App.state.isSidebarExpanded ? '210px' : '60px';
+        localStorage.setItem('sidebarExpanded', App.state.isSidebarExpanded);
     },
 
     loadRecentProjects: async () => {
@@ -99,6 +123,7 @@ const App = {
             rootContainer.innerHTML = '';
             rootContainer.appendChild(App.renderTree(data.root));
             App.renderFavorites();
+            App.renderActions();
             App.loadRecentProjects();
 
             // Sync settings from config if available and UI is empty
@@ -138,8 +163,9 @@ const App = {
         header.className = 'tree-node text-truncate animate-in';
         
         const icon = node.type === 'dir' ? '📁' : '📄';
+        const metaInfo = node.type === 'file' ? ` (${node.size_fmt})` : '';
         header.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>
-                            <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}</span>`;
+                            <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}${metaInfo}</span>`;
         container.appendChild(header);
 
         if (node.type === 'dir') {
@@ -208,10 +234,10 @@ const App = {
         try {
             await navigator.clipboard.writeText(App.state.currentFile);
             const btn = document.querySelector('[onclick="App.copyPath()"]');
-            const originalText = btn.innerText;
             btn.innerText = "✅";
             setTimeout(() => btn.innerText = "🔗", 1000);
-        } catch (e) { alert("Failed to copy path"); }
+            App.showToast("✅ Path copied!", 'success');
+        } catch (e) { App.showToast("Failed to copy path", 'danger'); }
     },
 
     updateFileMetaUI: (path) => {
@@ -268,8 +294,8 @@ const App = {
                 })
             });
             if (!res.ok) throw new Error("Archive failed");
-            alert(`✅ Archived to ${name} in project root.`);
-        } catch (e) { alert(e.message); }
+            App.showToast(`✅ Archived to ${name}`, 'success');
+        } catch (e) { App.showToast(e.message, 'danger'); }
     },
 
     renameFile: async () => {
@@ -311,6 +337,7 @@ const App = {
         if (!App.state.projectPath) return;
         const query = document.getElementById('searchInput').value;
         const mode = document.getElementById('searchMode').value;
+        localStorage.setItem('searchMode', mode);
         const tab = new bootstrap.Tab(document.getElementById('tab-search'));
         tab.show();
 
@@ -342,6 +369,108 @@ const App = {
         `;
         item.onclick = () => App.previewFile(data.path);
         list.appendChild(item);
+    },
+
+    // --- FileCortex Actions ---
+    renderActions: () => {
+        const catContainer = document.getElementById('categoriesContainer');
+        const toolContainer = document.getElementById('toolsContainer');
+        const section = document.getElementById('quickActionsSection');
+        
+        catContainer.innerHTML = '';
+        toolContainer.innerHTML = '';
+        
+        const cats = App.state.projConfig.quick_categories || {};
+        const tools = App.state.projConfig.custom_tools || {};
+        
+        const catKeys = Object.keys(cats);
+        const toolKeys = Object.keys(tools);
+        
+        if (catKeys.length === 0 && toolKeys.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+        
+        section.style.display = 'block';
+        
+        catKeys.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-info btn-xs py-0 px-1 x-small';
+            btn.innerText = name;
+            btn.onclick = () => App.categorizeStaged(name);
+            catContainer.appendChild(btn);
+        });
+        
+        toolKeys.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-warning btn-xs py-0 px-1 x-small';
+            btn.innerText = name;
+            btn.onclick = () => App.executeToolOnStaged(name);
+            toolContainer.appendChild(btn);
+        });
+    },
+
+    categorizeStaged: async (catName) => {
+        if (App.state.staging.size === 0) return App.showToast("Add files to staging first.", 'warning');
+        try {
+            const res = await fetch('/api/actions/categorize', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    paths: Array.from(App.state.staging),
+                    category_name: catName
+                })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                App.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
+                App.state.staging.clear();
+                App.renderStaging();
+                App.syncStagingToBackend();
+                App.refreshProject();
+            } else throw new Error(data.detail);
+        } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
+    },
+
+    executeToolOnStaged: async (toolName) => {
+        if (App.state.staging.size === 0) return App.showToast("Add files to staging first.", 'warning');
+        try {
+            const res = await fetch('/api/actions/execute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    paths: Array.from(App.state.staging),
+                    tool_name: toolName
+                })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                const modalWrapper = document.getElementById('toolResultModal');
+                const modalBody = document.getElementById('toolResultModalBody');
+                modalBody.innerHTML = '';
+                
+                data.results.forEach(r => {
+                    const block = document.createElement('div');
+                    block.className = 'border-bottom border-secondary p-3';
+                    const color = r.exit_code === 0 ? 'text-success' : 'text-danger';
+                    block.innerHTML = `
+                        <div class="fw-bold mb-2">${App.escapeHtml(r.path)} <span class="badge bg-secondary ms-2 align-middle">Exit: <span class="${color}">${r.exit_code}</span></span></div>
+                        <pre class="m-0 p-2 rounded" style="background:#000; color:#ccc; font-size:0.85rem;"><code>${App.escapeHtml(r.stdout || 'No output')}</code></pre>
+                        ${r.error ? `<div class="text-danger small mt-2">Error: ${App.escapeHtml(r.error)}</div>` : ''}
+                    `;
+                    modalBody.appendChild(block);
+                });
+                
+                const bsModal = new bootstrap.Modal(modalWrapper);
+                bsModal.show();
+                
+                App.state.staging.clear();
+                App.renderStaging();
+                App.syncStagingToBackend();
+            } else throw new Error(data.detail);
+        } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
     },
 
     // --- Staging & Generation ---
@@ -469,8 +598,8 @@ const App = {
             });
             const data = await res.json();
             await navigator.clipboard.writeText(data.content);
-            alert("✅ Context copied!");
-        } catch (e) { alert("Failed to copy"); }
+            App.showToast("✅ Context copied!", 'success');
+        } catch (e) { App.showToast("Failed to copy", 'danger'); }
     },
 
     toggleEdit: async () => {

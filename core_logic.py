@@ -10,12 +10,12 @@ import logging
 from functools import lru_cache
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("AIContextWorkbench")
+logger = logging.getLogger("FileCortex")
 
 # --- Data Management ---
 def get_app_dir():
     home = pathlib.Path.home()
-    app_dir = home / ".ai_context_workbench"
+    app_dir = home / ".filecortex"
     try:
         app_dir.mkdir(exist_ok=True)
     except Exception as e:
@@ -30,7 +30,9 @@ class PathValidator:
         try:
             target = pathlib.Path(target_path).resolve()
             root = pathlib.Path(root_path).resolve()
-            return root in target.parents or root == target
+            # Ensure root is actually a project root or child of a registered project
+            # Correctly handle root itself and nested children
+            return root == target or root in target.parents
         except Exception:
             return False
 
@@ -54,6 +56,26 @@ class PathValidator:
         if found_blocks:
             raise PermissionError(f"Access to system directory '{list(found_blocks)[0]}' is blocked for security.")
         return p
+
+class FormatUtils:
+    @staticmethod
+    def format_size(size_bytes):
+        """Returns human-readable file size."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    @staticmethod
+    def format_datetime(mtime):
+        """Returns formatted modification time."""
+        import datetime
+        try:
+            return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+        except:
+            return ""
 
 CONFIG_FILE = get_app_dir() / "config.json"
 
@@ -91,7 +113,9 @@ class DataManager:
             "notes": {},
             "tags": {},
             "sessions": [],
-            "staging_list": []
+            "staging_list": [],
+            "quick_categories": {}, # {Name: Relative_Target_Dir}
+            "custom_tools": {}      # {Name: Command_Template}
         }
         
         if path_str not in self.data["projects"]:
@@ -417,17 +441,77 @@ class FileOps:
                             rel_base = root_dir if root_dir else p.parent
                             zipf.write(full_f, full_f.relative_to(rel_base))
         return str(output_path)
+    
+    @staticmethod
+    def batch_categorize(project_path, paths, category_name):
+        """Moves a list of files to a predefined category directory."""
+        data_mgr = DataManager()
+        proj = data_mgr.get_project_data(project_path)
+        cat_dir_rel = proj["quick_categories"].get(category_name)
+        if not cat_dir_rel:
+            raise ValueError(f"Category '{category_name}' not defined.")
+        
+        root = pathlib.Path(project_path)
+        target_dir = (root / cat_dir_rel).resolve()
+        
+        # Security Check
+        if not PathValidator.is_safe(target_dir, root):
+            raise PermissionError("Category target directory is outside the workspace.")
+        
+        if not target_dir.exists():
+            target_dir.mkdir(parents=True)
+            
+        moved = []
+        for p_str in paths:
+            try:
+                # move_file handles safety of src_path and exists checks
+                new_p = FileOps.move_file(p_str, str(target_dir))
+                moved.append(new_p)
+            except Exception as e:
+                logger.error(f"Failed to categorize {p_str}: {e}")
+        return moved
+
+class ActionBridge:
+    @staticmethod
+    def execute_tool(template, path_str, project_root):
+        """Executes a command template safely on a given path."""
+        p = pathlib.Path(path_str)
+        if not p.exists(): return False
+        
+        # Context extraction
+        context = {
+            "path": str(p),
+            "name": p.name,
+            "ext": p.suffix,
+            "root": str(project_root),
+            "parent": str(p.parent)
+        }
+        
+        # Template injection
+        try:
+            cmd_str = template.format(**context)
+            # Use list arguments for security if possible, but templates often imply shell
+            import subprocess
+            logger.info(f"AUDIT - Executing external tool: {cmd_str}")
+            # Windows specific: shell=True is often needed for multi-command or .bat
+            res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
+            return {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.returncode}
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            return {"error": str(e)}
 
 # --- Search Logic (Generator-based) ---
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
-                     is_inverse=False, case_sensitive=False):
+                     is_inverse=False, case_sensitive=False, max_results=2000):
     """
     Yields dicts with keys: path, match_type, size, mtime, ext.
     """
     root_dir = pathlib.Path(root_dir)
     excludes = [e.lower().strip() for e in manual_excludes.split() if e.strip()]
     git_spec = FileUtils.get_gitignore_spec(root_dir) if use_gitignore else None
+    
+    count = 0
     
     search_text_processed = search_text.strip() if case_sensitive else search_text.lower().strip()
     keywords = search_text_processed.split()
@@ -526,11 +610,13 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 # 1. Check Name Match
                 if search_mode != 'content':
                     if match_name(file):
+                        count += 1
                         yield {
                             "path": str(full_path),
                             "match_type": "Inverse Match" if is_inverse else "Match",
                             **meta
                         }
+                        if count >= max_results: break
                         continue
                 
                 # 2. Check Content Match (Queued for parallel processing)
@@ -557,6 +643,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                 is_match = f.result()
                                 info = content_futures.pop(f)
                                 if is_match:
+                                    count += 1
                                     yield {
                                         "path": info["path"],
                                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
@@ -564,15 +651,22 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                         "mtime": info["mtime"],
                                         "ext": info["ext"]
                                     }
+                                    if count >= max_results: break
                             except Exception:
                                 if f in content_futures: content_futures.pop(f)
+                        if count >= max_results: break
+                
+                if count >= max_results: break
+            if count >= max_results: break
 
         # Final flush of remaining futures
         for f in as_completed(content_futures):
+            if count >= max_results: break
             try:
                 is_match = f.result()
                 info = content_futures.pop(f)
                 if is_match:
+                    count += 1
                     yield {
                         "path": info["path"],
                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
@@ -590,7 +684,7 @@ class SearchWorker(threading.Thread):
     """
     def __init__(self, root_dir, search_text, search_mode, manual_excludes, 
                  include_dirs, result_queue, stop_event, use_gitignore=True,
-                 is_inverse=False, case_sensitive=False):
+                 is_inverse=False, case_sensitive=False, max_results=2000):
         super().__init__()
         self.root_dir = root_dir
         self.search_text = search_text
@@ -602,12 +696,13 @@ class SearchWorker(threading.Thread):
         self.use_gitignore = use_gitignore
         self.is_inverse = is_inverse
         self.case_sensitive = case_sensitive
+        self.max_results = max_results
         self.daemon = True
 
     def run(self):
         gen = search_generator(self.root_dir, self.search_text, self.search_mode, 
                                self.manual_excludes, self.include_dirs, self.use_gitignore,
-                               self.is_inverse, self.case_sensitive)
+                               self.is_inverse, self.case_sensitive, self.max_results)
         if gen is None:
             self.result_queue.put(("DONE", "DONE"))
             return

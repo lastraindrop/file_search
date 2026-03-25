@@ -3,7 +3,7 @@ import pathlib
 import os
 import zipfile
 from unittest.mock import patch
-from core_logic import search_generator, FileUtils, PathValidator, ContextFormatter, FileOps
+from core_logic import search_generator, FileUtils, PathValidator, ContextFormatter, FileOps, FormatUtils, ActionBridge
 
 @pytest.mark.parametrize("query, mode, inverse, case, inc_dirs, expected_names", [
     # 1. Smart Search (default, case-insensitive)
@@ -208,3 +208,78 @@ def test_data_manager_concurrency(clean_config, mock_project):
     data = dm.get_project_data(proj_path)
     for i in range(50):
         assert data[f"key_{i}"] == i
+
+# --- V5.0 Architecture Tests ---
+
+def test_format_utils():
+    """Verify byte formatting and datetime string parsing."""
+    import time
+    assert FormatUtils.format_size(500) == "500 B"
+    assert FormatUtils.format_size(1500) == "1.5 KB"
+    assert FormatUtils.format_size(1024 * 1024 * 2.5) == "2.5 MB"
+    
+    # Just verify it doesn't crash and returns a string with a hyphen
+    current_time = time.time()
+    dt_str = FormatUtils.format_datetime(current_time)
+    assert "-" in dt_str
+    assert ":" in dt_str
+    assert FormatUtils.format_datetime(None) == ""
+
+def test_search_max_results(stress_project):
+    """Verify that search_generator respects the max_results parameter."""
+    # We know stress_project has 100 files containing the word 'Content'
+    query = "Content"
+    
+    # 1. No limit (default is 2000, should find all 100)
+    all_results = list(search_generator(stress_project, query, "content", ""))
+    assert len(all_results) == 100
+    
+    # 2. Limit to exactly 5
+    limited_results = list(search_generator(stress_project, query, "content", "", max_results=5))
+    assert len(limited_results) == 5
+
+def test_action_bridge_execution(mock_project):
+    """Test `execute_tool` with a safe dynamic command."""
+    test_file = mock_project / "src" / "main.py"
+    
+    # Windows/Linux compatible testing command
+    cmd_echo = "echo {name}"
+    if os.name == 'nt':
+        cmd_echo = "cmd.exe /c echo {name}"
+        
+    res = ActionBridge.execute_tool(cmd_echo, str(test_file), mock_project)
+    
+    assert "error" not in res
+    assert res["exit_code"] == 0
+    assert "main.py" in res["stdout"]
+
+def test_batch_categorize(clean_config, mock_project):
+    """Verify dynamic directory creation, secure movement, and out-of-bounds rejection."""
+    dm = clean_config
+    proj_path = str(mock_project)
+    
+    # Setup project with a quick category
+    dm.update_project_settings(proj_path, {
+        "quick_categories": {"Logs": "archived_logs"}
+    })
+    
+    file_to_move = str(mock_project / "src" / "main.py")
+    
+    # 1. move file
+    moved = FileOps.batch_categorize(proj_path, [file_to_move], "Logs")
+    
+    assert len(moved) == 1
+    new_path = moved[0]
+    assert "archived_logs" in new_path
+    assert "main.py" in new_path
+    assert os.path.exists(new_path)
+    assert not os.path.exists(file_to_move)
+
+    # 2. Test Security Boundary (Malicious Category)
+    dm.update_project_settings(proj_path, {
+        "quick_categories": {"Evil": "../hacker_logs"}
+    })
+    test_file_2 = str(mock_project / "empty.txt")
+    
+    with pytest.raises(PermissionError):
+        FileOps.batch_categorize(proj_path, [test_file_2], "Evil")

@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import pathlib
 import os
-from file_search import FileWorkbenchApp
+from file_search import FileCortexApp
 import tkinter as tk
 
 @pytest.fixture
@@ -11,7 +11,7 @@ def app_instance():
     # Mocking DataManager to avoid config loading issues
     with patch('file_search.DataManager') as mock_dm:
         mock_dm.return_value.data = {"last_directory": "", "projects": {}}
-        app = FileWorkbenchApp(root)
+        app = FileCortexApp(root)
         yield app
     root.destroy()
 

@@ -189,7 +189,6 @@ def test_api_audit_logging(mock_logger, project_client, mock_project):
     """Verify that sensitive write operations trigger AUDIT logs."""
     test_file = str(mock_project / "src" / "main.py")
     
-    # 1. Test Delete Audit
     project_client.post("/api/fs/delete", json={
         "project_path": str(mock_project),
         "paths": [test_file]
@@ -198,3 +197,62 @@ def test_api_audit_logging(mock_logger, project_client, mock_project):
     audit_calls = [c for c in mock_logger.info.call_args_list if "AUDIT" in str(c)]
     assert len(audit_calls) > 0
     assert "Deleting" in str(audit_calls[-1])
+
+# --- V5.0 Action API Tests ---
+
+def test_api_categorize(project_client, mock_project):
+    """Test batch categorization via the API."""
+    # 1. Register category
+    project_client.post("/api/project/settings", json={
+        "project_path": str(mock_project),
+        "settings": {"quick_categories": {"WebLogs": "logs/web"}}
+    })
+    
+    test_file = str(mock_project / "error.log")
+    
+    # 2. Trigger categorization
+    res = project_client.post("/api/actions/categorize", json={
+        "project_path": str(mock_project),
+        "paths": [test_file],
+        "category_name": "WebLogs"
+    })
+    
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["moved_count"] == 1
+    
+    new_path = data["paths"][0]
+    assert "logs" in new_path and "web" in new_path
+    assert os.path.exists(new_path)
+    assert not os.path.exists(test_file)
+
+def test_api_execute_tool(project_client, mock_project):
+    """Test external tool execution via the API."""
+    import sys
+    # Register tool (using a simple cross-platform python print command)
+    cmd = f'"{sys.executable}" -c "print(\'Processed {{name}}\')"'
+    
+    project_client.post("/api/project/settings", json={
+        "project_path": str(mock_project),
+        "settings": {"custom_tools": {"EchoBot": cmd}}
+    })
+    
+    test_file = str(mock_project / "src" / "main.py")
+    
+    # Trigger execution
+    res = project_client.post("/api/actions/execute", json={
+        "project_path": str(mock_project),
+        "paths": [test_file],
+        "tool_name": "EchoBot"
+    })
+    
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert len(data["results"]) == 1
+    
+    res_data = data["results"][0]
+    assert test_file == res_data["path"]
+    assert res_data["exit_code"] == 0
+    assert "Processed main.py" in res_data["stdout"]

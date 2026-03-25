@@ -1,6 +1,9 @@
-# AI Context Workbench (AI 上下文收集助手)
+# FileCortex v5.0 (工作区编排助手)
 
-这是一个专为 AI 辅助编程设计的上下文收集工具。它可以帮助你快速扫描项目文件、生成 ASCII 树状结构，并将代码内容格式化为适合 AI 阅读的 Markdown 格式。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、执行自动化脚本、进行快速分类，并能一键导出结构化的上下文以供 AI 辅助编程使用。
+
+## 🌟 核心理念
+*   **Orchestration over Collection**: 从简单的“收集”进化为对工作区的“编排”。
 
 ## 🌟 主要功能
 - **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**真正支持 Windows/macOS/Linux 跨平台运行**。
@@ -10,6 +13,7 @@
 - **一键路径复制**：Web 界面新增“Copy Path”功能，支持直观的文件路径分发。
 - **无状态架构**：Web API 采用完全无状态设计，支持浏览器多标签页同时操作不同项目。
 - **工作区持久化**：自动保存待处理清单 (Staging) 及 收藏夹 (Favorites)，跨端同步工作进度。
+- **工作区编排 (Orchestrator)**：集成 **ActionBridge** 模板引擎与 **快速分类** 模块，支持在 Staging 界面内直接执行 `ffmpeg`, `grep` 或 移动归档 脚本。
 - **自动对齐与并发安全**：内核级项目配置 Schema 自动对齐、全局线程锁及原子化写入，实现旧版数据的“自愈”升级。
 - **高安全性**：防范 XSS 攻击、路径穿越 (Path Traversal) 及 PowerShell 注入，严密保护系统目录。
 
@@ -21,7 +25,7 @@
 ## 🚀 快速开始
 
 ### 桌面版 (直接运行)
-- **已打包用户**：下载并解压，双击 `dist/AI_Context_Workbench.exe`。
+- **已打包用户**：下载并解压，双击 `dist/FileCortex.exe`。
 - **开发者**：
   ```bash
   pip install -r requirements.txt
@@ -36,7 +40,7 @@
 2. 在浏览器中访问：`http://127.0.0.1:8000`
 
 ## 🧪 测试
-项目包含 **44+** 项覆盖核心逻辑、API、并发压力、安全及 E2E 的 `pytest` 测试。采用 **“零硬编码”架构**，支持跨平台自适应运行：
+项目包含 **51** 项覆盖核心逻辑、API、并发压力、安全及 E2E 的 `pytest` 测试。采用 **“零硬编码”架构**，支持跨平台自适应运行：
 ```bash
 python -m pytest
 ```
