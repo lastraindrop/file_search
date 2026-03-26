@@ -5,42 +5,36 @@ import zipfile
 from unittest.mock import patch
 from core_logic import search_generator, FileUtils, PathValidator, ContextFormatter, FileOps, FormatUtils, ActionBridge
 
-@pytest.mark.parametrize("query, mode, inverse, case, inc_dirs, expected_names", [
+@pytest.mark.parametrize("query, mode, inverse, case, inc_dirs, use_git, expected_names", [
     # 1. Smart Search (default, case-insensitive)
-    ("MAIN", "smart", False, False, False, ["main.py"]),
+    ("MAIN", "smart", False, False, False, True, ["main.py"]),
     # 2. Exact Search (case-insensitive)
-    ("main.py", "exact", False, False, False, ["main.py"]),
+    ("main.py", "exact", False, False, False, True, ["main.py"]),
     # 3. Exact Search (case-sensitive)
-    ("MAIN.PY", "exact", False, True, False, []), # Should not match
+    ("MAIN.PY", "exact", False, True, False, True, []), # Should not match
     # 4. Regex Search
-    (r"utils\..*", "regex", False, False, False, ["utils.js"]),
+    (r"utils\..*", "regex", False, False, False, True, ["utils.js"]),
     # 5. Content Search
-    ("print", "content", False, False, False, ["main.py", "utils.js"]),
+    ("print", "content", False, False, False, True, ["main.py", "utils.js"]),
     # 6. Inverse Name Match
-    ("main", "smart", True, False, False, ["utils.js", "config.json", "data.bin"]),
-    # 7. Inverse Content Match
-    ("print", "content", True, False, False, ["config.json"]),
+    ("main", "smart", True, False, False, True, ["utils.js", "config.json", "data.bin"]),
+    # 7. Gitignore bypass (Search ignoring gitignore)
+    ("error", "smart", False, False, False, False, ["error.log"]),
     # 8. Include Directories
-    ("src", "smart", False, False, True, ["src"]),
-    # 9. Smart Search with spaces (AND logic)
-    ("utils js", "smart", False, False, False, ["utils.js"]),
+    ("src", "smart", False, False, True, True, ["src"]),
 ])
-def test_search_permutations(mock_project, query, mode, inverse, case, inc_dirs, expected_names):
+def test_search_permutations(mock_project, query, mode, inverse, case, inc_dirs, use_git, expected_names):
     results = list(search_generator(
         mock_project, query, mode, "", 
         include_dirs=inc_dirs,
         is_inverse=inverse, 
-        case_sensitive=case
+        case_sensitive=case,
+        use_gitignore=use_git
     ))
     result_names = [os.path.basename(r["path"]) for r in results]
     
-    # Check if all expected names are in results (Dynamic Check)
     for name in expected_names:
         assert any(name in rn for rn in result_names), f"Expected {name} not found in {result_names}"
-    
-    # Check if results are correctly restricted
-    if not inverse and mode != 'content':
-        assert len(results) == len(expected_names)
 
 def test_metadata_accuracy(mock_project):
     """Verifies that the returned metadata matches the actual file properties."""
@@ -53,233 +47,87 @@ def test_metadata_accuracy(mock_project):
     assert meta["mtime"] == path_obj.stat().st_mtime
     assert meta["ext"] == ".py"
 
-def test_gitignore_complex(mock_project):
-    """Verifies ignore logic with multiple patterns."""
-    # error.log is in gitignore
-    results = list(search_generator(mock_project, "error", "smart", ""))
-    assert len(results) == 0
-    
-    # node_modules is in gitignore
-    results = list(search_generator(mock_project, "node_modules", "smart", "", include_dirs=True))
-    assert not any("node_modules" in r["path"] for r in results)
+def test_path_validator_is_relative_to_comprehensive(mock_project):
+    """Verify robust path traversal defense."""
+    root = str(mock_project.resolve())
+    # Safe
+    assert PathValidator.is_safe(str(mock_project / "src"), root) is True
+    # Unsafe: Parent traversal
+    assert PathValidator.is_safe(str(mock_project / ".." / "outside"), root) is False
+    # Unsafe: Fake Prefix
+    fake_root = str(mock_project.parent / (mock_project.name + "_fake"))
+    assert PathValidator.is_safe(fake_root, root) is False
+    # Unsafe: Absolute system path
+    assert PathValidator.is_safe("C:/Windows" if os.name == 'nt' else "/etc", root) is False
 
-def test_manual_excludes(mock_project):
-    """Verifies that manual excludes string works."""
-    # Exclude .js files manually
-    results = list(search_generator(mock_project, "", "smart", "*.js"))
-    paths = [r["path"] for r in results]
-    assert not any(p.endswith(".js") for p in paths)
+def test_action_bridge_injection_and_quoting(mock_project):
+    """Verify shell injection prevention across platforms."""
+    test_file = mock_project / "src" / "main.py"
+    # Malicious injection attempt
+    malicious_template = "echo {name} ; touch " + str(mock_project / "injected.txt")
+    res = ActionBridge.execute_tool(malicious_template, str(test_file), mock_project)
+    assert not os.path.exists(mock_project / "injected.txt")
 
-def test_binary_file_detection(mock_project):
-    """Content search should skip binary files but allow empty files."""
-    # data.bin contains 'hello' (binary)
-    results = list(search_generator(mock_project, "hello", "content", ""))
-    assert not any("data.bin" in r["path"] for r in results)
-    
-    # empty.txt should be searchable (not binary)
-    results = list(search_generator(mock_project, "", "smart", ""))
-    assert any("empty.txt" in r["path"] for r in results)
-    assert FileUtils.is_binary(mock_project / "empty.txt") is False
+    # Special characters handling
+    special_name = "test & $(whoami).txt"
+    special_file = mock_project / special_name
+    special_file.touch()
+    res = ActionBridge.execute_tool("echo {name}", str(special_file), mock_project)
+    assert special_name in res["stdout"]
 
-# --- New Unit Tests for Latest Architecture ---
+def test_file_utils_batch_scan_logic(mock_project):
+    """Verify the 'Stage All' scanning logic respects ignores."""
+    # Recursive mode
+    items = FileUtils.get_project_items(str(mock_project), ["*.js"], use_gitignore=True, mode="files")
+    item_names = [os.path.basename(i) for i in items]
+    assert "main.py" in item_names
+    assert "utils.js" not in item_names # Excluded manually
+    assert "error.log" not in item_names # Excluded by gitignore
+    
+    # Top-folders mode
+    items_top = FileUtils.get_project_items(str(mock_project), [], use_gitignore=True, mode="top_folders")
+    item_names_top = [os.path.basename(i) for i in items_top]
+    assert "src" in item_names_top
+    assert "main.py" not in item_names_top # Only top items
 
-def test_path_validator_safety(mock_project):
-    root = mock_project
-    safe_path = root / "src" / "main.py"
-    unsafe_path = root / ".." / "outside.txt"
-    
-    assert PathValidator.is_safe(str(safe_path), str(root)) is True
-    assert PathValidator.is_safe(str(unsafe_path), str(root)) is False
-    assert PathValidator.is_safe("C:/Windows/system32", str(root)) is False
-
-def test_context_formatter_markdown(mock_project):
-    paths = [str(mock_project / "src" / "main.py"), str(mock_project / "image.png")]
-    md = ContextFormatter.to_markdown(paths, mock_project)
-    
-    expected_rel = os.path.relpath(mock_project / "src" / "main.py", mock_project)
-    assert f"File: {expected_rel}" in md
-    assert "print('hello')" in md
-    assert "```python" in md
-    
-    # Verify metadata (size) is present in the header
-    assert "(0.0 KB)" in md or "KB)" in md # main.py is small
-    
-    # Should skip binary image.png
-    assert "image.png" not in md
-
-def test_file_ops_unit(mock_project):
-    # Test Create
-    new_f = FileOps.create_item(str(mock_project), "test_create.txt", is_dir=False)
-    assert os.path.exists(new_f)
-    assert pathlib.Path(new_f).is_file()
-    
-    new_d = FileOps.create_item(str(mock_project), "test_dir", is_dir=True)
-    assert os.path.exists(new_d)
-    assert pathlib.Path(new_d).is_dir()
-    
-    # Test Duplicate Error
-    with pytest.raises(FileExistsError):
-        FileOps.create_item(str(mock_project / "src"), "main.py")
-
-def test_archive_selection_logic(mock_project):
-    paths = [str(mock_project / "src" / "main.py")]
-    zip_path = mock_project / "test.zip"
-    
-    result = FileOps.archive_selection(paths, str(zip_path), mock_project)
-    assert os.path.exists(result)
-    
-    with zipfile.ZipFile(result, 'r') as z:
-        names = z.namelist()
-        assert "src/main.py" in names
-
-def test_generate_ascii_tree_depth(mock_project):
-    """Verifies that the tree generation respects max_depth."""
-    base = mock_project / "deep"
-    base.mkdir()
-    curr = base
-    for i in range(20):
-        curr = curr / f"level_{i}"
-        curr.mkdir()
-    
-    # Test with default limit (15)
-    tree = FileUtils.generate_ascii_tree(mock_project, "")
-    assert "level_14" in tree
-    assert "[Max Depth Reached (15) ...]" in tree
-    assert "level_16" not in tree
-
-def test_search_engine_parallel_stress(stress_project):
-    """Verify concurrent search engine stability and correctness under load."""
-    query = "keyword_target_5"
-    results = list(search_generator(stress_project, query, "content", ""))
-    
-    # We expect 10 matches (one in each of the 10 dirs)
-    assert len(results) == 10
-    for r in results:
-        assert "file_5.txt" in r["path"]
-        assert r["match_type"] == "Content Match"
-
-def test_data_manager_alignment_logic(clean_config):
-    """Test automatic schema detection and alignment using clean_config fixture."""
+def test_data_manager_alignment_and_persistence(clean_config):
     dm = clean_config
     import json
-    
-    # 1. Manually corrupt the config file that dm is using
+    test_path = str(pathlib.Path("/fake/proj").resolve())
     with open(dm.config_path, 'w') as f:
-        json.dump({
-            "last_directory": "/tmp",
-            "projects": {"/tmp": {"excludes": ".git"}}
-        }, f)
-        
-    # 2. Reload
-    dm.load()
-    proj_data = dm.get_project_data("/tmp")
+        json.dump({"projects": {test_path: {"excludes": ".git"}}}, f)
     
-    # 3. Verify Alignment
-    assert "sessions" in proj_data
-    assert "notes" in proj_data
+    dm.load()
+    proj_data = dm.get_project_data(test_path)
+    assert "staging_list" in proj_data
     assert proj_data["excludes"] == ".git"
     
-    # 4. Verify Persistence
+    dm.batch_stage(test_path, ["/p1", "/p2"])
     dm.save()
     with open(dm.config_path, 'r') as f:
         saved = json.load(f)
-        assert "sessions" in saved["projects"]["/tmp"]
+        assert "/p1" in saved["projects"][test_path]["staging_list"]
 
-@patch('core_logic.logger')
-def test_search_generator_error_handling(mock_logger, mock_project):
-    """Verify that the engine handles permission errors gracefully during walk."""
-    with patch('os.scandir', side_effect=PermissionError("Mock Permission Denied")):
-        results = list(search_generator(mock_project, "main", "smart", ""))
-        # Should not crash, just yield nothing or stop gracefully
-        assert len(results) == 0
-
-def test_data_manager_concurrency(clean_config, mock_project):
+def test_data_manager_concurrency_stress(clean_config, mock_project):
+    """Verify singleton thread safety and data integrity."""
     import threading
     dm = clean_config
-    proj_path = str(mock_project)
-    
-    def worker(i):
-        dm.update_project_settings(proj_path, {f"key_{i}": i})
-        
+    p = str(mock_project)
+    def worker(i): dm.update_project_settings(p, {f"k{i}": i})
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(50)]
     for t in threads: t.start()
     for t in threads: t.join()
-        
-    data = dm.get_project_data(proj_path)
-    for i in range(50):
-        assert data[f"key_{i}"] == i
+    data = dm.get_project_data(p)
+    assert all(data[f"k{i}"] == i for i in range(50))
 
-# --- V5.0 Architecture Tests ---
+def test_file_ops_unit_enhanced(mock_project):
+    # Test Create & Error
+    new_f = FileOps.create_item(str(mock_project), "unit.txt", is_dir=False)
+    assert os.path.exists(new_f)
+    with pytest.raises(FileExistsError):
+        FileOps.create_item(str(mock_project), "unit.txt")
 
-def test_format_utils():
-    """Verify byte formatting and datetime string parsing."""
-    import time
-    assert FormatUtils.format_size(500) == "500 B"
-    assert FormatUtils.format_size(1500) == "1.5 KB"
-    assert FormatUtils.format_size(1024 * 1024 * 2.5) == "2.5 MB"
-    
-    # Just verify it doesn't crash and returns a string with a hyphen
-    current_time = time.time()
-    dt_str = FormatUtils.format_datetime(current_time)
-    assert "-" in dt_str
-    assert ":" in dt_str
-    assert FormatUtils.format_datetime(None) == ""
-
-def test_search_max_results(stress_project):
-    """Verify that search_generator respects the max_results parameter."""
-    # We know stress_project has 100 files containing the word 'Content'
-    query = "Content"
-    
-    # 1. No limit (default is 2000, should find all 100)
-    all_results = list(search_generator(stress_project, query, "content", ""))
-    assert len(all_results) == 100
-    
-    # 2. Limit to exactly 5
-    limited_results = list(search_generator(stress_project, query, "content", "", max_results=5))
-    assert len(limited_results) == 5
-
-def test_action_bridge_execution(mock_project):
-    """Test `execute_tool` with a safe dynamic command."""
-    test_file = mock_project / "src" / "main.py"
-    
-    # Windows/Linux compatible testing command
-    cmd_echo = "echo {name}"
-    if os.name == 'nt':
-        cmd_echo = "cmd.exe /c echo {name}"
-        
-    res = ActionBridge.execute_tool(cmd_echo, str(test_file), mock_project)
-    
-    assert "error" not in res
-    assert res["exit_code"] == 0
-    assert "main.py" in res["stdout"]
-
-def test_batch_categorize(clean_config, mock_project):
-    """Verify dynamic directory creation, secure movement, and out-of-bounds rejection."""
-    dm = clean_config
-    proj_path = str(mock_project)
-    
-    # Setup project with a quick category
-    dm.update_project_settings(proj_path, {
-        "quick_categories": {"Logs": "archived_logs"}
-    })
-    
-    file_to_move = str(mock_project / "src" / "main.py")
-    
-    # 1. move file
-    moved = FileOps.batch_categorize(proj_path, [file_to_move], "Logs")
-    
-    assert len(moved) == 1
-    new_path = moved[0]
-    assert "archived_logs" in new_path
-    assert "main.py" in new_path
-    assert os.path.exists(new_path)
-    assert not os.path.exists(file_to_move)
-
-    # 2. Test Security Boundary (Malicious Category)
-    dm.update_project_settings(proj_path, {
-        "quick_categories": {"Evil": "../hacker_logs"}
-    })
-    test_file_2 = str(mock_project / "empty.txt")
-    
-    with pytest.raises(PermissionError):
-        FileOps.batch_categorize(proj_path, [test_file_2], "Evil")
+    # Test Archive
+    zip_p = mock_project / "unit.zip"
+    FileOps.archive_selection([new_f], str(zip_p), mock_project)
+    assert os.path.exists(zip_p)

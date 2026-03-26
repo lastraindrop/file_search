@@ -60,10 +60,17 @@ def clean_config():
     config_path = pathlib.Path(temp_dir) / "test_config.json"
     
     from unittest.mock import patch
+    from core_logic import FileUtils
     with patch('core_logic.CONFIG_FILE', config_path):
+        # Full Reset for implementation consistency
+        DataManager._instance = None
+        FileUtils.clear_cache()
         dm = DataManager()
-        dm.config_path = config_path # Attach for testing convenience
+        dm.config_path = config_path
         yield dm
+        # Cleanup
+        DataManager._instance = None
+        FileUtils.clear_cache()
         
     shutil.rmtree(temp_dir, ignore_errors=True)
 

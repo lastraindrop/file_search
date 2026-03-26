@@ -4,19 +4,18 @@
 
 ## 📍 阶段 0：核心巩固与安全加固 (当前状态 - 已完成)
 *   **[DONE] 安全架构重构**: 引入了 `PathValidator` 路径组件精准匹配及 Web 端 XSS 防护机制，严防路径穿越与脚本注入。
+*   **[DONE] ActionBridge 安全加固 (v5.1)**: 实现了跨平台命令执行安全适配，支持 Windows/Unix 变量自动引用转义，杜绝注入攻击。
 *   **[DONE] 并发搜索引擎**: 引入 `ThreadPoolExecutor` 并发扫描及 Tkinter UI 批次渲染，彻底解决了大规模项目下的界面卡死。
-*   **[DONE] Schema 自动对齐与持久化**: `DataManager` 支持配置字段热补全，并实现了待处理清单 (Staging) 及 收藏夹 (Favorites) 的自动存取。
+*   **[DONE] Schema 自动对齐与持久化**: `DataManager` 支持配置字段热补全（新增 `tool_rules`），并实现了待处理清单 (Staging) 及 收藏夹 (Favorites) 的自动存取。
+*   **[DONE] 智能分类建议引擎**: 实现基于文件模式 (`fnmatch`) 的工具自动推荐，提升编排效率。
 *   **[DONE] 无状态架构升级**: Web API 移除全局状态依赖，支持浏览器多标签页独立操作不同项目。
-*   **[DONE] 审计日志与安全加固**: 实现了 Web API 操作审计、路径权限校验对齐，并彻底排除了系统级调用的注入风险。
-*   **[DONE] 性能自适应引擎**: 搜索引擎引入自适应批处理，并完善了对 0 字节文件及权限受限文件的健壮性处理。
-*   **[DONE] UI 元数据对齐**: Web 界面已同步显示 `mtime`，并支持“一键复制路径”与 Staging 状态的原子化持久化。
-*   **[DONE] 工作区编排 (v5.0 Orchestrator)**: **ActionBridge** 模板引擎与 **Quick Categorize** 规则移动功能全线落地，支持在 Staging 列表内一键触发外部工具或执行文件归纳。
-*   **[DONE] 全量自动化验证**: 实现了 **51** 个遵循“零硬编码”原则的高鲁棒性测试用例。
+*   **[DONE] 性能压榨 (v5.1)**: 引入 `is_binary` Fast-path 及 `.gitignore` mtime 感知缓存，大幅降低磁盘 IO 开销。
+*   **[DONE] ActionBridge 异步流 (Streaming Output)**: 内核与 Web WebSocket 接口已支持外部工具实时输出捕获。
 
 ## 📍 阶段 1：编排增强与前端优化 (短期目标)
 - [ ] **多项目快速切换 UI**: 优化 Web 端 Sidebar，支持点击项目图标快速载入不同项目。
-- [ ] **ActionBridge 异步流 (Streaming)**: 支持在 Web/Desktop 界面实时流式输出外部工具的 `stdout`，提升长时任务的交互感。
-- [ ] **智能分类规则引擎**: 支持配置基于扩展名、正则匹配的“自动分类建议”，在文件加入 Staging 时自动高亮推荐的分类动作。
+- [ ] **智能分类规则界面**: 在 Web/Desktop 提供 UI 界面直接配置 `tool_rules`（正则模式与工具关联）。
+- [ ] **ActionBridge 进程管控**: 支持在 UI 界面手动终止正在运行的长时脚本（如 `Kill Process`）。
 - [ ] **前端虚拟列表**: 对 Web 端文件树进行性能优化，支持在万级节点下保持极速滚动。
 
 ## 🚀 长期愿景 (v5.x+)

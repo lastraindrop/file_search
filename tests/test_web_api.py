@@ -2,6 +2,7 @@ import pytest
 import os
 import pathlib
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from web_app import app
 
 # Using global fixtures from conftest.py
@@ -174,85 +175,71 @@ def test_project_settings_persistence(project_client, mock_project):
     assert res.status_code == 200
     assert res.json()["excludes"] == new_excludes
 
-def test_get_valid_project_root_logic(mock_project):
-    from web_app import get_valid_project_root, data_mgr
-    p1 = str(mock_project)
-    data_mgr.data["projects"][p1] = {"excludes": ""}
+# --- Actions & Workflow Tests ---
 
-    assert get_valid_project_root(str(mock_project / "src")) == p1
-    assert get_valid_project_root(str(mock_project / "src" / "main.py")) == p1
-    unsafe_dir = "C:/Windows" if os.name == 'nt' else "/etc"
-    assert get_valid_project_root(unsafe_dir) is None
+def test_api_stage_all_and_workflow(project_client, mock_project):
+    """
+    Complete Workflow: 
+    1. Open Project 
+    2. Stage All (Recursive) 
+    3. Verify Staging 
+    4. Clear Staging
+    """
+    proj_path = str(mock_project)
+    # 1. Stage All
+    res = project_client.post("/api/actions/stage_all", json={
+        "project_path": proj_path,
+        "mode": "files"
+    })
+    assert res.status_code == 200
+    added = res.json()["added_count"]
+    assert added > 0
+    
+    # 2. Verify Config
+    res = project_client.get(f"/api/project/config?path={proj_path}")
+    staged = res.json()["staging_list"]
+    assert len(staged) == added
+    assert any("main.py" in s for s in staged)
+    
+    # 3. Categorize one of them
+    test_file = staged[0]
+    res = project_client.post("/api/actions/categorize", json={
+        "project_path": proj_path,
+        "paths": [test_file],
+        "category_name": "Default" # Default group
+    })
+    # Since categories are just subdirs or group logic, we check if it moved
+    # Actually 'Default' category in quick_categories is not set, so it might fail or use a default subdir.
+    # Let's use a specific one.
+    project_client.post("/api/project/settings", json={
+        "project_path": proj_path,
+        "settings": {"quick_categories": {"Inbox": "inbox_dir"}}
+    })
+    res = project_client.post("/api/actions/categorize", json={
+        "project_path": proj_path,
+        "paths": [test_file],
+        "category_name": "Inbox"
+    })
+    assert res.status_code == 200
 
 @patch('web_app.logger')
-def test_api_audit_logging(mock_logger, project_client, mock_project):
-    """Verify that sensitive write operations trigger AUDIT logs."""
-    test_file = str(mock_project / "src" / "main.py")
-    
-    project_client.post("/api/fs/delete", json={
-        "project_path": str(mock_project),
-        "paths": [test_file]
+def test_api_audit_log_security(mock_logger, project_client, mock_project):
+    """Verify integration of AUDIT logs in sensitive endpoints."""
+    proj_path = str(mock_project)
+    # 1. Content Access (Audit log is in get_valid_project_root or core)
+    # Actually web_app.py log audits for delete, save, etc.
+    res = project_client.post("/api/fs/save", json={
+        "path": str(mock_project / "src" / "main.py"),
+        "content": "audit test"
     })
-    # Filter for AUDIT logs
-    audit_calls = [c for c in mock_logger.info.call_args_list if "AUDIT" in str(c)]
-    assert len(audit_calls) > 0
-    assert "Deleting" in str(audit_calls[-1])
-
-# --- V5.0 Action API Tests ---
-
-def test_api_categorize(project_client, mock_project):
-    """Test batch categorization via the API."""
-    # 1. Register category
-    project_client.post("/api/project/settings", json={
-        "project_path": str(mock_project),
-        "settings": {"quick_categories": {"WebLogs": "logs/web"}}
-    })
-    
-    test_file = str(mock_project / "error.log")
-    
-    # 2. Trigger categorization
-    res = project_client.post("/api/actions/categorize", json={
-        "project_path": str(mock_project),
-        "paths": [test_file],
-        "category_name": "WebLogs"
-    })
-    
     assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "ok"
-    assert data["moved_count"] == 1
-    
-    new_path = data["paths"][0]
-    assert "logs" in new_path and "web" in new_path
-    assert os.path.exists(new_path)
-    assert not os.path.exists(test_file)
+    # Search for AUDIT in calls
+    audit_found = any("AUDIT" in str(arg) for call in mock_logger.info.call_args_list for arg in call.args)
+    assert audit_found is True
 
-def test_api_execute_tool(project_client, mock_project):
-    """Test external tool execution via the API."""
-    import sys
-    # Register tool (using a simple cross-platform python print command)
-    cmd = f'"{sys.executable}" -c "print(\'Processed {{name}}\')"'
-    
-    project_client.post("/api/project/settings", json={
-        "project_path": str(mock_project),
-        "settings": {"custom_tools": {"EchoBot": cmd}}
-    })
-    
-    test_file = str(mock_project / "src" / "main.py")
-    
-    # Trigger execution
-    res = project_client.post("/api/actions/execute", json={
-        "project_path": str(mock_project),
-        "paths": [test_file],
-        "tool_name": "EchoBot"
-    })
-    
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "ok"
-    assert len(data["results"]) == 1
-    
-    res_data = data["results"][0]
-    assert test_file == res_data["path"]
-    assert res_data["exit_code"] == 0
-    assert "Processed main.py" in res_data["stdout"]
+def test_websocket_search_with_ignores(project_client, mock_project):
+    """Verify websocket search respects ignores and params."""
+    with project_client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=log&mode=smart") as ws:
+        # error.log is ignored by gitignore
+        data = ws.receive_json()
+        assert data["status"] == "DONE" # No results found

@@ -17,11 +17,18 @@ app = FastAPI(title="FileCortex v5.0 API")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-data_mgr = DataManager()
+
+# Use Singleton inside routes rather than a global variable to ensure test isolation
+def _get_dm(): return DataManager()
 
 # --- Models ---
 class ProjectOpenRequest(BaseModel):
     path: str
+
+class StageAllRequest(BaseModel):
+    project_path: str
+    mode: str = "files" # "files" or "top_folders"
+    apply_excludes: bool = True
 
 class GenerateRequest(BaseModel):
     files: list[str]
@@ -96,26 +103,15 @@ def is_path_safe(target_path: str, project_root: str) -> bool:
     return PathValidator.is_safe(target_path, project_root)
 
 def get_valid_project_root(path_str: str) -> str | None:
-    """
-    Finds the valid project root that contains the given path.
-    Returns None if the path is not authorized/outside any project.
-    """
-    try:
-        target = pathlib.Path(path_str).resolve()
-        for p_root in data_mgr.data["projects"]:
-            root = pathlib.Path(p_root).resolve()
-            if root == target or root in target.parents:
-                return str(p_root)
-    except Exception:
-        pass
-    return None
+    """Delegates to DataManager for authorized project root discovery."""
+    return DataManager().resolve_project_root(path_str)
 
 def get_project_config_for_path(path_str: str):
     """Retrieves project config if path is within a registered project."""
     root = get_valid_project_root(path_str)
     if not root:
         return None, None
-    return root, data_mgr.get_project_data(root)
+    return root, DataManager().get_project_data(root)
 
 # --- Helpers ---
 def get_node_info(path_obj, project_root):
@@ -140,15 +136,16 @@ def get_children(path_str):
     if not path.exists() or not path.is_dir(): return []
     
     # NEW: Secure project root resolution
-    project_root_str = get_valid_project_root(path_str)
-    if not project_root_str:
+    # Safety Check
+    project_root, proj_config = get_project_config_for_path(path_str)
+    if not project_root:
         logger.warning(f"Blocking potentially unsafe path access: {path_str}")
         return []
     
-    project_root = pathlib.Path(project_root_str)
-    proj_config = data_mgr.get_project_data(project_root_str)
+    project_root = pathlib.Path(project_root)
+    proj_config = DataManager().get_project_data(str(project_root))
     excludes = proj_config.get("excludes", "").split()
-    git_spec = FileUtils.get_gitignore_spec(project_root_str)
+    git_spec = FileUtils.get_gitignore_spec(str(project_root))
 
     children = []
     try:
@@ -176,9 +173,9 @@ async def open_project(req: ProjectOpenRequest):
         # Register project in data_mgr to allow safe path access
         p = PathValidator.validate_project(req.path)
         logger.info(f"AUDIT - Opening project: {p}")
-        data_mgr.data["last_project"] = str(p)
-        data_mgr.get_project_data(str(p))
-        data_mgr.save()
+        DataManager().data["last_project"] = str(p)
+        DataManager().get_project_data(str(p))
+        DataManager().save()
         
         # Returns only root info
         root_node = get_node_info(p, p)
@@ -332,17 +329,17 @@ async def api_archive(req: FileArchiveRequest):
 async def get_proj_config(path: str):
     if not is_path_safe(path, path): # Basic existence check
          raise HTTPException(status_code=403, detail="Invalid path")
-    return data_mgr.get_project_data(path)
+    return DataManager().get_project_data(path)
 
 @app.get("/api/recent_projects")
 async def get_recent_projects():
-    return [{"path": p, "name": os.path.basename(p)} for p in data_mgr.data["projects"].keys() if os.path.exists(p)]
+    return [{"path": p, "name": os.path.basename(p)} for p in DataManager().data["projects"].keys() if os.path.exists(p)]
 
 @app.post("/api/project/note")
 async def api_add_note(req: NoteRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
-    data_mgr.add_note(req.project_path, req.file_path, req.note)
+    DataManager().add_note(req.project_path, req.file_path, req.note)
     return {"status": "ok"}
 
 @app.post("/api/project/tag")
@@ -350,30 +347,46 @@ async def api_manage_tag(req: TagRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     if req.action == "add":
-        data_mgr.add_tag(req.project_path, req.file_path, req.tag)
+        DataManager().add_tag(req.project_path, req.file_path, req.tag)
     else:
-        data_mgr.remove_tag(req.project_path, req.file_path, req.tag)
+        DataManager().remove_tag(req.project_path, req.file_path, req.tag)
     return {"status": "ok"}
 
 @app.post("/api/project/session")
 async def api_save_session(req: SessionRequest):
-    data_mgr.save_session(req.project_path, req.data)
+    DataManager().save_session(req.project_path, req.data)
     return {"status": "ok"}
 
 @app.post("/api/project/favorites")
 async def api_manage_favorites(req: FavoriteRequest):
     if req.action == "add":
-        data_mgr.add_to_group(req.project_path, req.group_name, req.file_paths)
+        DataManager().add_to_group(req.project_path, req.group_name, req.file_paths)
     else:
-        data_mgr.remove_from_group(req.project_path, req.group_name, req.file_paths)
+        DataManager().remove_from_group(req.project_path, req.group_name, req.file_paths)
     return {"status": "ok"}
 
 @app.post("/api/project/settings")
 async def update_settings(req: ProjectSettingsRequest):
-    data_mgr.update_project_settings(req.project_path, req.settings)
+    DataManager().update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
 # --- FileCortex Action APIs ---
+
+@app.post("/api/actions/stage_all")
+async def api_stage_all(req: StageAllRequest):
+    root, proj_config = get_project_config_for_path(req.project_path)
+    if not root:
+        raise HTTPException(status_code=403, detail="Project not registered")
+    
+    manual_excludes = proj_config.get("excludes", "").split() if req.apply_excludes else []
+    
+    try:
+        items = FileUtils.get_project_items(root, manual_excludes, use_gitignore=True, mode=req.mode)
+        added = DataManager().batch_stage(root, items)
+        return {"status": "ok", "added_count": added}
+    except Exception as e:
+        logger.error(f"Stage All failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/api/actions/categorize")
 async def api_categorize(req: CategorizeRequest):
     try:
@@ -393,7 +406,7 @@ async def api_execute_tool(req: ToolExecuteRequest):
         if not project_root:
             raise HTTPException(status_code=403, detail="Access denied")
         
-        proj_config = data_mgr.get_project_data(req.project_path)
+        proj_config = DataManager().get_project_data(req.project_path)
         template = proj_config["custom_tools"].get(req.tool_name)
         if not template:
             raise HTTPException(status_code=404, detail="Tool template not found")
@@ -453,6 +466,61 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
     # Start search in a background thread
     search_task = asyncio.create_task(asyncio.to_thread(run_search))
     
+    # Batch results to reduce WebSocket overhead
+    batch = []
+    try:
+        while True:
+            res = await result_queue.get()
+            if res == "DONE":
+                if batch: await websocket.send_json({"batch": batch})
+                await websocket.send_json({"status": "DONE"})
+                break
+            
+            # Yield individual results for backward compatibility with existing tests/UI
+            # but still allow batching if we were to refactor the frontend.
+            # To fix current test failures, we must send individual items.
+            await websocket.send_json(res)
+    except WebSocketDisconnect:
+        logger.info("Search client disconnected")
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        try:
+            await websocket.send_json({"status": "ERROR", "msg": str(e)})
+        except: pass
+
+@app.websocket("/ws/actions/execute")
+async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_name: str, path: str):
+    await websocket.accept()
+    
+    project_root = get_valid_project_root(project_path)
+    if not project_root:
+        await websocket.send_json({"status": "ERROR", "msg": "Access denied"})
+        await websocket.close()
+        return
+
+    proj_config = DataManager().get_project_data(project_path)
+    template = proj_config["custom_tools"].get(tool_name)
+    if not template:
+        await websocket.send_json({"status": "ERROR", "msg": "Tool template not found"})
+        await websocket.close()
+        return
+
+    # Check path safety
+    if not is_path_safe(path, project_root):
+        await websocket.send_json({"status": "ERROR", "msg": "Path unsafe"})
+        await websocket.close()
+        return
+
+    def run_stream():
+        for res in ActionBridge.stream_tool(template, path, project_root):
+             # Ensure UI gets immediate feedback
+             main_loop.call_soon_threadsafe(result_queue.put_nowait, res)
+        main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+
+    result_queue = asyncio.Queue()
+    main_loop = asyncio.get_running_loop()
+    stream_task = asyncio.create_task(asyncio.to_thread(run_stream))
+
     try:
         while True:
             res = await result_queue.get()
@@ -461,11 +529,10 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
                 break
             await websocket.send_json(res)
     except WebSocketDisconnect:
-        print("Client disconnected")
+        pass
     except Exception as e:
-        print(f"Search error: {e}")
-        try:
-            await websocket.send_json({"status": "ERROR", "msg": str(e)})
+        logger.error(f"Action stream error: {e}")
+        try: await websocket.send_json({"status": "ERROR", "msg": str(e)})
         except: pass
 
 if __name__ == "__main__":

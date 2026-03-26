@@ -13,12 +13,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("FileCortex")
 
 # --- Data Management ---
-def get_app_dir():
+def get_app_dir() -> pathlib.Path:
     home = pathlib.Path.home()
     app_dir = home / ".filecortex"
     try:
         app_dir.mkdir(exist_ok=True)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"Failed to create app directory: {e}")
     return app_dir
 
@@ -30,14 +30,16 @@ class PathValidator:
         try:
             target = pathlib.Path(target_path).resolve()
             root = pathlib.Path(root_path).resolve()
-            # Ensure root is actually a project root or child of a registered project
-            # Correctly handle root itself and nested children
+            # Use is_relative_to (Python 3.9+) for more robust checking
+            if hasattr(target, 'is_relative_to'):
+                 return target.is_relative_to(root)
+            # Fallback for older versions if needed, though 3.9+ is expected
             return root == target or root in target.parents
         except Exception:
             return False
 
     @staticmethod
-    def validate_project(path_str):
+    def validate_project(path_str: str) -> pathlib.Path:
         p = pathlib.Path(path_str).resolve()
         if not p.exists(): raise FileNotFoundError(f"Path does not exist: {path_str}")
         if not p.is_dir(): raise NotADirectoryError(f"Not a directory: {path_str}")
@@ -80,31 +82,40 @@ class FormatUtils:
 CONFIG_FILE = get_app_dir() / "config.json"
 
 class DataManager:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(DataManager, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
     def __init__(self):
-        self._lock = threading.Lock()
+        if self._initialized: return
         self.data = {"last_directory": "", "projects": {}}
         self.load()
+        self._initialized = True
 
     def load(self):
         if os.path.exists(CONFIG_FILE):
             try:
-                with self._lock:
-                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        self.data.update(json.load(f))
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    self.data.update(json.load(f))
             except Exception as e:
                 logger.error(f"Config load error: {e}")
 
     def save(self):
         try:
-            with self._lock:
-                temp_file = CONFIG_FILE.with_suffix('.json.tmp')
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.data, f, ensure_ascii=False, indent=4)
-                os.replace(temp_file, CONFIG_FILE)
+            temp_file = CONFIG_FILE.with_suffix('.json.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=4)
+            os.replace(temp_file, CONFIG_FILE)
         except Exception as e:
             logger.error(f"Config save error: {e}")
 
-    def get_project_data(self, path_str):
+    def get_project_data(self, path_str: str) -> dict:
         DEFAULT_SCHEMA = {
             "groups": {"Default": []},
             "current_group": "Default",
@@ -118,15 +129,46 @@ class DataManager:
             "custom_tools": {}      # {Name: Command_Template}
         }
         
-        if path_str not in self.data["projects"]:
-            self.data["projects"][path_str] = DEFAULT_SCHEMA.copy()
+        # Ensure path_str is canonical for key lookup
+        try:
+            path_key = str(pathlib.Path(path_str).resolve())
+        except:
+            path_key = path_str
+
+        if path_key not in self.data["projects"]:
+            self.data["projects"][path_key] = DEFAULT_SCHEMA.copy()
         else:
-            # Dynamic Alignment: Update existing project data with missing keys from schema
-            proj = self.data["projects"][path_str]
+            proj = self.data["projects"][path_key]
             for key, val in DEFAULT_SCHEMA.items():
                 if key not in proj:
                     proj[key] = val
-        return self.data["projects"][path_str]
+        return self.data["projects"][path_key]
+
+    def batch_stage(self, project_path: str, paths: list[str]) -> int:
+        proj = self.get_project_data(project_path)
+        added_count = 0
+        for p in paths:
+            if p not in proj["staging_list"]:
+                proj["staging_list"].append(p)
+                added_count += 1
+        if added_count > 0:
+            self.save()
+        return added_count
+
+    def resolve_project_root(self, target_path_str: str) -> str | None:
+        """
+        Identifies which registered project contains the given path.
+        Returns the canonical project root path string or None.
+        """
+        try:
+            target = pathlib.Path(target_path_str).resolve()
+            for p_root in self.data["projects"]:
+                root = pathlib.Path(p_root).resolve()
+                if target == root or root in target.parents:
+                    return str(root)
+        except Exception:
+            pass
+        return None
 
     def add_note(self, project_path, file_path, note):
         proj = self.get_project_data(project_path)
@@ -203,7 +245,7 @@ class FileUtils:
         except Exception: return True # Locked or inaccessible
 
         # 1. Fast path: Common text extensions
-        text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', '.xml', '.sql', '.c', '.cpp', '.h', '.java'}
+        text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', '.xml', '.sql', '.c', '.cpp', '.h', '.java', '.go', '.rs', '.sh', '.bat', '.ini', '.cfg', '.toml'}
         if path.suffix.lower() in text_exts:
             return False
             
@@ -223,9 +265,20 @@ class FileUtils:
             return True
 
     @staticmethod
-    @lru_cache(maxsize=32)
     def get_gitignore_spec(root_dir):
-        """Compiles a pathspec object from .gitignore if it exists (Cached)."""
+        """Public interface for cached gitignore spec."""
+        gitignore_path = pathlib.Path(root_dir) / ".gitignore"
+        mtime = 0
+        if gitignore_path.exists():
+            try:
+                mtime = gitignore_path.stat().st_mtime
+            except: pass
+        return FileUtils._get_cached_gitignore_spec(str(root_dir), mtime)
+
+    @staticmethod
+    @lru_cache(maxsize=32)
+    def _get_cached_gitignore_spec(root_dir, mtime):
+        """Internal cached method, mtime ensures cache invalidation on file change."""
         gitignore_path = pathlib.Path(root_dir) / ".gitignore"
         lines = []
         if gitignore_path.exists():
@@ -236,13 +289,14 @@ class FileUtils:
                 logger.warning(f"Failed to read gitignore at {gitignore_path}: {e}")
         return pathspec.PathSpec.from_lines('gitwildmatch', lines)
 
+
     @staticmethod
     def clear_cache():
         """Clears the gitignore spec cache."""
-        FileUtils.get_gitignore_spec.cache_clear()
+        FileUtils._get_cached_gitignore_spec.cache_clear()
 
     @staticmethod
-    def should_ignore(name, rel_path, manual_excludes, git_spec=None, is_dir=False):
+    def should_ignore(name: str, rel_path: pathlib.Path, manual_excludes: list[str], git_spec: pathspec.PathSpec | None = None, is_dir: bool = False) -> bool:
         """
         Comprehensive check against manual excludes and gitignore patterns.
         :param name: Filename (e.g., 'test.py')
@@ -265,6 +319,31 @@ class FileUtils:
         return False
 
     @staticmethod
+    def get_project_items(root_dir: str, manual_excludes: list[str], use_gitignore: bool = True, mode: str = "files") -> list[str]:
+        """
+        Scans project directory for items to stage.
+        :param mode: 'files' (recursive files) or 'top_folders' (items in root)
+        """
+        root = pathlib.Path(root_dir).resolve()
+        git_spec = FileUtils.get_gitignore_spec(str(root)) if use_gitignore else None
+        results = []
+
+        if mode == "top_folders":
+            for item in root.iterdir():
+                rel = item.relative_to(root)
+                if not FileUtils.should_ignore(item.name, rel, manual_excludes, git_spec, item.is_dir()):
+                    results.append(str(item))
+        else:
+            for curr_root, dirs, files in os.walk(root):
+                curr_root_path = pathlib.Path(curr_root)
+                dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, (curr_root_path / d).relative_to(root), manual_excludes, git_spec, True)]
+                for f in files:
+                    rel = (curr_root_path / f).relative_to(root)
+                    if not FileUtils.should_ignore(f, rel, manual_excludes, git_spec, False):
+                        results.append(str(curr_root_path / f))
+        return results
+
+    @staticmethod
     def get_language_tag(suffix):
         """Returns the markdown language tag for a given file extension."""
         mapping = {
@@ -279,6 +358,17 @@ class FileUtils:
             '.ini': 'ini', '.cfg': 'ini', '.log': 'text'
         }
         return mapping.get(suffix.lower(), '')
+
+    @staticmethod
+    def get_tool_suggestions(path_str, tool_rules):
+        """Returns a list of suggested tool names based on file pattern rules."""
+        import fnmatch
+        name = pathlib.Path(path_str).name
+        suggestions = []
+        for pattern, tools in tool_rules.items():
+            if fnmatch.fnmatch(name, pattern):
+                suggestions.extend(tools)
+        return list(set(suggestions))
 
     @staticmethod
     def get_metadata(path_obj):
@@ -325,7 +415,10 @@ class FileUtils:
             except Exception as e:
                 logger.error(f"Tree generation error at {path}: {e}")
 
-        _build_tree(root_dir)
+        try:
+            _build_tree(root_dir)
+        except Exception as e:
+            logger.error(f"Tree generation failed: {e}")
         return "\n".join(lines)
 
 class ContextFormatter:
@@ -474,9 +567,9 @@ class FileOps:
 class ActionBridge:
     @staticmethod
     def execute_tool(template, path_str, project_root):
-        """Executes a command template safely on a given path."""
+        """Executes a command template safely on a given path using list-based arguments."""
         p = pathlib.Path(path_str)
-        if not p.exists(): return False
+        if not p.exists(): return {"error": "Path does not exist"}
         
         # Context extraction
         context = {
@@ -487,18 +580,81 @@ class ActionBridge:
             "parent": str(p.parent)
         }
         
-        # Template injection
         try:
-            cmd_str = template.format(**context)
-            # Use list arguments for security if possible, but templates often imply shell
             import subprocess
-            logger.info(f"AUDIT - Executing external tool: {cmd_str}")
-            # Windows specific: shell=True is often needed for multi-command or .bat
-            res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
+            import shlex
+            
+            if os.name == 'nt':
+                # On Windows, shell=True is more compatible for complex templates
+                # but we MUST manually quote context variables to prevent injection.
+                def win_quote(s):
+                    return f'"{s}"'
+                
+                safe_context = {k: win_quote(v) for k, v in context.items()}
+                cmd_str = template.format(**safe_context)
+                
+                logger.info(f"AUDIT - Executing external tool (Win/Shell): {cmd_str}")
+                res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
+            else:
+                # On Unix/Linux, shell=False with shlex is preferred
+                tokens = shlex.split(template, posix=True)
+                final_cmd = [t.format(**context) for t in tokens]
+                
+                logger.info(f"AUDIT - Executing external tool (Unix/List): {' '.join(final_cmd)}")
+                res = subprocess.run(final_cmd, shell=False, capture_output=True, text=True, check=False)
+                
             return {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.returncode}
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
             return {"error": str(e)}
+
+    @staticmethod
+    def stream_tool(template, path_str, project_root):
+        """Generates real-time output from a command execution."""
+        p = pathlib.Path(path_str)
+        if not p.exists():
+            yield {"error": "Path does not exist"}
+            return
+        
+        context = {
+            "path": str(p),
+            "name": p.name,
+            "ext": p.suffix,
+            "root": str(project_root),
+            "parent": str(p.parent)
+        }
+        
+        try:
+            import shlex
+            import subprocess
+            
+            tokens = shlex.split(template, posix=(os.name != 'nt'))
+            final_cmd = [t.format(**context) for t in tokens]
+            
+            logger.info(f"AUDIT - Streaming external tool: {' '.join(final_cmd)}")
+            
+            # Start process with piped output
+            process = subprocess.Popen(
+                final_cmd, 
+                shell=False, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, # Merge stderr into stdout for simple streaming
+                text=True, 
+                bufsize=1, # Line buffered
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            # Yield output line by line
+            for line in process.stdout:
+                yield {"out": line}
+            
+            process.wait()
+            yield {"exit_code": process.returncode}
+            
+        except Exception as e:
+            logger.error(f"Tool streaming failed: {e}")
+            yield {"error": str(e)}
 
 # --- Search Logic (Generator-based) ---
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
@@ -710,5 +866,5 @@ class SearchWorker(threading.Thread):
         for result in gen:
             if self.stop_event.is_set(): break
             self.result_queue.put(result)
-        
+
         self.result_queue.put(("DONE", "DONE"))

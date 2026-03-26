@@ -5,23 +5,20 @@
 ## 🏗️ 核心架构
 
 ### 1. 权限与安全校验
-为了防止路径越权 (Path Traversal) 和 XSS 攻击，本项目采用了严格的校验机制：
+为了防止路径越权 (Path Traversal) 和 命令注入 (Command Injection)，本项目采用了严格的校验机制：
 *   **路径权限注册制**: 只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
-*   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `etc` 等系统关键目录的直接访问。
-*   **文件名隔离**: 在重命名和归档操作中，严格限制文件名不得包含路径分隔符。
-*   **XSS 防护**: Web 前端在渲染任何用户可控的文件名/路径时，必须通过 `App.escapeHtml` 进行转义，禁止直接使用 `.innerHTML` 拼接。
-*   **规范**: 禁止使用 `os.path.join` 处理未经过滤的用户输入路径，一律使用 `pathlib` 结合 `is_safe` 方法。
-*   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志，注明发起路径与目标动作。
+*   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env`, `.ssh` 等系统及敏感目录的访问。
+*   **ActionBridge 安全执行 (v5.1+)**: 
+    *   **Windows**: 采用 `shell=True` 以兼容复杂的 CMD 模板，但对所有上下文变量（如 `{path}`, `{name}`）进行 `win_quote` (双引号包裹) 强制转义，彻底杜绝注入。
+    *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
+*   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 参数一致性与动态对齐 (Consistency & Self-healing)
-保持跨端 (Tkinter/Web) 参数一致性是核心设计点，旨在消除“配置漂移”：
-*   **SSOT (Single Source of Truth)**: 所有的路径权限、排除规则 (`excludes`) 及 工作区设置 (`staging_list`) 统一由 `DataManager` 管理。UI 层（无论是 React/JS 还是 Tkinter）在变更设置后必须第一时间调用 `DataManager.save()`，确保重启后的“状态复原”。
-*   **动态参数链路**: 以 `MAX_RESULTS` 为例：
-    1.  **定义**: 在 `DataManager.DEFAULT_SCHEMA` 中定义默认值。
-    2.  **分发**: 搜索请求发起时，API/GUI 层从 `proj_config` 提取值，并将其透传至 `SearchWorker` 或 `search_generator`。
-    3.  **熔断**: `core_logic.py` 内置多级 `break` 机制，确保即使在并发多线程生成器模式下，总结果数也不会突破此阈值，防御内存溢出。
-*   **Schema 自动对齐 (Schema Evolution)**: 这是一个关键的韧性设计。`DataManager.get_project_data` 在加载 JSON 时，会递归检测并补全所有缺失的 v5.0+ 字段（如 `quick_categories`, `custom_tools`）。这保证了旧版本用户在升级到 v5.0 时，配置不会报错且能立即获得新功能。
-*   **无状态 API (Statelessness)**: Web 端接口严禁依赖后台全局变量。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
+保持跨端参数一致性是核心设计点，旨在消除“配置漂移”：
+*   **SSOT (Single Source of Truth)**: `DataManager` 采用 **线程安全的原子单例模式 (Atomic Singleton)**。配置加载 (`load_initial`) 在 `__new__` 的锁保护下仅执行一次，确保多线程并发下的数据一致性。
+*   **Schema 自动演进 (Schema Evolution)**: `DataManager.get_project_data` 在加载 JSON 时，会递归检测并补全缺失字段。v5.1 新增了 `tool_rules` 字段，支持基于文件模式的智能工具推荐。
+*   **无状态 API**: Web 端接口严禁依赖后台全局变量。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
+
 *   **数据原子性**: 采用 `os.replace` 确保配置在写入瞬间的完整性，防止断电或崩溃导致 JSON 文件损坏。
 
 ### 3. 并发安全与数据一致性 (Concurrency Safety)

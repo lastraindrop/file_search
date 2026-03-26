@@ -175,8 +175,12 @@ class FileCortexApp:
         
         act = ttk.Frame(self.tab_staging, padding=5); act.pack(fill=tk.X)
         ttk.Button(act, text="🚀 导出工作区上下文", command=self.copy_all_staging_content).pack(fill=tk.X, pady=2)
-        ttk.Button(act, text="清空", command=self.clear_staging).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(act, text="移除", command=self.remove_staging_selection).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        
+        btn_row = ttk.Frame(act)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="➕ 智能全选", command=self.on_stage_all).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(btn_row, text="清空", command=self.clear_staging).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(btn_row, text="移除", command=self.remove_staging_selection).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     def _init_tools_tab(self):
         f = self.tab_tools
@@ -265,6 +269,25 @@ class FileCortexApp:
         self.data_mgr.save()
         self.on_search_input()
         self.update_stats()
+
+    def on_stage_all(self):
+        if not self.current_dir: return
+        
+        # Simple Dialog to choose mode
+        mode = messagebox.askquestion("选择添加模式", 
+                                      "是否递归添加项目下所有非忽略文件？\n\n[Yes] 递归添加所有文件\n[No] 仅添加顶级文件夹", 
+                                      icon='question')
+        
+        stage_mode = "files" if mode == 'yes' else "top_folders"
+        manual_excludes = self.exclude_var.get().split()
+        
+        try:
+            items = FileUtils.get_project_items(str(self.current_dir), manual_excludes, use_gitignore=self.use_gitignore_var.get(), mode=stage_mode)
+            added = self.data_mgr.batch_stage(str(self.current_dir), items)
+            messagebox.showinfo("成功", f"已成功添加 {added} 个项目到清单。")
+            self.load_project(str(self.current_dir)) # Refresh UI
+        except Exception as e:
+            messagebox.showerror("错误", f"全选添加失败: {e}")
 
     def refresh_tools_ui(self):
         for w in self.cat_btn_frame.winfo_children(): w.destroy()
@@ -570,11 +593,27 @@ class FileCortexApp:
     def ctx_copy_file_to_os(self):
         paths = self._get_ctx_paths()
         if not paths: return
+        
+        import sys
         try:
-            # Secure execution: Use list arguments to avoid shell injection
-            # PowerShell Command uses $args to receive the paths safely
-            cmd = ["powershell", "-NoProfile", "-Command", "Set-Clipboard -Path $args"]
-            subprocess.run(cmd + [str(p) for p in paths], check=True)
+            if sys.platform == 'win32':
+                # Secure execution: Use list arguments to avoid shell injection
+                cmd = ["powershell", "-NoProfile", "-Command", "Set-Clipboard -Path $args"]
+                subprocess.run(cmd + [str(p) for p in paths], check=True)
+            elif sys.platform == 'darwin':
+                # macOS: Copying files to clipboard requires AppleScript
+                path_list = ",".join([f'POSIX file "{str(p)}"' for p in paths])
+                script = f'tell app "Finder" to set the clipboard to {{{path_list}}}'
+                subprocess.run(["osascript", "-e", script], check=True)
+            else:
+                # Linux: Often requires xclip or wl-copy, but file copying is non-standard
+                # Fallback to copy paths
+                path_str = "\\n".join([str(p) for p in paths])
+                self.root.clipboard_clear()
+                self.root.clipboard_append(path_str)
+                messagebox.showinfo("提示", "Linux 下已将文件路径复制到剪切板。")
+                return
+
             self.lbl_status.config(text=f"已将 {len(paths)} 个项目复制到系统剪切板")
         except Exception as e:
             messagebox.showerror("剪切板错误", f"无法复制到系统剪切板: {e}")
