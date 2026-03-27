@@ -483,6 +483,7 @@ class FileCortexApp:
                 p = pathlib.Path(p_str)
                 if not p.exists(): continue
                 self.staging_files.append(p_str)
+                sz = p.stat().st_size if p.is_file() else 0
                 sz_str = FormatUtils.format_size(sz)
                 self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=("", p_str, sz_str))
         

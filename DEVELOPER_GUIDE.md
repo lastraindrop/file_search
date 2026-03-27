@@ -11,6 +11,7 @@
 *   **ActionBridge 安全执行 (v5.1+)**: 
     *   **Windows**: 采用 `shell=True` 以兼容复杂的 CMD 模板，但对所有上下文变量（如 `{path}`, `{name}`）进行 `win_quote` (双引号包裹) 强制转义，彻底杜绝注入。
     *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
+*   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 参数一致性与动态对齐 (Consistency & Self-healing)
@@ -20,9 +21,11 @@
 *   **无状态 API**: Web 端接口严禁依赖后台全局变量。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
 
 *   **数据原子性**: 采用 `os.replace` 确保配置在写入瞬间的完整性，防止断电或崩溃导致 JSON 文件损坏。
+*   **属性动态对齐 (Property Alignment)**: 为避免 `AttributeError` 或 `NameError`，**严禁在前端或 UI 层手动构造文件元数据字典**。必须统一调用 `web_app.get_node_info` 或 `core_logic.search_generator` 返回的标准化字典，确保 `mtime_fmt`, `size_fmt` 等派生属性在各端点同步对齐。
 
 ### 3. 并发安全与数据一致性 (Concurrency Safety)
-*   **线程锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load` 和 `save` 操作均处于线程安全上下文中，防止多端或高频 API 请求引发的竞态条件。
+*   **内存读写锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load()` 和 `save()` 操作均处于线程锁保护下，确保磁盘写入的原子性与内存状态的一致性。
+*   **深拷贝 Schema**: 调用 `get_project_data` 创建新项目时必须执行 `copy.deepcopy(DEFAULT_SCHEMA)`，防止列表/字典等引用类型在多项目间意外共享。
 *   **原子写入**: 配置保存采用**原子重命名策略** (写入 `.json.tmp` 后调用 `os.replace` 覆盖)。这确保了即使在极端情况 (如进程意外中断) 下，配置文件也不会被截断或损坏。
 *   **跨平台 IO 分发**: 避免直接使用如 `os.startfile` 等强依赖系统的 API。所有的原生系统调用均已抽象入 `FileUtils.open_path_in_os`，依据 `sys.platform` 进行动态分发。
 

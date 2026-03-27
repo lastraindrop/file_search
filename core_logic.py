@@ -7,7 +7,14 @@ import queue
 import re
 import pathspec
 import logging
+import datetime
 from functools import lru_cache
+import copy
+import shutil
+import zipfile
+import sys
+import subprocess
+import shlex
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("FileCortex")
@@ -73,10 +80,9 @@ class FormatUtils:
     @staticmethod
     def format_datetime(mtime):
         """Returns formatted modification time."""
-        import datetime
         try:
             return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
-        except:
+        except Exception:
             return ""
 
 CONFIG_FILE = get_app_dir() / "config.json"
@@ -99,21 +105,23 @@ class DataManager:
         self._initialized = True
 
     def load(self):
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    self.data.update(json.load(f))
-            except Exception as e:
-                logger.error(f"Config load error: {e}")
+        with self._lock:
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                        self.data.update(json.load(f))
+                except Exception as e:
+                    logger.error(f"Config load error: {e}")
 
     def save(self):
-        try:
-            temp_file = CONFIG_FILE.with_suffix('.json.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=4)
-            os.replace(temp_file, CONFIG_FILE)
-        except Exception as e:
-            logger.error(f"Config save error: {e}")
+        with self._lock:
+            try:
+                temp_file = CONFIG_FILE.with_suffix('.json.tmp')
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.data, f, ensure_ascii=False, indent=4)
+                os.replace(temp_file, CONFIG_FILE)
+            except Exception as e:
+                logger.error(f"Config save error: {e}")
 
     def get_project_data(self, path_str: str) -> dict:
         DEFAULT_SCHEMA = {
@@ -136,12 +144,14 @@ class DataManager:
             path_key = path_str
 
         if path_key not in self.data["projects"]:
-            self.data["projects"][path_key] = DEFAULT_SCHEMA.copy()
+            import copy
+            self.data["projects"][path_key] = copy.deepcopy(DEFAULT_SCHEMA)
         else:
             proj = self.data["projects"][path_key]
             for key, val in DEFAULT_SCHEMA.items():
                 if key not in proj:
-                    proj[key] = val
+                    import copy
+                    proj[key] = copy.deepcopy(val)
         return self.data["projects"][path_key]
 
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
@@ -588,7 +598,8 @@ class ActionBridge:
                 # On Windows, shell=True is more compatible for complex templates
                 # but we MUST manually quote context variables to prevent injection.
                 def win_quote(s):
-                    return f'"{s}"'
+                    # Escape internal double quotes and wrap in double quotes
+                    return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
                 
                 safe_context = {k: win_quote(v) for k, v in context.items()}
                 cmd_str = template.format(**safe_context)
@@ -750,6 +761,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         yield {
                             "path": str(full_d),
                             "match_type": "📁 Folder",
+                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
 
@@ -770,6 +782,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         yield {
                             "path": str(full_path),
                             "match_type": "Inverse Match" if is_inverse else "Match",
+                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
                         if count >= max_results: break
@@ -803,6 +816,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                     yield {
                                         "path": info["path"],
                                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
                                         "size": info["size"],
                                         "mtime": info["mtime"],
                                         "ext": info["ext"]
@@ -826,6 +840,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                     yield {
                         "path": info["path"],
                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
                         "size": info["size"],
                         "mtime": info["mtime"],
                         "ext": info["ext"]

@@ -21,7 +21,7 @@ def build():
         '--onefile',
         '--noconsole',
         '--clean',
-        '--name=AI_Context_Workbench',
+        '--name=FileCortex',
         '--add-data=static;static',
         '--add-data=templates;templates',
         # If you have an icon, uncomment below
@@ -32,11 +32,11 @@ def build():
 
     # 清理临时目录
     print("\n打包完成！")
-    print("可执行文件位于: dist/AI_Context_Workbench.exe")
+    print("可执行文件位于: dist/FileCortex.exe")
     
     if os.path.exists("build"):
         shutil.rmtree("build")
-    spec_file = "AI_Context_Workbench.spec"
+    spec_file = "FileCortex.spec"
     if os.path.exists(spec_file):
         os.remove(spec_file)
 

@@ -49,7 +49,8 @@ const App = {
         
         // Restore search settings from localStorage
         const savedExcludes = localStorage.getItem('searchExcludes');
-        if (savedExcludes) document.getElementById('excludeInput').value = savedExcludes;
+        const excludeIn = document.getElementById('excludeInput');
+        if (savedExcludes && excludeIn) excludeIn.value = savedExcludes;
         const savedMode = localStorage.getItem('searchMode');
         if (savedMode) document.getElementById('searchMode').value = savedMode;
         
@@ -161,6 +162,7 @@ const App = {
         container.className = 'ms-2';
         const header = document.createElement('div');
         header.className = 'tree-node text-truncate animate-in';
+        header.setAttribute('data-path', node.path);
         
         const icon = node.type === 'dir' ? '📁' : '📄';
         const metaInfo = node.type === 'file' ? ` (${node.size_fmt})` : '';
@@ -359,6 +361,7 @@ const App = {
         const list = document.getElementById('searchResultsList');
         const item = document.createElement('div');
         item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer';
+        item.setAttribute('data-path', data.path);
         item.style.cursor = 'pointer';
         item.innerHTML = `
             <div class="d-flex justify-content-between align-items-center">
@@ -487,8 +490,19 @@ const App = {
         App.state.staging.forEach(path => {
             const item = document.createElement('div');
             item.className = 'list-group-item d-flex justify-content-between p-1 bg-transparent border-0 text-white animate-in';
-            item.innerHTML = `<span class="text-truncate small" title="${path}">${App.escapeHtml(path.split(/[\\\/]/).pop())}</span>
-                              <button class="btn btn-sm btn-link text-danger p-0" onclick="App.removeFromStaging('${path.replace(/\\/g, '\\\\')}')">×</button>`;
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'text-truncate small cursor-pointer';
+            nameSpan.title = path;
+            nameSpan.innerText = path.split(/[\\\/]/).pop();
+            nameSpan.onclick = () => App.previewFile(path);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-sm btn-link text-danger p-0 ms-2';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = (e) => { e.stopPropagation(); App.removeFromStaging(path); };
+
+            item.appendChild(nameSpan);
+            item.appendChild(removeBtn);
             list.appendChild(item);
         });
         App.updateStats();
@@ -542,13 +556,23 @@ const App = {
         files.forEach(path => {
             const item = document.createElement('div');
             item.className = 'list-group-item bg-transparent text-white border-0 p-2 cursor-pointer hover-bg d-flex justify-content-between align-items-center';
-            item.innerHTML = `
-                <div class="text-truncate flex-grow-1" onclick="App.previewFile('${path.replace(/\\/g, '\\\\')}')">
-                    <div class="fw-bold text-info small">${App.escapeHtml(path.split(/[\\\/]/).pop())}</div>
-                    <div class="text-muted" style="font-size:0.75rem">${App.escapeHtml(path)}</div>
-                </div>
-                <button class="btn btn-sm btn-link text-danger p-0" title="Unfavorite" onclick="App.toggleFavorite('${path.replace(/\\/g, '\\\\')}', 'remove')">×</button>
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'text-truncate flex-grow-1';
+            infoDiv.innerHTML = `
+                <div class="fw-bold text-info small">${App.escapeHtml(path.split(/[\\\/]/).pop())}</div>
+                <div class="text-muted" style="font-size:0.75rem">${App.escapeHtml(path)}</div>
             `;
+            infoDiv.onclick = () => App.previewFile(path);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-sm btn-link text-danger p-0';
+            removeBtn.title = 'Unfavorite';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = (e) => { e.stopPropagation(); App.toggleFavorite(path, 'remove'); };
+
+            item.appendChild(infoDiv);
+            item.appendChild(removeBtn);
             list.appendChild(item);
         });
     },
@@ -628,6 +652,66 @@ const App = {
                 App.previewFile(App.state.currentFile);
             } catch (e) { alert("Save failed"); }
         }
+    },
+
+    // --- Bulk Operations (Impl) ---
+    toggleSelectAll: (checked) => {
+        App.state.selectedFiles.clear();
+        if (checked) {
+            // This would normally select all visible files in the tree or search results
+            // For now, we'll just handle the state and count.
+            // Full implementation would require a recursive tree traversal or search result mapping.
+            const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
+            allItems.forEach(item => {
+                const path = item.getAttribute('data-path');
+                if (path) App.state.selectedFiles.add(path);
+            });
+        }
+        App.updateBulkUI();
+    },
+
+    updateBulkUI: () => {
+        const count = App.state.selectedFiles.size;
+        document.getElementById('selectedCount').innerText = count;
+        const bulkActions = document.getElementById('bulkActions');
+        if (count > 0) {
+            bulkActions.style.setProperty('display', 'flex', 'important');
+        } else {
+            bulkActions.style.setProperty('display', 'none', 'important');
+        }
+    },
+
+    bulkStage: () => {
+        if (App.state.selectedFiles.size === 0) return;
+        App.state.selectedFiles.forEach(p => App.state.staging.add(p));
+        App.state.selectedFiles.clear();
+        document.getElementById('selectAllCb').checked = false;
+        App.renderStaging();
+        App.syncStagingToBackend();
+        App.updateBulkUI();
+        App.showToast(`Batch added ${App.state.staging.size} files to staging.`);
+    },
+
+    bulkDelete: async () => {
+        if (App.state.selectedFiles.size === 0 || !confirm(`Delete ${App.state.selectedFiles.size} files forever?`)) return;
+        try {
+            await fetch('/api/fs/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    project_path: App.state.projectPath, 
+                    paths: Array.from(App.state.selectedFiles) 
+                })
+            });
+            App.state.selectedFiles.clear();
+            App.updateBulkUI();
+            App.openProject();
+            App.showToast("Batch delete successful.");
+        } catch (e) { alert("Bulk delete failed"); }
+    },
+
+    bulkMove: async () => {
+        alert("Bulk Move requires a target directory. Please use individual rename/move for now or implement a folder picker.");
     }
 };
 

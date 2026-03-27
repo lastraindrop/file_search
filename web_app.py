@@ -116,16 +116,15 @@ def get_project_config_for_path(path_str: str):
 # --- Helpers ---
 def get_node_info(path_obj, project_root):
     """Returns a single node's info (non-recursive) with formatted metadata."""
-    rel = path_obj.relative_to(project_root) if project_root in path_obj.parents or project_root == path_obj else path_obj.name
+    is_d = path_obj.is_dir()
     meta = FileUtils.get_metadata(path_obj)
-    
     mtime_fmt = FormatUtils.format_datetime(meta["mtime"])
     
     return {
         "name": path_obj.name,
         "path": str(path_obj),
-        "type": "dir" if path_obj.is_dir() else "file",
-        "has_children": path_obj.is_dir() and any(os.scandir(path_obj)) if path_obj.is_dir() else False,
+        "type": "dir" if is_d else "file",
+        "has_children": is_d and any(os.scandir(path_obj)),
         "mtime_fmt": mtime_fmt,
         "size_fmt": FormatUtils.format_size(meta["size"]),
         **meta
@@ -327,8 +326,8 @@ async def api_archive(req: FileArchiveRequest):
 # --- Workspace Memory APIs ---
 @app.get("/api/project/config")
 async def get_proj_config(path: str):
-    if not is_path_safe(path, path): # Basic existence check
-         raise HTTPException(status_code=403, detail="Invalid path")
+    if not get_valid_project_root(path):
+         raise HTTPException(status_code=403, detail="Access denied")
     return DataManager().get_project_data(path)
 
 @app.get("/api/recent_projects")
@@ -354,11 +353,15 @@ async def api_manage_tag(req: TagRequest):
 
 @app.post("/api/project/session")
 async def api_save_session(req: SessionRequest):
+    if not get_valid_project_root(req.project_path):
+        raise HTTPException(status_code=403, detail="Access denied")
     DataManager().save_session(req.project_path, req.data)
     return {"status": "ok"}
 
 @app.post("/api/project/favorites")
 async def api_manage_favorites(req: FavoriteRequest):
+    if not get_valid_project_root(req.project_path):
+        raise HTTPException(status_code=403, detail="Access denied")
     if req.action == "add":
         DataManager().add_to_group(req.project_path, req.group_name, req.file_paths)
     else:
@@ -367,6 +370,8 @@ async def api_manage_favorites(req: FavoriteRequest):
 
 @app.post("/api/project/settings")
 async def update_settings(req: ProjectSettingsRequest):
+    if not get_valid_project_root(req.project_path):
+        raise HTTPException(status_code=403, detail="Access denied")
     DataManager().update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
@@ -458,6 +463,7 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
                     "type": res_dict["match_type"],
                     "size": res_dict["size"],
                     "mtime": res_dict["mtime"],
+                    "mtime_fmt": res_dict.get("mtime_fmt", ""),
                     "ext": res_dict["ext"]
                 })
         finally:
