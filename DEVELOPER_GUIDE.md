@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南 (DEVELOPER_GUIDE)
 
-欢迎参与 FileCortex 的开发。本项目采用核心逻辑 (`core_logic.py`) + 多端适配 (`file_search.py`, `web_app.py`, `fctx.py`) 的分层架构。
+欢迎参与 FileCortex 的开发。本项目采用核心业务包 (`file_cortex_core/`) + 多端视角 (`file_search.py`, `web_app.py`, `fctx.py`) 的解耦架构。
 
 ## 🏗️ 核心架构
 
@@ -14,14 +14,23 @@
 *   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
-### 2. 参数一致性与动态对齐 (Consistency & Self-healing)
-保持跨端参数一致性是核心设计点，旨在消除“配置漂移”：
-*   **SSOT (Single Source of Truth)**: `DataManager` 采用 **线程安全的原子单例模式 (Atomic Singleton)**。配置加载 (`load_initial`) 在 `__new__` 的锁保护下仅执行一次，确保多线程并发下的数据一致性。
-*   **Schema 自动演进 (Schema Evolution)**: `DataManager.get_project_data` 在加载 JSON 时，会递归检测并补全缺失字段。v5.1 新增了 `tool_rules` 字段，支持基于文件模式的智能工具推荐。
-*   **无状态 API**: Web 端接口严禁依赖后台全局变量。所有文件操作必须显式传递 `project_path`，以支持多标签页并发。
+### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
+FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_core/` 包，实现了高内聚低耦合：
+*   **config.py**: 线程安全的 `DataManager` 单例，管理全局配置与项目 Schema。
+*   **security.py**: `PathValidator` 负责所有路径的安全性校验。
+*   **utils.py**: 提供文件 IO 工具、语言识别及最新的 **Token 估算** 与 **Prompt 模板渲染** 逻辑。
+*   **actions.py**: 封装物理文件操作 (`FileOps`) 与外部工具执行桥接 (`ActionBridge`)。
+*   **search.py**: 负责高性能的多线程并发文件检索。
 
-*   **数据原子性**: 采用 `os.replace` 确保配置在写入瞬间的完整性，防止断电或崩溃导致 JSON 文件损坏。
-*   **属性动态对齐 (Property Alignment)**: 为避免 `AttributeError` 或 `NameError`，**严禁在前端或 UI 层手动构造文件元数据字典**。必须统一调用 `web_app.get_node_info` 或 `core_logic.search_generator` 返回的标准化字典，确保 `mtime_fmt`, `size_fmt` 等派生属性在各端点同步对齐。
+### 3. AI 上下文增强 (AI Context Orchestration)
+*   **Token 计数**: 采用 `FormatUtils.estimate_tokens` 进行快速预判，帮助用户在发送给 LLM 前评估成本。
+*   **Prompt 预设**: `DataManager` 内置了 `prompt_templates` 字段，允许用户预设“代码审查”、“生成单测”等常用指令，并一键组装上下文。
+
+### 4. 参数一致性与动态对齐 (Parameter Consistency & Dynamic Alignment)
+为了确保多端（Web, Desktop, CLI）及不同版本间的稳定性，本项目遵循以下核心原则：
+*   **Schema 自愈 (Self-Healing)**: `DataManager.DEFAULT_SCHEMA` 是全局配置的单一事实来源。任何配置读取均会自动合并默认值，确保旧版配置文件在升级后能自动补全缺失字段（如 `prompt_templates`）。
+*   **动态路径感知**: 严禁在核心逻辑中硬编码特定的路径分隔符 (`/` 或 `\`)。所有的路径比较与安全校验均应通过 `pathlib.Path.resolve()` 后的组件进行，以实现跨系统的“动态对齐”。
+*   **UI 数据驱动**: Web 前端（`app.js`）不应硬编码特定的配置 Key。例如，Prompt 模板下拉列表应完全由 `/api/project/prompt_templates` 接口返回的数据动态渲染。
 
 ### 3. 并发安全与数据一致性 (Concurrency Safety)
 *   **内存读写锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load()` 和 `save()` 操作均处于线程锁保护下，确保磁盘写入的原子性与内存状态的一致性。
@@ -41,8 +50,10 @@
 *   **解耦设计**: Tkinter 和 FastAPI 接口是解耦的，允许独立开发和部署。
 
 ## 🧪 测试方法论
-本项目坚持 **100% 关键路径覆盖** 且遵循 **“零硬编码”原则**。
-*   **零硬编码 (Zero Hardcoding)**: 测试 fixture 严禁直接定义驱动器号或系统绝对路径（如 `C:/Windows`）。应使用 `system_dir` 等动态感知 fixture，确保测试在任何环境下皆可即插即用，杜绝 False Negative。
+本项目坚持 **100% 核心路径覆盖** 且遵循 **“零硬编码”原则**。
+*   **参数矩阵覆盖 (Matrix Testing)**: 在 `test_search.py` 中覆盖了搜索模式、正反向、大小写、排除规则的组合。
+*   **零硬编码 (Zero Hardcoding)**: 测试 Fixture 严禁出现绝对路径。使用 `system_dir` 等动态感知 Fixture，确保测试在任何环境下皆能“动态对齐”。
+*   **端到端工作流 (E2E)**: `test_e2e.py` 模拟了从“打开项目 -> 搜索并暂存 -> 选择模板 -> 生成上下文”的完整 AI 辅助心流。
 *   **Mock 边界**: 使用 `pytest` 对 PowerShell 或 subprocess 调用进行隔离 Mock，确保逻辑验证不依赖于特定宿主环境的权限。
 *   **并发压力测试**: 对核心引擎（如自适应检索、配置读写锁）进行 Stress Testing 覆盖。
 *   **测试运行**: 

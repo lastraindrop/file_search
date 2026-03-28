@@ -110,9 +110,10 @@ const App = {
             App.state.projectPath = path;
             localStorage.setItem('lastProjectPath', path);
             
-            // Load Project Configuration (Notes, Tags, etc.)
-            const configRes = await fetch(`/api/project/config?path=${encodeURIComponent(path)}`);
             App.state.projConfig = await configRes.json();
+            
+            // Fill Prompt Templates dropdown
+            App.updateTemplateList();
             
             // Restore Staging List from config
             if (App.state.projConfig.staging_list) {
@@ -298,6 +299,18 @@ const App = {
             if (!res.ok) throw new Error("Archive failed");
             App.showToast(`✅ Archived to ${name}`, 'success');
         } catch (e) { App.showToast(e.message, 'danger'); }
+    },
+
+    updateTemplateList: () => {
+        const select = document.getElementById('promptTemplate');
+        if (!select) return;
+        const templates = App.state.projConfig.prompt_templates || {};
+        select.innerHTML = '<option value="">None (Standard)</option>';
+        Object.keys(templates).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.innerText = name;
+            select.appendChild(opt);
+        });
     },
 
     renameFile: async () => {
@@ -608,17 +621,43 @@ const App = {
         }
     },
 
-    updateStats: () => {
-        document.getElementById('tokenEstimate').innerText = App.state.staging.size;
-    },
-
-    generateContext: async () => {
-        if (App.state.staging.size === 0) return;
+    updateStats: async () => {
+        const count = App.state.staging.size;
+        const label = document.getElementById('tokenEstimate');
+        if (count === 0) {
+            label.innerText = '0 Tokens';
+            return;
+        }
+        
+        // Debounced or throttled update for tokens
         try {
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ files: Array.from(App.state.staging) })
+                body: JSON.stringify({ 
+                    files: Array.from(App.state.staging),
+                    project_path: App.state.projectPath
+                })
+            });
+            const data = await res.json();
+            label.innerText = `${data.tokens} Tokens`;
+        } catch (e) { 
+            label.innerText = `${count} Files`;
+        }
+    },
+
+    generateContext: async () => {
+        if (App.state.staging.size === 0) return;
+        const templateName = document.getElementById('promptTemplate').value;
+        try {
+            const res = await fetch('/api/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    files: Array.from(App.state.staging),
+                    project_path: App.state.projectPath,
+                    template_name: templateName
+                })
             });
             const data = await res.json();
             await navigator.clipboard.writeText(data.content);

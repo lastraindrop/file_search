@@ -7,14 +7,14 @@
 
 ## 🌟 主要功能
 - **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**真正支持 Windows/macOS/Linux 跨平台运行**。
-- **高性能加载**：网页版支持目录懒加载、**自适应并发多线程搜索** 及 **二进制检测 Fast-path**，显著提升大规模项目下的响应速度。
-- **ActionBridge 异步流 (Real-time Streaming)**：支持外部编排工具的 `stdout` 实时推送到 Web/Desktop 界面，长时任务不再“盲跑”。
-- **智能分类建议 (Smart Suggestions)**：基于文件模式自动推荐编排工具（如 `.py` 自动推荐 `Pylint`），实现“感知型”工作区管理。
-- **跨平台系统剪切板**：支持 Windows (PowerShell), macOS (AppleScript) 及 Linux 的原生文件复制与路径分发。
-- **原子化持久化与自愈**：内核级项目配置 Schema 自动对齐、**线程安全单例模型** 及 原子化写入，实现旧版数据的“自愈”升级并彻底杜绝配置损坏。
-- **高级安全性**: 防御命令注入、XSS 攻击、路径穿越 (Path Traversal) 及敏感目录（.git, .env）泄露。v5.1 强化了 API 多层级权限校验。
-- **批量编排 (Bulk Orchestration)**: 支持一键全选、批量暂存与物理删除，极大提升了对大型工作区的处理效率。
-- **元数据动态对齐**: 确多端属性（如 `mtime_fmt`）同步一致，杜绝 `AttributeError` 风险。
+- **微内核架构 (v5.2)**：核心逻辑已完全迁移至 `file_cortex_core/` 包，实现高内聚低耦合，支持作为库被第三方调用。
+- **AI 上下文增强**：集成 **Token 实时估算 (FormatUtils)** 与 **Prompt 自动化模板 (Prompt Templates)**，极大优化 LLM 辅助编程的工作流。
+- **高性能加载**：网页版支持目录懒加载、**自适应并发多线程搜索** 及 **二进制检测 Fast-path**。
+- **ActionBridge 异步流 (Real-time Streaming)**：支持外部编排工具的 `stdout` 实时推送。
+- **智能分类建议 (Smart Suggestions)**：基于文件模式自动推荐编排工具。
+- **跨平台系统剪切板**：支持 Windows/macOS/Linux 的原生文件复制。
+- **原子化持久化与自愈**：内核级项目配置 Schema 自动对齐、**线程安全单例模型** 及 原子化写入。
+- **高级安全性**: 防御路径穿越 (Path Traversal) 及敏感目录（.git, .env）泄露。
 
 ## 📚 详细文档
 - [开发者说明 (Architecture & Security)](DEVELOPER_GUIDE.md)
@@ -23,7 +23,7 @@
 
 ## 🚀 快速开始
 
-### 桌面版 (直接运行)
+### 桌面版
 - **已打包用户**：下载并解压，双击 `dist/FileCortex.exe`。
 - **开发者**：
   ```bash
@@ -39,7 +39,7 @@
 2. 在浏览器中访问：`http://127.0.0.1:8000`
 
 ## 🧪 测试
-项目包含 **40+** 项覆盖核心逻辑、API、并发压力、安全及 E2E 的 `pytest` 测试。采用 **“零硬编码”架构**，支持跨平台自适应运行：
+项目包含 **60+** 项覆盖核心逻辑、API、并发压力及 AI 工作流 E2E 的 `pytest` 测试。采用 **“零硬编码”架构**，支持跨平台自适应运行：
 ```bash
 python -m pytest
 ```
@@ -57,10 +57,11 @@ python build_exe.py
 ```
 
 ## 📂 项目结构
-- `core_logic.py`: 核心业务逻辑（搜索、扫描、统计）。
+- `file_cortex_core/`: 微内核逻辑包（配置、安全、工具、行为、搜索）。
 - `file_search.py`: Tkinter 桌面端应用。
 - `web_app.py`: FastAPI Web 应用。
-- `tests/`: 自动化测试套件（Core, API, E2E）。
+- `fctx.py`: 现代桌面端逻辑入口。
+- `tests/`: 自动化测试套件（新架构下的拆分式测试）。
 - `static/` & `templates/`: Web 静态资源与模板。
 - `build_exe.py`: 自动化打包脚本。
 

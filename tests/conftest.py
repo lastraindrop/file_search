@@ -5,7 +5,7 @@ import shutil
 import os
 from fastapi.testclient import TestClient
 from web_app import app
-from core_logic import DataManager
+from file_cortex_core import DataManager
 
 @pytest.fixture
 def mock_project():
@@ -60,8 +60,8 @@ def clean_config():
     config_path = pathlib.Path(temp_dir) / "test_config.json"
     
     from unittest.mock import patch
-    from core_logic import FileUtils
-    with patch('core_logic.CONFIG_FILE', config_path):
+    from file_cortex_core import FileUtils
+    with patch('file_cortex_core.config.CONFIG_FILE', config_path):
         # Full Reset for implementation consistency
         DataManager._instance = None
         FileUtils.clear_cache()

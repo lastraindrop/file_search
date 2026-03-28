@@ -137,7 +137,7 @@
             <div class="col-md-2 glass-panel border-start d-flex flex-column h-100">
                 <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
                     <h6 class="m-0 fw-bold">🛒 Staging</h6>
-                    <span id="tokenEstimate" class="badge bg-info">0</span>
+                    <span id="tokenEstimate" class="badge bg-info">0 Tokens</span>
                 </div>
                 <div class="flex-grow-1 overflow-auto p-2">
                     <div id="stagingList" class="list-group list-group-flush small mb-3"></div>
@@ -153,6 +153,12 @@
                     </div>
                 </div>
                 <div class="p-3 border-top">
+                    <div class="mb-2">
+                        <label class="small text-muted mb-1">📋 Prompt Template</label>
+                        <select id="promptTemplate" class="form-select form-select-sm bg-dark text-white border-secondary">
+                            <option value="">None (Standard)</option>
+                        </select>
+                    </div>
                     <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="App.archiveStaging()">📦 Archive Selection</button>
                     <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" onclick="App.generateContext()">🚀 Copy Context</button>
                 </div>

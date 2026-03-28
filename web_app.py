@@ -9,7 +9,7 @@ import os
 import pathlib
 import json
 import asyncio
-from core_logic import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, FormatUtils, ActionBridge, logger
+from file_cortex_core import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, FormatUtils, ActionBridge, logger
 
 app = FastAPI(title="FileCortex v5.0 API")
 
@@ -32,6 +32,8 @@ class StageAllRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     files: list[str]
+    project_path: str | None = None
+    template_name: str | None = None
 
 class FileRenameRequest(BaseModel):
     project_path: str
@@ -212,8 +214,19 @@ async def get_content(path: str):
 
 @app.post("/api/generate")
 async def generate_context(req: GenerateRequest):
-    content = ContextFormatter.to_markdown(req.files)
-    return {"content": content}
+    root, proj_config = None, None
+    prompt_prefix = None
+    if req.project_path:
+        root, proj_config = get_project_config_for_path(req.project_path)
+        # Fallback to req.project_path itself if it's the root of the files
+        final_root = root if root else req.project_path
+        if proj_config and req.template_name:
+            prompt_prefix = proj_config.get("prompt_templates", {}).get(req.template_name)
+        content = ContextFormatter.to_markdown(req.files, root_dir=final_root, prompt_prefix=prompt_prefix)
+    else:
+        content = ContextFormatter.to_markdown(req.files, prompt_prefix=None)
+    tokens = FormatUtils.estimate_tokens(content)
+    return {"content": content, "tokens": tokens}
 
 # --- File Operations APIs ---
 @app.post("/api/fs/rename")
@@ -329,6 +342,13 @@ async def get_proj_config(path: str):
     if not get_valid_project_root(path):
          raise HTTPException(status_code=403, detail="Access denied")
     return DataManager().get_project_data(path)
+
+@app.get("/api/project/prompt_templates")
+async def get_prompt_templates(path: str):
+    root, proj_config = get_project_config_for_path(path)
+    if not root:
+         raise HTTPException(status_code=403, detail="Access denied")
+    return proj_config.get("prompt_templates", {})
 
 @app.get("/api/recent_projects")
 async def get_recent_projects():

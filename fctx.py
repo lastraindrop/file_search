@@ -1,7 +1,7 @@
 import sys
 import argparse
 import pathlib
-from core_logic import DataManager, FileOps, ActionBridge, PathValidator, logger
+from file_cortex_core import DataManager, FileOps, ActionBridge, PathValidator, logger
 
 def main():
     parser = argparse.ArgumentParser(description="FileCortex CLI: Workspace Orchestrator")

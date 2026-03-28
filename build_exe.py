@@ -24,6 +24,7 @@ def build():
         '--name=FileCortex',
         '--add-data=static;static',
         '--add-data=templates;templates',
+        '--collect-all=file_cortex_core',
         # If you have an icon, uncomment below
         # '--icon=app.ico', 
     ]

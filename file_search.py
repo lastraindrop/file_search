@@ -6,7 +6,7 @@ import threading
 import queue
 import sys
 import subprocess
-from core_logic import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge
+from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge
 
 # --- Constants ---
 PREVIEW_LIMIT = 100000  # Max characters to display in preview
@@ -34,6 +34,7 @@ class FileCortexApp:
         self.case_sensitive_var = tk.BooleanVar(value=False)
         self.recursive_copy_var = tk.BooleanVar(value=True)
         self.use_gitignore_var = tk.BooleanVar(value=True)
+        self.selected_template_var = tk.StringVar(value="None")
 
         self._init_ui()
         self._init_context_menu()
@@ -174,6 +175,13 @@ class FileCortexApp:
         self.tree_staging.pack(fill=tk.BOTH, expand=True)
         
         act = ttk.Frame(self.tab_staging, padding=5); act.pack(fill=tk.X)
+        
+        tpl_row = ttk.Frame(act)
+        tpl_row.pack(fill=tk.X, pady=2)
+        ttk.Label(tpl_row, text="📋 模板:").pack(side=tk.LEFT, padx=2)
+        self.combo_templates = ttk.Combobox(tpl_row, textvariable=self.selected_template_var, state="readonly")
+        self.combo_templates.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         ttk.Button(act, text="🚀 导出工作区上下文", command=self.copy_all_staging_content).pack(fill=tk.X, pady=2)
         
         btn_row = ttk.Frame(act)
@@ -266,6 +274,7 @@ class FileCortexApp:
         self._refresh_tree() # Call _refresh_tree here
         self.refresh_fav_tree()
         self.refresh_tools_ui()
+        self.refresh_template_combo()
         self.data_mgr.save()
         self.on_search_input()
         self.update_stats()
@@ -302,6 +311,13 @@ class FileCortexApp:
         for name in tools:
             ttk.Button(self.tool_btn_frame, text=name, width=10, 
                        command=lambda n=name: self.on_execute_tool_staged(n)).pack(side=tk.LEFT, padx=2)
+
+    def refresh_template_combo(self):
+        templates = self.current_proj_config.get("prompt_templates", {})
+        vals = ["None"] + list(templates.keys())
+        self.combo_templates['values'] = vals
+        if self.selected_template_var.get() not in vals:
+            self.selected_template_var.set("None")
 
     def on_categorize_staged(self, cat_name):
         if not self.staging_files: return
@@ -345,11 +361,15 @@ class FileCortexApp:
 
     def update_stats(self):
         count = len(self.staging_files)
-        total_chars = 0
+        total_tokens = 0
         for p_str in self.staging_files:
             p = pathlib.Path(p_str)
-            if p.is_file(): total_chars += p.stat().st_size if p.exists() else 0
-        self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_chars//TOKEN_RATIO} Tokens")
+            if p.is_file() and p.exists() and not FileUtils.is_binary(p):
+                 try:
+                     content = p.read_text('utf-8', 'ignore')
+                     total_tokens += FormatUtils.estimate_tokens(content)
+                 except: pass
+        self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_tokens} Tokens")
 
     def on_search_input(self, *args):
         if not self.current_dir: return
@@ -517,7 +537,12 @@ class FileCortexApp:
         self.update_stats()
 
     def copy_all_staging_content(self):
-        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir)
+        prefix = None
+        tpl_name = self.selected_template_var.get()
+        if tpl_name != "None" and self.current_proj_config:
+            prefix = self.current_proj_config.get("prompt_templates", {}).get(tpl_name)
+            
+        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir, prompt_prefix=prefix)
         if final_text:
             self.root.clipboard_clear()
             self.root.clipboard_append(final_text)

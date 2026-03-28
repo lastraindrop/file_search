@@ -121,3 +121,35 @@ def test_v5_workspace_orchestration_e2e(project_client, mock_project):
     results = res.json()["results"]
     assert len(results) == 1
     assert "E2E_OK_for_utils.js" in results[0]["stdout"]
+
+def test_ai_workflow_e2e(project_client, mock_project):
+    """
+    Simulates AI Context Orchestration:
+    1. Search for code.
+    2. Stage files.
+    3. Apply 'Code Review' template.
+    4. Generate and verify content/tokens.
+    """
+    proj_path = str(mock_project)
+    
+    # 1. Search & Stage
+    files = [str(mock_project / "src" / "main.py")]
+    project_client.post("/api/project/settings", json={
+        "project_path": proj_path,
+        "settings": {"staging_list": files}
+    })
+    
+    # 2. Generate with Template
+    res = project_client.post("/api/generate", json={
+        "files": files,
+        "project_path": proj_path,
+        "template_name": "Code Review"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    
+    # 3. Verify
+    assert "Please review the following code" in data["content"] # From default templates
+    assert "main.py" in data["content"]
+    assert data["tokens"] > 0
+    assert isinstance(data["tokens"], int)
