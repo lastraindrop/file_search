@@ -6,7 +6,7 @@ import threading
 import queue
 import sys
 import subprocess
-from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge
+from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge, PathValidator
 
 # --- Constants ---
 PREVIEW_LIMIT = 100000  # Max characters to display in preview
@@ -296,6 +296,7 @@ class FileCortexApp:
         # Load dynamic components
         self.refresh_fav_tree()
         self.refresh_tools_ui()
+        self.refresh_staging_ui()
         self.refresh_template_combo()
         self._refresh_tree()
         self.update_stats()
@@ -535,8 +536,15 @@ class FileCortexApp:
         tree_text = FileUtils.generate_ascii_tree(self.current_dir, self.exclude_var.get(), self.use_gitignore_var.get())
         self.root.clipboard_clear(); self.root.clipboard_append(tree_text); messagebox.showinfo("成功", "结构已复制")
 
+    def refresh_staging_ui(self):
+        self.staging_files.clear()
+        for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
+        if self.current_proj_config:
+            self._add_paths_to_staging(self.current_proj_config.get("staging_list", []), save_to_disk=False)
+
     def _add_paths_to_staging(self, paths, save_to_disk=True):
-        for p_str in paths:
+        for p_raw in paths:
+            p_str = PathValidator.norm_path(p_raw)
             if p_str not in self.staging_files:
                 p = pathlib.Path(p_str)
                 if not p.exists(): continue

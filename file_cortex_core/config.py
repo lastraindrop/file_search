@@ -188,9 +188,11 @@ class DataManager:
 
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
         """Adds multiple paths to the staging list atomically."""
+        from .security import PathValidator
         proj = self.get_project_data(project_path)
         added_count = 0
-        for p in paths:
+        for raw_p in paths:
+            p = PathValidator.norm_path(raw_p)
             if p not in proj["staging_list"]:
                 proj["staging_list"].append(p)
                 added_count += 1
@@ -242,10 +244,14 @@ class DataManager:
     })
 
     def update_project_settings(self, project_path, settings: dict):
+        from .security import PathValidator
         proj = self.get_project_data(project_path)
         for k, v in settings.items():
             if k in self.MUTABLE_SETTINGS:
-                proj[k] = v
+                if k == "staging_list" and isinstance(v, list):
+                    proj[k] = [PathValidator.norm_path(p) for p in v]
+                else:
+                    proj[k] = v
             else:
                 logger.warning(f"Blocked attempt to modify protected key via settings API: {k}")
         self.save()
@@ -277,12 +283,14 @@ class DataManager:
         self.save()
 
     def add_to_group(self, project_path, group_name, file_paths):
+        from .security import PathValidator
         proj = self.get_project_data(project_path)
         if group_name not in proj["groups"]:
             proj["groups"][group_name] = []
-        for path in file_paths:
-            if path not in proj["groups"][group_name]:
-                proj["groups"][group_name].append(path)
+        for raw_p in file_paths:
+            p = PathValidator.norm_path(raw_p)
+            if p not in proj["groups"][group_name]:
+                proj["groups"][group_name].append(p)
         self.save()
 
     def remove_from_group(self, project_path, group_name, file_paths):

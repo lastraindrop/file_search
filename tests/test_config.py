@@ -74,14 +74,18 @@ def test_data_manager_batch_stage(clean_config, mock_project):
     """Verify batch staging logic and config update."""
     dm = clean_config
     p = str(mock_project)
-    files = ["f1.py", "f2.js"]
+    from file_cortex_core import PathValidator
+    f1 = PathValidator.norm_path(mock_project / "f1.py")
+    f2 = PathValidator.norm_path(mock_project / "f2.js")
+    files = [f1, f2]
     
     count = dm.batch_stage(p, files)
     assert count == 2
     
     proj = dm.get_project_data(p)
-    assert "f1.py" in proj["staging_list"]
-    assert "f2.js" in proj["staging_list"]
+    # The normalized results should be in the list
+    assert f1 in proj["staging_list"]
+    assert f2 in proj["staging_list"]
     
     # Repeat (Should not duplicate)
     count2 = dm.batch_stage(p, files)
