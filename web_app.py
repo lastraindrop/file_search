@@ -98,6 +98,20 @@ class CategoriesUpdateRequest(BaseModel):
     project_path: str
     categories: dict  # {name: relative_target_dir}
 
+class PathCollectionRequest(BaseModel):
+    paths: list[str]
+    project_root: str | None = None
+    mode: str = "relative" # "relative" or "absolute"
+    separator: str = "\n"
+
+class WorkspacePinRequest(BaseModel):
+    path: str
+
+class ProjectSettingsRequest(BaseModel):
+    project_path: str
+    excludes: str
+    search_settings: dict
+
 class CategorizeRequest(BaseModel):
     project_path: str
     paths: list[str]
@@ -206,7 +220,9 @@ async def open_project(req: ProjectOpenRequest):
         p = PathValidator.validate_project(req.path)
         logger.info(f"AUDIT - Opening project: {p}")
         dm = _get_dm()
-        dm.data["last_directory"] = str(p)
+        
+        # New: Tracking workspace high-level history
+        dm.add_to_recent(str(p))
         dm.get_project_data(str(p))
         dm.save()
         
@@ -396,9 +412,28 @@ async def get_prompt_templates(path: str):
          raise HTTPException(status_code=403, detail="Access denied")
     return proj_config.get("prompt_templates", {})
 
+@app.get("/api/workspaces")
+async def get_workspaces():
+    return _get_dm().get_workspaces_summary()
+
+@app.post("/api/workspaces/pin")
+async def toggle_pin(req: WorkspacePinRequest):
+    status = _get_dm().toggle_pinned(req.path)
+    return {"is_pinned": status}
+
 @app.get("/api/recent_projects")
-async def get_recent_projects():
-    return [{"path": p, "name": os.path.basename(p)} for p in DataManager().data["projects"].keys() if os.path.exists(p)]
+async def get_recent_projects_legacy():
+    # Keep for old UI compatibility during migration if needed, but we'll update UI soon
+    return [{"name": pathlib.Path(p).name, "path": p} for p in _get_dm().data["projects"].keys() if os.path.exists(p)]
+
+@app.post("/api/project/settings")
+async def save_settings(req: ProjectSettingsRequest):
+    dm = _get_dm()
+    proj = dm.get_project_data(req.project_path)
+    proj["excludes"] = req.excludes
+    proj["search_settings"] = req.search_settings
+    dm.save()
+    return {"status": "ok"}
 
 @app.post("/api/project/note")
 async def api_add_note(req: NoteRequest):
@@ -517,6 +552,24 @@ async def api_execute_tool(req: ToolExecuteRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 # --- WebSocket Search ---
+@app.post("/api/fs/collect_paths")
+async def collect_paths_api(req: PathCollectionRequest):
+    """
+    Format a list of paths into a single string with custom separators.
+    """
+    try:
+        # Valid Project Root Check for safety
+        if req.project_root:
+            from .security import PathValidator
+            if not PathValidator.is_safe(req.project_root, req.project_root): # Self-safety check
+                 pass # Still allowed for formatting purposes, but might be restricted later
+        
+        res = FormatUtils.collect_paths(req.paths, req.project_root, req.mode, req.separator)
+        return {"result": res}
+    except Exception as e:
+        logger.error(f"Path collection error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.websocket("/ws/search")
 async def websocket_search(websocket: WebSocket, path: str, query: str, mode: str = "smart", 
                            inverse: bool = False, case_sensitive: bool = False):
@@ -541,10 +594,12 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
     def run_search():
         try:
             # Pass inverse and case_sensitive to search_generator
+            max_size = proj_config.get("max_search_size_mb", 5)
             for res_dict in search_generator(p, query, mode, excludes, 
                                             include_dirs=False, 
                                             is_inverse=inverse,
-                                            case_sensitive=case_sensitive):
+                                            case_sensitive=case_sensitive,
+                                            max_size_mb=max_size):
                 # Use call_soon_threadsafe to put results into the main loop's queue
                 main_loop.call_soon_threadsafe(result_queue.put_nowait, {
                     "name": os.path.basename(res_dict["path"]),

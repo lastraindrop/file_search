@@ -50,6 +50,7 @@ class FileCortexApp:
         self.root.after(SEARCH_POLL_MS, self.process_queue)
 
     def _init_ui(self):
+        self._init_menu()
         self._init_top_bar()
         self._init_main_body()
         self._init_status_bar()
@@ -60,6 +61,9 @@ class FileCortexApp:
         ttk.Button(top_bar, text="📁 浏览", command=self.on_browse).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_bar, text="🔄 刷新", command=self.on_refresh).pack(side=tk.LEFT, padx=5)
         
+        self.btn_pin = ttk.Button(top_bar, text="☆", width=3, command=self.on_toggle_pin)
+        self.btn_pin.pack(side=tk.LEFT, padx=2)
+
         self.lbl_project = ttk.Label(top_bar, text="请打开项目路径", font=("Segoe UI", 9))
         self.lbl_project.pack(side=tk.LEFT, padx=10, pady=2)
         ttk.Button(top_bar, text="🌲 复制项目结构", command=self.copy_project_tree).pack(side=tk.RIGHT, padx=5)
@@ -187,6 +191,7 @@ class FileCortexApp:
         btn_row = ttk.Frame(act)
         btn_row.pack(fill=tk.X)
         ttk.Button(btn_row, text="➕ 智能全选", command=self.on_stage_all).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(btn_row, text="🔗 复制路径", command=self.on_copy_staged_paths).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(btn_row, text="清空", command=self.clear_staging).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(btn_row, text="移除", command=self.remove_staging_selection).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -222,6 +227,7 @@ class FileCortexApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="📋 复制文件 (OS)", command=self.ctx_copy_file_to_os)
         self.context_menu.add_command(label="🔗 复制路径", command=self.ctx_copy_path_to_clipboard)
+        self.context_menu.add_command(label="🧬 复制路径 (高级)...", command=self.ctx_collect_paths)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="✏️ 重命名", command=self.ctx_rename_file)
         self.context_menu.add_command(label="✂️ 移动至...", command=self.ctx_move_file)
@@ -244,43 +250,58 @@ class FileCortexApp:
 
     def on_refresh(self):
         if self.current_dir:
-            try:
-                # Save current UI settings to config before refreshing
-                if self.current_proj_config:
-                    self.current_proj_config["excludes"] = self.exclude_var.get()
-                    self.data_mgr.save()
-                
-                # Re-browse (now with updated config)
-                self.on_browse(str(self.current_dir))
-            except Exception:
-                pass
+            self.save_project_settings()
+            self.load_project(str(self.current_dir))
         else:
             messagebox.showinfo("刷新", "请先浏览一个项目。")
 
-    def load_project(self, path_str):
-        self.current_dir = pathlib.Path(path_str)
-        self.lbl_project.config(text=f"项目: {self.current_dir.name}", foreground="black")
-        self.data_mgr.data["last_directory"] = path_str
-        self.current_proj_config = self.data_mgr.get_project_data(path_str)
-        # Only overwrite UI if UI is empty (e.g. initial load) or if it's a NEW project
-        # For refresh, the config was updated in on_refresh already.
-        self.exclude_var.set(self.current_proj_config.get("excludes", ""))
-        self.update_group_combo()
-        self.current_group_var.set(self.current_proj_config.get("current_group", "Default"))
-        
-        # Restore Staging List from project config
-        self.staging_files = []
-        for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
-        staged = self.current_proj_config.get("staging_list", [])
-        self._add_paths_to_staging(staged, save_to_disk=False)
+    def save_project_settings(self):
+        if self.current_proj_config:
+            # Sync UI state to config object
+            self.current_proj_config["excludes"] = self.exclude_var.get()
+            self.current_proj_config["search_settings"] = {
+                "mode": self.search_mode_var.get(),
+                "case_sensitive": self.case_sensitive_var.get(),
+                "inverse": self.is_inverse_var.get(),
+                "include_dirs": self.search_include_dirs_var.get()
+            }
+            self.data_mgr.save()
+            self.lbl_status.config(text="项目配置已保存")
 
-        self._refresh_tree() # Call _refresh_tree here
+    def load_project(self, path_str):
+        self.results_count = 0 
+        self.lbl_status.config(text="正在加载项目...")
+        
+        # Clear UI components
+        self.tree_proj.delete(*self.tree_proj.get_children())
+        self.tree_search.delete(*self.tree_search.get_children())
+        
+        self.current_dir = pathlib.Path(path_str)
+        self.lbl_project.config(text=f"📂 {path_str}")
+        self.current_proj_config = self.data_mgr.get_project_data(path_str)
+        
+        # Restore UI Settings from Config
+        ss = self.current_proj_config.get("search_settings", {})
+        self.search_mode_var.set(ss.get("mode", "smart"))
+        self.case_sensitive_var.set(ss.get("case_sensitive", False))
+        self.is_inverse_var.set(ss.get("inverse", False))
+        self.search_include_dirs_var.set(ss.get("include_dirs", False))
+        self.exclude_var.set(self.current_proj_config.get("excludes", ""))
+        self._update_pin_button()
+        
+        # Track history
+        self.data_mgr.add_to_recent(path_str)
+        self._update_history_menus()
+
+        # Load dynamic components
         self.refresh_fav_tree()
         self.refresh_tools_ui()
         self.refresh_template_combo()
-        self.data_mgr.save()
-        self.on_search_input()
+        self._refresh_tree()
         self.update_stats()
+        self.on_search_input()
+        
+        self.lbl_status.config(text=f"已就绪: {self.current_dir.name}")
 
     def on_stage_all(self):
         if not self.current_dir: return
@@ -380,10 +401,12 @@ class FileCortexApp:
         for item in self.tree_search.get_children(): self.tree_search.delete(item)
         self.stop_event = threading.Event(); self.result_queue = queue.Queue()
         self.lbl_status.config(text="扫描中...")
+        max_size = self.current_proj_config.get("max_search_size_mb", 5) if self.current_proj_config else 5
         self.search_thread = SearchWorker(self.current_dir, self.search_var.get(), self.search_mode_var.get(), 
                                          self.exclude_var.get(), self.search_include_dirs_var.get(), 
                                          self.result_queue, self.stop_event, self.use_gitignore_var.get(),
-                                         is_inverse=self.is_inverse_var.get(), case_sensitive=self.case_sensitive_var.get())
+                                         is_inverse=self.is_inverse_var.get(), case_sensitive=self.case_sensitive_var.get(),
+                                         max_size_mb=max_size)
         self.search_thread.start()
 
     def process_queue(self):
@@ -646,7 +669,70 @@ class FileCortexApp:
 
             self.lbl_status.config(text=f"已将 {len(paths)} 个项目复制到系统剪切板")
         except Exception as e:
-            messagebox.showerror("剪切板错误", f"无法复制到系统剪切板: {e}")
+            messagebox.showerror("错误", f"复制失败: {e}")
+
+    def ctx_collect_paths(self):
+        paths = self._get_ctx_paths()
+        if not paths: return
+        self._show_path_collection_dialog(paths)
+
+    def on_copy_staged_paths(self):
+        # Get all paths in staging
+        paths = []
+        for item in self.tree_staging.get_children():
+            p_str = self.tree_staging.set(item, "path")
+            paths.append(pathlib.Path(p_str))
+        if not paths: return
+        self._show_path_collection_dialog(paths)
+
+    def _show_path_collection_dialog(self, paths):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("路径搜集与格式化")
+        dialog.geometry("360x280")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        main_f = ttk.Frame(dialog, padding=15); main_f.pack(fill=tk.BOTH, expand=True)
+        
+        # Mode
+        mode_var = tk.StringVar(value="relative")
+        ttk.Label(main_f, text="路径模式:", font=("Bold", 9)).pack(anchor=tk.W)
+        ttk.Radiobutton(main_f, text="项目相对路径 (Relative)", variable=mode_var, value="relative").pack(anchor=tk.W, padx=10)
+        ttk.Radiobutton(main_f, text="系统绝对路径 (Absolute)", variable=mode_var, value="absolute").pack(anchor=tk.W, padx=10)
+        
+        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        # Separator
+        sep_var = tk.StringVar(value="\\n")
+        ttk.Label(main_f, text="自定义分隔符 (支持 \\n, \\t):", font=("Bold", 9)).pack(anchor=tk.W)
+        
+        presets = ttk.Frame(main_f)
+        presets.pack(fill=tk.X, pady=5)
+        ttk.Button(presets, text="换行(\\n)", width=8, command=lambda: sep_var.set("\\n")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(presets, text="空格", width=8, command=lambda: sep_var.set(" ")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(presets, text="空格+@", width=8, command=lambda: sep_var.set(" @")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(presets, text="空格+#", width=8, command=lambda: sep_var.set(" #")).pack(side=tk.LEFT, padx=2)
+        
+        entry_sep = ttk.Entry(main_f, textvariable=sep_var)
+        entry_sep.pack(fill=tk.X, pady=5)
+        
+        def do_copy():
+            mode = mode_var.get()
+            sep = sep_var.get()
+            formatted = FormatUtils.collect_paths([str(p) for p in paths], str(self.current_dir), mode, sep)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(formatted)
+            self.lbl_status.config(text=f"已成功搜集 {len(paths)} 条路径")
+            dialog.destroy()
+            
+        ttk.Button(main_f, text="✅ 确定并复制到剪切板", command=do_copy).pack(fill=tk.X, pady=10)
 
     def ctx_copy_path_to_clipboard(self):
         paths = self._get_ctx_paths()
@@ -699,7 +785,52 @@ class FileCortexApp:
         self.refresh_fav_tree()
         self.lbl_status.config(text=f"已将 {len(paths)} 个项目添加至收藏组: {group}")
 
-    def open_batch_io_dialog(self): pass # 保持原有逻辑
+    def _init_menu(self):
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+        
+        file_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="文件 (File)", menu=file_menu)
+        file_menu.add_command(label="📁 浏览工作区...", command=self.on_browse)
+        
+        self.recent_menu = tk.Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="最近打开", menu=self.recent_menu)
+        
+        self.pinned_menu = tk.Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="置顶工作区", menu=self.pinned_menu)
+        
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.root.quit)
+        self._update_history_menus()
+
+    def _update_history_menus(self):
+        try:
+            self.recent_menu.delete(0, tk.END)
+            self.pinned_menu.delete(0, tk.END)
+            summary = self.data_mgr.get_workspaces_summary()
+            
+            for item in summary["recent"]:
+                self.recent_menu.add_command(label=item["name"], command=lambda p=item["path"]: self.on_browse(p))
+                
+            for item in summary["pinned"]:
+                self.pinned_menu.add_command(label=item["name"], command=lambda p=item["path"]: self.on_browse(p))
+        except Exception: pass
+
+    def on_toggle_pin(self):
+        if not self.current_dir: return
+        is_pinned = self.data_mgr.toggle_pinned(str(self.current_dir))
+        self._update_pin_button()
+        self._update_history_menus()
+        self.lbl_status.config(text="已置顶工作区" if is_pinned else "已取消置顶工作区")
+
+    def _update_pin_button(self):
+        if not self.current_dir:
+            self.btn_pin.config(text="☆")
+            return
+        is_pinned = str(self.current_dir) in self.data_mgr.data.get("pinned_projects", [])
+        self.btn_pin.config(text="⭐" if is_pinned else "☆")
+
+    def open_batch_io_dialog(self): pass 
 
 if __name__ == "__main__":
     root = tk.Tk(); ttk.Style().theme_use('clam'); app = FileCortexApp(root); root.mainloop()

@@ -9,15 +9,10 @@ from .utils import FileUtils, FormatUtils
 
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
-                     is_inverse=False, case_sensitive=False, max_results=2000):
+                     is_inverse=False, case_sensitive=False, max_results=2000,
+                     max_size_mb=5):
     """
     Multi-mode file search generator.
-    
-    Mode behaviors:
-    - 'smart': Match file names using keyword splitting
-    - 'exact': Match file names using exact substring
-    - 'regex': Match both file names AND file content (dual-match)
-    - 'content': Match file content only
     """
     root_dir = pathlib.Path(root_dir)
     excludes = [e.lower().strip() for e in manual_excludes.split() if e.strip()]
@@ -49,12 +44,10 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             
         return found != is_inverse
     
-    size_limit_mb = 5 # Default, should ideally be passed from config if needed
-    
     def match_content(path):
         if search_mode not in ('content', 'regex') or not search_text: return False
         try:
-            limit = size_limit_mb * 1024 * 1024
+            limit = max_size_mb * 1024 * 1024
             if path.stat().st_size > limit: return False
             if FileUtils.is_binary(path): return False
             
@@ -78,101 +71,109 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
         content_futures = {}
 
-        for root, dirs, files in os.walk(root_dir):
-            rel_root = pathlib.Path(root).relative_to(root_dir)
-            dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
-            
-            if include_dirs:
-                for d in dirs:
-                    if match_name(d):
-                        full_d = pathlib.Path(root) / d
-                        meta = FileUtils.get_metadata(full_d)
-                        yield {
-                            "path": str(full_d),
-                            "match_type": "📁 Folder",
-                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
+        try:
+            for root, dirs, files in os.walk(root_dir):
+                rel_root = pathlib.Path(root).relative_to(root_dir)
+                dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
+                
+                if include_dirs:
+                    for d in dirs:
+                        if match_name(d):
+                            full_d = pathlib.Path(root) / d
+                            meta = FileUtils.get_metadata(full_d)
+                            yield {
+                                "path": str(full_d),
+                                "match_type": "📁 Folder",
+                                "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
+                                **meta
+                            }
+
+                for file in files:
+                    full_path = pathlib.Path(root) / file
+                    rel_path = rel_root / file
+                    if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
+                        continue
+                    try:
+                        meta = FileUtils.get_metadata(full_path)
+                    except Exception as e:
+                        logger.error(f"Error getting metadata for {full_path}: {e}")
+                        continue
+                    
+                    if search_mode != 'content':
+                        if match_name(file):
+                            count += 1
+                            yield {
+                                "path": str(full_path),
+                                "match_type": "Inverse Match" if is_inverse else "Match",
+                                "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
+                                **meta
+                            }
+                            if count >= max_results: break
+                            continue
+                    
+                    if search_mode in ('content', 'regex') and search_text:
+                        future = executor.submit(match_content, full_path)
+                        content_futures[future] = {
+                            "path": str(full_path),
+                            "is_inverse": is_inverse,
                             **meta
                         }
+                        if len(content_futures) >= 40: # Increased batch size
+                            # Adaptive Batching
+                            batch = [f for f in content_futures if f.done()]
+                            if not batch:
+                                try:
+                                    next(as_completed(content_futures, timeout=0.01))
+                                    batch = [f for f in content_futures if f.done()]
+                                except: pass
+                            for f in batch:
+                                try:
+                                    is_match = f.result()
+                                    info = content_futures.pop(f)
+                                    if is_match:
+                                        count += 1
+                                        yield {
+                                            "path": info["path"],
+                                            "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                                            "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
+                                            "size": info["size"],
+                                            "mtime": info["mtime"],
+                                            "ext": info["ext"]
+                                        }
+                                        if count >= max_results: break
+                                except Exception:
+                                    if f in content_futures: content_futures.pop(f)
+                            if count >= max_results: break
+                    if count >= max_results: break
+                if count >= max_results: break
 
-            for file in files:
-                full_path = pathlib.Path(root) / file
-                rel_path = rel_root / file
-                if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
-                    continue
+            # Process remaining
+            for f in as_completed(content_futures):
+                if count >= max_results: break
                 try:
-                    meta = FileUtils.get_metadata(full_path)
-                except Exception as e:
-                    logger.error(f"Error getting metadata for {full_path}: {e}")
-                    continue
-                if search_mode != 'content':
-                    if match_name(file):
+                    is_match = f.result()
+                    info = content_futures.pop(f)
+                    if is_match:
                         count += 1
                         yield {
-                            "path": str(full_path),
-                            "match_type": "Inverse Match" if is_inverse else "Match",
-                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
-                            **meta
+                            "path": info["path"],
+                            "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                            "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
+                            "size": info["size"],
+                            "mtime": info["mtime"],
+                            "ext": info["ext"]
                         }
-                        if count >= max_results: break
-                        continue
-                
-                if search_mode in ('content', 'regex') and search_text:
-                    future = executor.submit(match_content, full_path)
-                    content_futures[future] = {
-                        "path": str(full_path),
-                        "is_inverse": is_inverse,
-                        **meta
-                    }
-                    if len(content_futures) >= 20:
-                        # Adaptive Batching
-                        batch = [f for f in content_futures if f.done()]
-                        if not batch:
-                            try:
-                                next(as_completed(content_futures, timeout=0.05))
-                                batch = [f for f in content_futures if f.done()]
-                            except: pass
-                        for f in batch:
-                            try:
-                                is_match = f.result()
-                                info = content_futures.pop(f)
-                                if is_match:
-                                    count += 1
-                                    yield {
-                                        "path": info["path"],
-                                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                                        "size": info["size"],
-                                        "mtime": info["mtime"],
-                                        "ext": info["ext"]
-                                    }
-                                    if count >= max_results: break
-                            except Exception:
-                                if f in content_futures: content_futures.pop(f)
-                        if count >= max_results: break
-                if count >= max_results: break
-            if count >= max_results: break
-
-        for f in as_completed(content_futures):
-            if count >= max_results: break
-            try:
-                is_match = f.result()
-                info = content_futures.pop(f)
-                if is_match:
-                    count += 1
-                    yield {
-                        "path": info["path"],
-                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                        "size": info["size"],
-                        "mtime": info["mtime"],
-                        "ext": info["ext"]
-                    }
-            except Exception: pass
+                except Exception: pass
+        finally:
+            # Shutdown executor quickly if generator is closed
+            # This is hard to do perfectly but we ensure all remaining tasks in content_futures are cleared from our tracking
+            content_futures.clear()
 
 class SearchWorker(threading.Thread):
     def __init__(self, root_dir, search_text, search_mode, manual_excludes, 
                  include_dirs, result_queue, stop_event, use_gitignore=True,
-                 is_inverse=False, case_sensitive=False, max_results=2000):
+                 is_inverse=False, case_sensitive=False, max_results=2000,
+                 max_size_mb=5):
         super().__init__()
         self.root_dir = root_dir
         self.search_text = search_text
@@ -185,12 +186,14 @@ class SearchWorker(threading.Thread):
         self.is_inverse = is_inverse
         self.case_sensitive = case_sensitive
         self.max_results = max_results
+        self.max_size_mb = max_size_mb
         self.daemon = True
 
     def run(self):
         gen = search_generator(self.root_dir, self.search_text, self.search_mode, 
                                self.manual_excludes, self.include_dirs, self.use_gitignore,
-                               self.is_inverse, self.case_sensitive, self.max_results)
+                               self.is_inverse, self.case_sensitive, self.max_results,
+                               max_size_mb=self.max_size_mb)
         if gen is None:
             self.result_queue.put(("DONE", "DONE"))
             return

@@ -8,8 +8,8 @@
 为了防止路径越权 (Path Traversal) 和 命令注入 (Command Injection)，本项目采用了严格的校验机制：
 *   **路径权限注册制**: 只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
 *   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env`, `.ssh` 等系统及敏感目录的访问。
-*   **ActionBridge 安全执行 (v5.1+)**: 
-    *   **Windows**: 采用 `shell=True` 以兼容复杂的 CMD 模板，但对所有上下文变量（如 `{path}`, `{name}`）进行 `win_quote` (双引号包裹) 强制转义，彻底杜绝注入。
+*   **ActionBridge 安全执行 (v5.3+)**: 
+    *   **Windows**: 默认对不含 Shell 元字符 (`&|<>^%`) 的模板采用 `shell=False` 列表模式执行，彻底杜绝注入。若模板包含元字符，则回退至 `shell=True` 并强制执行 `win_quote` 转义审计。
     *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
 *   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
 *   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
@@ -39,10 +39,13 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 ### 3. 并发安全与数据一致性 (Concurrency Safety)
 *   **内存读写锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load()` 和 `save()` 操作均处于线程锁保护下，确保磁盘写入的原子性与内存状态的一致性。
 *   **深拷贝 Schema**: 调用 `get_project_data` 创建新项目时必须执行 `copy.deepcopy(DEFAULT_SCHEMA)`，防止列表/字典等引用类型在多项目间意外共享。
-*   **原子写入**: 配置保存采用**原子重命名策略** (写入 `.json.tmp` 后调用 `os.replace` 覆盖)。这确保了即使在极端情况 (如进程意外中断) 下，配置文件也不会被截断或损坏。
+*   **原子写入**: 
+    *   **配置保存**: 采用原子重命名策略 (写入 `.json.tmp` 后调用 `os.replace` 覆盖)。这确保了即使在极端情况 (如进程意外中断) 下，配置文件也不会被截断或损坏。
+    *   **文件保存 (FileOps.save_content)**: v5.3 引入了用户文件的原子化写入，通过临时文件中转确保数据完整性。
 *   **跨平台 IO 分发**: 避免直接使用如 `os.startfile` 等强依赖系统的 API。所有的原生系统调用均已抽象入 `FileUtils.open_path_in_os`，依据 `sys.platform` 进行动态分发。
 *   **路径归一化强制标准 (v5.3 PRO)**: 为了解决 Windows 大小写不敏感及正反斜杠混用导致的 `KeyError` 或 `403` 误报，**所有内存中的字典键（Dictionary Keys）必须且只能使用 `PathValidator.norm_path` 处理后的字符串。**
 *   **前端通信标准 (_fetch)**: `app.js` 必须一致性地调用 `App._fetch` 而非原生 `fetch`。这一封装确保了 HTTP 非 200 系列的状态码能被捕获并转化为人类可读的 UI Toast 提示，避免 API 拦截引发的静默失败。
+*   **工作区历史与状态对齐 (v5.3+)**: `DataManager` 现在支持 `pinned_projects` (置顶) 和 `recent_projects` (最近，基于 LRU)。通过 `/api/project/settings` 接口，前端 UI 的排除规则和搜索模式将被精准持久化至各项目的 `search_settings` 字段。在切换项目或刷新时，系统会自动从该字段恢复 UI 变量，确保跨会话的“动态对齐”与参数一致性。
 
 ### 4. 文件操作与快速分类 (FileOps & Quick Categorization)
 *   **文件操作**: 实现了安全的文件移动、删除和归档功能。

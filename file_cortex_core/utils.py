@@ -35,6 +35,37 @@ class FormatUtils:
         if not text: return 0
         return len(text) // 4
 
+    @staticmethod
+    def collect_paths(paths, root_dir=None, mode='relative', separator='\n'):
+        """
+        Formats a list of paths into a single string with a custom separator.
+        """
+        # Handle escapes in separator
+        sep = separator.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+        
+        formatted = []
+        root = pathlib.Path(root_dir).resolve() if root_dir else None
+        
+        for p_str in paths:
+            try:
+                # We use resolve() to handle '..' and normalize paths first
+                p = pathlib.Path(p_str).resolve()
+                
+                if mode == 'relative' and root:
+                    # Check if p is under root
+                    if root in p.parents or root == p:
+                        # Use as_posix() or str()? 
+                        # User's request implies cross-tool usage, str() is usually fine on the host OS.
+                        formatted.append(str(p.relative_to(root)))
+                    else:
+                        formatted.append(str(p))
+                else:
+                    formatted.append(str(p))
+            except Exception:
+                formatted.append(p_str)
+                
+        return sep.join(formatted)
+
 class FileUtils:
     @staticmethod
     def is_binary(file_path):

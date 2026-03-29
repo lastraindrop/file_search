@@ -58,7 +58,7 @@ const App = {
     },
 
     init: async () => {
-        App.loadRecentProjects();
+        App.loadWorkspaces();
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -93,48 +93,90 @@ const App = {
         localStorage.setItem('sidebarExpanded', App.state.isSidebarExpanded);
     },
 
-    loadRecentProjects: async () => {
+    loadWorkspaces: async () => {
         try {
-            const res = await fetch('/api/recent_projects');
+            const res = await fetch('/api/workspaces');
             const data = await res.json();
-            const list = document.getElementById('recentProjectsList');
-            list.innerHTML = '';
-            data.forEach(p => {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-outline-info btn-sm text-truncate w-100 mb-1';
-                btn.innerText = App.state.isSidebarExpanded ? p.name : p.name[0].toUpperCase();
-                btn.title = p.path;
-                btn.onclick = () => {
-                    document.getElementById('projectPath').value = p.path;
-                    App.openProject();
-                };
-                list.appendChild(btn);
-            });
-        } catch (e) { console.error("Failed to load recent projects", e); }
+            App.renderWorkspaces(data);
+        } catch (e) { console.error("Failed to load workspaces", e); }
     },
 
-    openProject: async () => {
-        const path = document.getElementById('projectPath').value.trim();
-        if (!path) return;
+    renderWorkspaces: (data) => {
+        const renderList = (list, containerId) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            list.forEach(item => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-outline-info btn-sm text-truncate w-100 mb-1';
+                btn.style.height = '32px';
+                btn.innerText = App.state.isSidebarExpanded ? item.name : item.name[0].toUpperCase();
+                btn.title = item.path;
+                btn.onclick = () => {
+                    document.getElementById('projectPath').value = item.path;
+                    App.openProject();
+                };
+                container.appendChild(btn);
+            });
+        };
+        renderList(data.pinned, 'pinnedProjectsList');
+        renderList(data.recent, 'recentProjectsList');
+        
+        const isPinned = data.pinned.some(p => p.path === App.state.projectPath);
+        App.updatePinUI(isPinned);
+    },
+
+    updatePinUI: (isPinned) => {
+        const btn = document.getElementById('btnPin');
+        if (btn) {
+            btn.innerText = isPinned ? '⭐' : '☆';
+            btn.classList.toggle('btn-warning', isPinned);
+            btn.classList.toggle('btn-outline-warning', !isPinned);
+        }
+    },
+
+    togglePin: async () => {
+        if (!App.state.projectPath) return;
+        try {
+            const res = await App._fetch('/api/workspaces/pin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ path: App.state.projectPath })
+            });
+            const data = await res.json();
+            App.updatePinUI(data.is_pinned);
+            await App.loadWorkspaces();
+        } catch (e) { App.showToast("Pin failed: " + e.message, 'danger'); }
+    },
+
+    openProject: async (path = null) => {
+        const p = path || document.getElementById('projectPath').value.trim();
+        if (!p) return;
 
         try {
             const res = await App._fetch('/api/open', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ path })
+                body: JSON.stringify({ path: p })
             });
             const data = await res.json();
             
-            App.state.projectPath = path;
-            localStorage.setItem('lastProjectPath', path);
+            App.state.projectPath = p;
+            document.getElementById('projectPath').value = p;
+            localStorage.setItem('lastProjectPath', p);
             
-            const configRes = await App._fetch(`/api/project/config?path=${encodeURIComponent(path)}`);
+            const configRes = await App._fetch(`/api/project/config?path=${encodeURIComponent(p)}`);
             App.state.projConfig = await configRes.json();
             
-            // Fill Prompt Templates dropdown
-            App.updateTemplateList();
+            // Restore UI Settings from Config
+            if (App.state.projConfig.excludes) {
+                document.getElementById('excludeInput').value = App.state.projConfig.excludes;
+            }
+            if (App.state.projConfig.search_settings) {
+                document.getElementById('searchMode').value = App.state.projConfig.search_settings.mode || 'smart';
+            }
             
-            // Restore Staging List from config
+            App.updateTemplateList();
             if (App.state.projConfig.staging_list) {
                 App.state.staging = new Set(App.state.projConfig.staging_list);
                 App.renderStaging();
@@ -142,40 +184,36 @@ const App = {
 
             const rootContainer = document.getElementById('fileTreeRoot');
             rootContainer.innerHTML = '';
-            // Backend returns the root node object directly
             rootContainer.appendChild(App.renderTree(data));
             App.renderFavorites();
             App.renderActions();
-            App.loadRecentProjects();
+            App.loadWorkspaces();
 
-            // Sync settings from config if available and UI is empty
-            if (App.state.projConfig.excludes && !document.getElementById('excludeInput').value) {
-                document.getElementById('excludeInput').value = App.state.projConfig.excludes;
-            }
             App.showToast(`Opened project: ${data.name}`);
         } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
     },
 
     refreshProject: async () => {
         if (!App.state.projectPath) return;
-        // Save current UI state to backend before refreshing tree
-        const excludes = document.getElementById('excludeInput').value;
-        const mode = document.getElementById('searchMode').value;
-        
-        localStorage.setItem('searchExcludes', excludes);
-        localStorage.setItem('searchMode', mode);
+        await App.saveSettings();
+        await App.openProject(App.state.projectPath);
+    },
 
+    saveSettings: async () => {
+        if (!App.state.projectPath) return;
         try {
-            await fetch('/api/project/settings', {
+            await App._fetch('/api/project/settings', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     project_path: App.state.projectPath,
-                    settings: { excludes: excludes }
+                    excludes: document.getElementById('excludeInput').value,
+                    search_settings: {
+                        mode: document.getElementById('searchMode').value
+                    }
                 })
             });
-            App.openProject();
-        } catch (e) { App.openProject(); } // Refresh anyway
+        } catch (e) { console.warn("Auto-save settings failed", e); }
     },
 
     // --- File Tree Rendering ---
@@ -434,6 +472,10 @@ const App = {
             <div class="small text-muted text-truncate">${App.escapeHtml(data.path)}</div>
         `;
         item.onclick = () => App.previewFile(data.path);
+        item.oncontextmenu = (e) => {
+            e.preventDefault();
+            App.showPathCollector([data.path]);
+        };
         list.appendChild(item);
     },
 
@@ -798,13 +840,13 @@ const App = {
 
     bulkStage: () => {
         if (App.state.selectedFiles.size === 0) return;
-        App.state.selectedFiles.forEach(p => App.state.staging.add(p));
-        App.state.selectedFiles.clear();
+        App.state.selectedFiles.forEach(path => App.state.staging.add(path));
         document.getElementById('selectAllCb').checked = false;
         App.renderStaging();
         App.syncStagingToBackend();
+        App.state.selectedFiles.clear();
         App.updateBulkUI();
-        App.showToast(`Batch added ${App.state.staging.size} files to staging.`);
+        App.showToast("✅ Added selected items to staging");
     },
 
     bulkDelete: async () => {
@@ -840,12 +882,53 @@ const App = {
                 })
             });
             const data = await res.json();
-            App.showToast(`Batch Move: ${data.new_paths.length} moved, ${(data.skipped||[]).length} skipped.`);
+            App.showToast(`Batch Move: ${data.new_paths.length} items moved.`);
             App.state.selectedFiles.clear();
             App.updateBulkUI();
             App.openProject(); 
         } catch (e) { App.showToast("Move failed: " + e.message, 'danger'); }
+    },
+
+    // --- Path Collection ---
+    showPathCollector: (paths = null) => {
+        App._currentCollectionPaths = paths || Array.from(App.state.staging);
+        if (!App._currentCollectionPaths || App._currentCollectionPaths.length === 0) {
+            App.showToast("No files selected or staged!", "warning");
+            return;
+        }
+        const modal = new bootstrap.Modal(document.getElementById('pathCollectorModal'));
+        modal.show();
+    },
+
+    collectPaths: async () => {
+        const paths = App._currentCollectionPaths;
+        const mode = document.querySelector('input[name="pathMode"]:checked').value;
+        const separator = document.getElementById('pathSep').value;
+        const project_root = App.state.projectPath;
+
+        try {
+            const res = await App._fetch('/api/fs/collect_paths', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paths: paths,
+                    project_root: project_root,
+                    mode: mode,
+                    separator: separator
+                })
+            });
+            const data = await res.json();
+            if (data.result) {
+                await navigator.clipboard.writeText(data.result);
+                App.showToast(`✅ ${paths.length} paths copied to clipboard!`, "success");
+                const modalEl = document.getElementById('pathCollectorModal');
+                bootstrap.Modal.getInstance(modalEl).hide();
+            }
+        } catch (e) {
+            App.showToast("Collection failed: " + e.message, "danger");
+        }
     }
 };
 
-window.onload = App.init;
+// Initialize App
+document.addEventListener('DOMContentLoaded', () => App.init());

@@ -39,7 +39,12 @@ class DataManager:
 
     def __init__(self):
         if self._initialized: return
-        self.data = {"last_directory": "", "projects": {}}
+        self.data = {
+            "last_directory": "", 
+            "projects": {}, 
+            "recent_projects": [], 
+            "pinned_projects": []
+        }
         self.load()
         self._initialized = True
 
@@ -64,6 +69,9 @@ class DataManager:
                             except Exception:
                                 norm_projects[k] = v
                         self.data["projects"] = norm_projects
+                    
+                    self.data["recent_projects"] = loaded.get("recent_projects", [])
+                    self.data["pinned_projects"] = loaded.get("pinned_projects", [])
                 except Exception as e:
                     logger.error(f"Config load error: {e}")
 
@@ -90,6 +98,76 @@ class DataManager:
             except Exception as e:
                 logger.error(f"Config save error: {e}")
 
+    DEFAULT_SCHEMA = {
+        "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
+        "max_search_size_mb": 10,
+        "staging_list": [],
+        "current_group": "Default",
+        "groups": {"Default": []},
+        "notes": {},
+        "tags": {},
+        "sessions": [],
+        "custom_tools": {
+             "Summary": "python -c \"import sys; print(f'Summary for {sys.argv[1]}')\" {path}",
+             "Lint": "python -m py_compile {path}"
+        },
+        "quick_categories": {
+             "Scripts": "scripts",
+             "Docs": "docs"
+        },
+        "prompt_templates": {
+            "Code Review": "Please review the following code for logic errors, potential bugs, and code style. Focus on security and performance. {files}",
+            "Summary": "Please provide a concise summary of the functionality and purpose of each of the following files. {files}",
+            "Docstring": "Generate professional docstrings for all functions and classes in these files. {files}"
+        },
+        "search_settings": {
+            "mode": "smart",
+            "case_sensitive": False,
+            "inverse": False,
+            "include_dirs": False
+        }
+    }
+
+    def add_to_recent(self, path: str):
+        """Adds a project path to the top of recent projects list."""
+        from .security import PathValidator
+        try:
+            p = PathValidator.norm_path(path)
+        except:
+            p = path
+            
+        if p in self.data["recent_projects"]:
+            self.data["recent_projects"].remove(p)
+        self.data["recent_projects"].insert(0, p)
+        # Limit to 15 recent projects
+        self.data["recent_projects"] = self.data["recent_projects"][:15]
+        self.data["last_directory"] = p
+        self.save()
+
+    def toggle_pinned(self, path: str):
+        """Toggles the pinned status of a project."""
+        from .security import PathValidator
+        try:
+            p = PathValidator.norm_path(path)
+        except:
+            p = path
+            
+        if p in self.data["pinned_projects"]:
+            self.data["pinned_projects"].remove(p)
+            status = False
+        else:
+            self.data["pinned_projects"].append(p)
+            status = True
+        self.save()
+        return status
+
+    def get_workspaces_summary(self) -> dict:
+        """Returns a categorized summary of workspaces."""
+        return {
+            "pinned": [{"path": p, "name": pathlib.Path(p).name} for p in self.data["pinned_projects"] if os.path.exists(p)],
+            "recent": [{"path": p, "name": pathlib.Path(p).name} for p in self.data["recent_projects"] if os.path.exists(p) and p not in self.data["pinned_projects"]]
+        }
+
     def get_project_data(self, path_str: str) -> dict:
         """Returns (and initializes if needed) the configuration for a given project."""
         from .security import PathValidator
@@ -98,35 +176,11 @@ class DataManager:
         except Exception:
             path_key = path_str
             
-        DEFAULT_SCHEMA = {
-            "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
-            "max_search_size_mb": 10,
-            "staging_list": [],
-            "current_group": "Default",
-            "groups": {"Default": []},
-            "notes": {},
-            "tags": {},
-            "sessions": [],
-            "custom_tools": {
-                 "Summary": "python -c \"import sys; print(f'Summary for {sys.argv[1]}')\" {path}",
-                 "Lint": "python -m py_compile {path}"
-            },
-            "quick_categories": {
-                 "Scripts": "scripts",
-                 "Docs": "docs"
-            },
-            "prompt_templates": {
-                "Code Review": "Please review the following code for logic errors, potential bugs, and code style. Focus on security and performance. {files}",
-                "Summary": "Please provide a concise summary of the functionality and purpose of each of the following files. {files}",
-                "Docstring": "Generate professional docstrings for all functions and classes in these files. {files}"
-            }
-        }
-        
         if path_key not in self.data["projects"]:
-            self.data["projects"][path_key] = copy.deepcopy(DEFAULT_SCHEMA)
+            self.data["projects"][path_key] = copy.deepcopy(self.DEFAULT_SCHEMA)
         else:
             proj = self.data["projects"][path_key]
-            for key, val in DEFAULT_SCHEMA.items():
+            for key, val in self.DEFAULT_SCHEMA.items():
                 if key not in proj:
                     proj[key] = copy.deepcopy(val)
         
@@ -148,15 +202,11 @@ class DataManager:
         from .security import PathValidator
         try:
             target = PathValidator.norm_path(target_path_str)
-            print(f"DEBUG: resolving target={target}, registered={list(self.data['projects'].keys())}")
             for p_root in self.data["projects"]:
                 # p_root is already normalized on save/load
                 if target == p_root or target.startswith(p_root.rstrip('/') + '/'):
-                    print(f"DEBUG: match found for {target} -> {p_root}")
                     return p_root
-            print(f"DEBUG: NO MATCH for {target}")
-        except Exception as e:
-            print(f"DEBUG: exception {e}")
+        except Exception:
             pass
         return None
 

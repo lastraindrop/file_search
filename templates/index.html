@@ -22,6 +22,7 @@
             </a>
             <div class="d-flex ms-auto gap-2">
                 <input type="text" id="projectPath" class="form-control form-control-sm" placeholder="Full Project Path" style="width: 300px;">
+                <button id="btnPin" class="btn btn-outline-warning btn-sm" onclick="App.togglePin()" title="Pin Workspace">☆</button>
                 <button class="btn btn-primary btn-sm px-3" onclick="App.openProject()">Open</button>
                 <button class="btn btn-outline-light btn-sm" onclick="App.refreshProject()" title="Refresh Project">🔄</button>
             </div>
@@ -46,9 +47,8 @@
             <!-- Sidebar: Recent Projects & Sessions -->
             <div id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="width: 60px; transition: width 0.3s;">
                 <button class="btn btn-outline-light btn-sm mb-3" onclick="App.toggleSidebar()" title="Toggle Sidebar">☰</button>
-                <div id="recentProjectsList" class="d-flex flex-column gap-2 overflow-auto">
-                    <!-- Project icons will appear here -->
-                </div>
+                <div id="pinnedProjectsList" class="d-flex flex-column gap-2 mb-2 border-bottom pb-2"></div>
+                <div id="recentProjectsList" class="d-flex flex-column gap-2 overflow-auto"></div>
             </div>
 
             <!-- Left Panel: File Browser & Search -->
@@ -164,6 +164,7 @@
                         </select>
                     </div>
                     <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="App.archiveStaging()">📦 Archive Selection</button>
+                    <button class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="App.showPathCollector()">🔗 Copy Paths</button>
                     <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" onclick="App.generateContext()">🚀 Copy Context</button>
                 </div>
             </div>
@@ -181,6 +182,46 @@
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-0" id="toolResultModalBody" style="background: #0a0a0a; border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);">
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Path Collection Modal -->
+    <div class="modal fade" id="pathCollectorModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content glass-panel text-white">
+          <div class="modal-header border-bottom border-secondary">
+            <h5 class="modal-title">🧬 Path Collection & Formatting</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-4">
+            <div class="mb-4">
+                <label class="form-label small text-muted uppercase tracking-wider mb-2">Path Mode</label>
+                <div class="d-flex gap-4">
+                    <div class="form-check custom-radio">
+                        <input class="form-check-input" type="radio" name="pathMode" id="pathModeRel" value="relative" checked>
+                        <label class="form-check-label small" for="pathModeRel">Project Relative</label>
+                    </div>
+                    <div class="form-check custom-radio">
+                        <input class="form-check-input" type="radio" name="pathMode" id="pathModeAbs" value="absolute">
+                        <label class="form-check-label small" for="pathModeAbs">Full Absolute</label>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label small text-muted uppercase tracking-wider mb-2 d-block">Separator</label>
+                <div class="btn-group btn-group-sm mb-2 w-100">
+                    <button class="btn btn-outline-secondary" onclick="document.getElementById('pathSep').value='\\n'">NewLine</button>
+                    <button class="btn btn-outline-secondary" onclick="document.getElementById('pathSep').value=' '">Space</button>
+                    <button class="btn btn-outline-secondary" onclick="document.getElementById('pathSep').value=' @'">Space+@</button>
+                    <button class="btn btn-outline-secondary" onclick="document.getElementById('pathSep').value=' #'">Space+#</button>
+                </div>
+                <input type="text" id="pathSep" class="form-control form-control-sm bg-dark text-white border-secondary mt-1" value="\n" placeholder="Custom separator (e.g. \n, \t, etc.)">
+            </div>
+          </div>
+          <div class="modal-footer border-top border-secondary">
+            <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-sm btn-primary px-4" onclick="App.collectPaths()">✅ Copy Results</button>
           </div>
         </div>
       </div>

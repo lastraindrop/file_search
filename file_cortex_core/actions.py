@@ -50,8 +50,15 @@ class FileOps:
         if not path.is_file(): raise IsADirectoryError("Target is a directory.")
         if FileUtils.is_binary(path): raise ValueError("Cannot save binary file as text.")
         
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        # Atomic Write: write to temporary file then swap
+        temp_path = path.with_suffix(path.suffix + '.tmp')
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.replace(temp_path, path)
+        except Exception as e:
+            if temp_path.exists(): temp_path.unlink()
+            raise e
         return True
 
     @staticmethod
@@ -130,12 +137,34 @@ class ActionBridge:
         
         try:
             if os.name == 'nt':
+                # Security Hardening for Windows
+                # If there are no shell metacharacters, we use shell=False for maximum safety
+                shell_metas = set("&|<>^%")
+                has_meta = any(c in template for c in shell_metas)
+                
                 def win_quote(s):
                     return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
-                safe_context = {k: win_quote(v) for k, v in context.items()}
-                cmd_str = template.format(**safe_context)
-                logger.info(f"AUDIT - Executing external tool (Win/Shell): {cmd_str}")
-                res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
+                
+                if not has_meta:
+                    # Parse command and args using a simple split for shell=False
+                    # Note: This assumes simple templates like "cmd {path}"
+                    cmd_str = template.format(**context)
+                    # Use shlex for simple tokenizing even on Windows (good enough for simple paths)
+                    try:
+                        args = shlex.split(cmd_str, posix=False)
+                        logger.info(f"AUDIT - Executing external tool (Win/No-Shell): {args}")
+                        res = subprocess.run(args, shell=False, capture_output=True, text=True, check=False)
+                    except Exception:
+                        # Fallback if shlex fails
+                        logger.warning("shlex failed on Windows, falling back to shell=True")
+                        safe_context = {k: win_quote(v) for k, v in context.items()}
+                        cmd_str = template.format(**safe_context)
+                        res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
+                else:
+                    safe_context = {k: win_quote(v) for k, v in context.items()}
+                    cmd_str = template.format(**safe_context)
+                    logger.info(f"AUDIT - Executing external tool (Win/Shell-Required): {cmd_str}")
+                    res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
             else:
                 tokens = shlex.split(template, posix=True)
                 final_cmd = [t.format(**context) for t in tokens]
@@ -164,19 +193,40 @@ class ActionBridge:
         
         try:
             if os.name == 'nt':
-                # Windows: Use shell=True with win_quote, consistent with execute_tool
+                shell_metas = set("&|<>^%")
+                has_meta = any(c in template for c in shell_metas)
+                
                 def win_quote(s):
                     return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
-                safe_context = {k: win_quote(v) for k, v in context.items()}
-                cmd_str = template.format(**safe_context)
-                logger.info(f"AUDIT - Streaming external tool (Win/Shell): {cmd_str}")
-                process = subprocess.Popen(
-                    cmd_str, shell=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, encoding='utf-8', errors='replace'
-                )
+                
+                if not has_meta:
+                    cmd_str = template.format(**context)
+                    try:
+                        args = shlex.split(cmd_str, posix=False)
+                        logger.info(f"AUDIT - Streaming external tool (Win/No-Shell): {args}")
+                        process = subprocess.Popen(
+                            args, shell=False,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1, encoding='utf-8', errors='replace'
+                        )
+                    except Exception:
+                        safe_context = {k: win_quote(v) for k, v in context.items()}
+                        cmd_str = template.format(**safe_context)
+                        process = subprocess.Popen(
+                            cmd_str, shell=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1, encoding='utf-8', errors='replace'
+                        )
+                else:
+                    safe_context = {k: win_quote(v) for k, v in context.items()}
+                    cmd_str = template.format(**safe_context)
+                    logger.info(f"AUDIT - Streaming external tool (Win/Shell-Required): {cmd_str}")
+                    process = subprocess.Popen(
+                        cmd_str, shell=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, encoding='utf-8', errors='replace'
+                    )
             else:
-                # Unix: Use shell=False with shlex.split, consistent with execute_tool
                 tokens = shlex.split(template, posix=True)
                 final_cmd = [t.format(**context) for t in tokens]
                 logger.info(f"AUDIT - Streaming external tool (Unix/List): {' '.join(final_cmd)}")
