@@ -396,6 +396,12 @@ class FileCortexApp:
         self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_tokens} Tokens")
 
     def on_search_input(self, *args):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.root.after_cancel(self._search_timer)
+        self._search_timer = self.root.after(300, self._perform_search)
+
+    def _perform_search(self):
+        self._search_timer = None
         if not self.current_dir: return
         if self.search_thread and self.search_thread.is_alive(): self.stop_event.set()
         for item in self.tree_search.get_children(): self.tree_search.delete(item)
@@ -443,8 +449,14 @@ class FileCortexApp:
         if col == "size":
             def parse_sz(s):
                 try:
-                    num = float(s.split()[0])
-                    return num * 1024 if "KB" in s else num * 1024 * 1024
+                    parts = s.split()
+                    if not parts: return 0
+                    num = float(parts[0])
+                    unit = parts[1].upper() if len(parts) > 1 else ""
+                    if "GB" in unit: return num * 1024 * 1024 * 1024
+                    if "MB" in unit: return num * 1024 * 1024
+                    if "KB" in unit: return num * 1024
+                    return num # Default to Bytes
                 except Exception: return 0
             l.sort(key=lambda t: parse_sz(t[0]), reverse=reverse)
         else:

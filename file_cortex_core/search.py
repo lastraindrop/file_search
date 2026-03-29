@@ -10,7 +10,7 @@ from .utils import FileUtils, FormatUtils
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
                      is_inverse=False, case_sensitive=False, max_results=2000,
-                     max_size_mb=5):
+                     max_size_mb=5, stop_event=None):
     """
     Multi-mode file search generator.
     """
@@ -99,7 +99,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         logger.error(f"Error getting metadata for {full_path}: {e}")
                         continue
                     
-                    if search_mode != 'content':
+                    # Logic branching by mode
+                    if search_mode in ('smart', 'exact'):
+                        # Filename-centric modes
                         if match_name(file):
                             count += 1
                             yield {
@@ -109,16 +111,18 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                 **meta
                             }
                             if count >= max_results: break
-                            continue
+                        continue # Skip content check for path-focused modes
                     
                     if search_mode in ('content', 'regex') and search_text:
+                        if stop_event and stop_event.is_set(): break
+                        
                         future = executor.submit(match_content, full_path)
                         content_futures[future] = {
                             "path": str(full_path),
                             "is_inverse": is_inverse,
                             **meta
                         }
-                        if len(content_futures) >= 40: # Increased batch size
+                        if len(content_futures) >= 40:
                             # Adaptive Batching
                             batch = [f for f in content_futures if f.done()]
                             if not batch:
@@ -144,8 +148,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                 except Exception:
                                     if f in content_futures: content_futures.pop(f)
                             if count >= max_results: break
-                    if count >= max_results: break
-                if count >= max_results: break
+                    if count >= max_results or (stop_event and stop_event.is_set()): break
+                if count >= max_results or (stop_event and stop_event.is_set()): break
 
             # Process remaining
             for f in as_completed(content_futures):
@@ -192,8 +196,8 @@ class SearchWorker(threading.Thread):
     def run(self):
         gen = search_generator(self.root_dir, self.search_text, self.search_mode, 
                                self.manual_excludes, self.include_dirs, self.use_gitignore,
-                               self.is_inverse, self.case_sensitive, self.max_results,
-                               max_size_mb=self.max_size_mb)
+                                self.is_inverse, self.case_sensitive, self.max_results,
+                                max_size_mb=self.max_size_mb, stop_event=self.stop_event)
         if gen is None:
             self.result_queue.put(("DONE", "DONE"))
             return

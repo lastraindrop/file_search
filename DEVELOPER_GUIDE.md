@@ -30,32 +30,34 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **Token 计数**: 采用 `FormatUtils.estimate_tokens` 进行快速预判，帮助用户在发送给 LLM 前评估成本。
 *   **Prompt 预设**: `DataManager` 内置了 `prompt_templates` 字段，允许用户预设“代码审查”、“生成单测”等常用指令，并一键组装上下文。
 
-### 4. 参数一致性与动态对齐 (Parameter Consistency & Dynamic Alignment)
+### 4. 数据一致性与参数对齐 (Dynamic Alignment)
 为了确保多端（Web, Desktop, CLI）及不同版本间的稳定性，本项目遵循以下核心原则：
-*   **Schema 自愈 (Self-Healing)**: `DataManager.DEFAULT_SCHEMA` 是全局配置的单一事实来源。任何配置读取均会自动合并默认值，确保旧版配置文件在升级后能自动补全缺失字段（如 `prompt_templates`）。
-*   **动态路径感知**: 严禁在核心逻辑中硬编码特定的路径分隔符 (`/` 或 `\`)。所有的路径比较与安全校验均应通过 `pathlib.Path.resolve()` 后的组件进行，以实现跨系统的“动态对齐”。
-*   **UI 数据驱动**: Web 前端（`app.js`）不应硬编码特定的配置 Key。例如，Prompt 模板下拉列表应完全由 `/api/project/prompt_templates` 接口返回的数据动态渲染。
+*   **Schema 自愈 (Self-Healing)**: `DataManager._apply_default_schema` 是核心稳定性来源。任何配置读取均会自动合并 `DEFAULT_SCHEMA`，确保即使用户手动修改了配置文件或使用了旧版配置，系统也能自动补全缺失字段（如 `search_settings`），防止运行时 `KeyError`。
+*   **路径归一化强制标准 (Normalization)**: v5.3 确立了 `PathValidator.norm_path` 作为内存缓存键和字典键的唯一标准。这消除了 Windows 上驱动器号大小写不一致及斜杠方向差异带来的“路径逻辑孤岛”。
+*   **UI 数据驱动 (Data-Driven UI)**: Web 前端（`app.js`）与后端通过严格的 API Contract 对齐。UI 层的 Prompt 模板和 Tool 下拉列表必须且只能由对应的 API 实地驱动，绝不硬编码配置 Key。
+*   **SSOT (Single Source of Truth)**: `DataManager` 实例作为配置的单一事实来源。所有的配置更新必须通过 `update_project_settings` 等专用方法，这些方法内置了 `MUTABLE_SETTINGS` 白名单校验。
 
-### 3. 并发安全与数据一致性 (Concurrency Safety)
-*   **内存读写锁**: `DataManager` 内置了 `threading.Lock()`，所有的 `load()` 和 `save()` 操作均处于线程锁保护下，确保磁盘写入的原子性与内存状态的一致性。
-*   **深拷贝 Schema**: 调用 `get_project_data` 创建新项目时必须执行 `copy.deepcopy(DEFAULT_SCHEMA)`，防止列表/字典等引用类型在多项目间意外共享。
-*   **原子写入**: 
-    *   **配置保存**: 采用原子重命名策略 (写入 `.json.tmp` 后调用 `os.replace` 覆盖)。这确保了即使在极端情况 (如进程意外中断) 下，配置文件也不会被截断或损坏。
-    *   **文件保存 (FileOps.save_content)**: v5.3 引入了用户文件的原子化写入，通过临时文件中转确保数据完整性。
-*   **跨平台 IO 分发**: 避免直接使用如 `os.startfile` 等强依赖系统的 API。所有的原生系统调用均已抽象入 `FileUtils.open_path_in_os`，依据 `sys.platform` 进行动态分发。
-*   **路径归一化强制标准 (v5.3 PRO)**: 为了解决 Windows 大小写不敏感及正反斜杠混用导致的 `KeyError` 或 `403` 误报，**所有内存中的字典键（Dictionary Keys）必须且只能使用 `PathValidator.norm_path` 处理后的字符串。**
-*   **前端通信标准 (_fetch)**: `app.js` 必须一致性地调用 `App._fetch` 而非原生 `fetch`。这一封装确保了 HTTP 非 200 系列的状态码能被捕获并转化为人类可读的 UI Toast 提示，避免 API 拦截引发的静默失败。
-*   **工作区历史与状态对齐 (v5.3+)**: `DataManager` 现在支持 `pinned_projects` (置顶) 和 `recent_projects` (最近，基于 LRU)。通过 `/api/project/settings` 接口，前端 UI 的排除规则和搜索模式将被精准持久化至各项目的 `search_settings` 字段。在切换项目或刷新时，系统会自动从该字段恢复 UI 变量，确保跨会话的“动态对齐”与参数一致性。
+### 5. 并发安全与持久化 (Concurrency & Persistence)
+*   **原子化读写锁**: `DataManager` 内嵌了 `threading.RLock()`，所有的持久化 I/O 操作均处于锁保护下。
+*   **原子写入策略**: 使用 `.tmp` 临时文件 + `os.replace` 确保文件写入的完整性。
 
-### 4. 文件操作与快速分类 (FileOps & Quick Categorization)
+### 6. 防错检查清单 (Post-Audit Anti-Patterns)
+在开发新功能时，必须避开以下 v5.3 审计发现的常见陷阱：
+*   **[禁止] 重复定义 API 模型**: 严禁在同一文件（如 `web_app.py`）中定义两个相同名称的 `BaseModel` 类，这会导致 FastAPI 路由解析失败。
+*   **[禁止] 相对导入根目录脚本**: `web_app.py` 等根目录脚本不应使用 `from .xxx`，应直接使用 `from xxx`。
+*   **[强制] 路由唯一性**: 发布前必须验证是否存在同名的 API 装饰器（如 `@app.post("/settings")` 定义了两次），FastAPI 会优先执行最后一个，导致前端调用 422。
+*   **[强制] 跨平台 Open 实现**: 严禁直接调用 `os.startfile`，必须通过封装好的 `FileUtils.open_path_in_os` 进行分发。
+
+### 7. 文件操作与快速分类 (FileOps & Quick Categorization)
+... (后续章节递增)
 *   **文件操作**: 实现了安全的文件移动、删除和归档功能。
 *   **快速分类**: `batch_categorize` 模块允许基于规则对文件进行批量排序和分类。
 
-### 5. 动作桥接 (ActionBridge)
+### 7. 动作桥接 (ActionBridge)
 *   **模板引擎**: ActionBridge 是一个模板引擎，用于在暂存文件上执行外部命令行工具 (CLI)。
 *   **上下文注入**: 支持将文件路径、项目根目录、文件扩展名等上下文信息注入到 CLI 命令中，实现高度灵活的自动化操作。
 
-### 6. UI 层 (UI Layer)
+### 8. UI 层 (UI Layer)
 *   **解耦设计**: Tkinter 和 FastAPI 接口是解耦的，允许独立开发和部署。
 
 ## 🧪 测试方法论

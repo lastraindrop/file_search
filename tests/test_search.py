@@ -15,9 +15,9 @@ from file_cortex_core import search_generator, FileUtils
     ("MAIN.PY", "exact", False, True, False, True, []),
     (".js", "exact", False, False, False, True, ["utils.js"]),
 
-    # --- Regex Matrix ---
-    (r"utils\..*", "regex", False, False, False, True, ["utils.js"]),
-    (r"^m.*py$", "regex", False, False, False, True, ["main.py"]),
+    # --- Regex (Content-based) Matrix ---
+    (r"console\..*", "regex", False, False, False, True, ["utils.js"]),
+    (r"print\(.*", "regex", False, False, False, True, ["main.py"]),
     (r"NON_EXISTENT", "regex", False, False, False, True, []),
 
     # --- Content Search Matrix ---

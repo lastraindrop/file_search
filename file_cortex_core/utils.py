@@ -68,6 +68,21 @@ class FormatUtils:
 
 class FileUtils:
     @staticmethod
+    def open_path_in_os(path):
+        """Opens a file or directory using the default OS application."""
+        import subprocess, sys
+        p_str = str(path)
+        try:
+            if sys.platform == 'win32':
+                os.startfile(p_str)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', p_str], check=True)
+            else:
+                subprocess.run(['xdg-open', p_str], check=True)
+        except Exception as e:
+            logger.error(f"Failed to open path {p_str}: {e}")
+
+    @staticmethod
     def is_binary(file_path):
         path = pathlib.Path(file_path)
         try:

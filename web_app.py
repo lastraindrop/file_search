@@ -107,15 +107,13 @@ class PathCollectionRequest(BaseModel):
 class WorkspacePinRequest(BaseModel):
     path: str
 
-class ProjectSettingsRequest(BaseModel):
-    project_path: str
-    excludes: str
-    search_settings: dict
-
 class CategorizeRequest(BaseModel):
     project_path: str
     paths: list[str]
     category_name: str
+
+class StatsRequest(BaseModel):
+    paths: list[str]
 
 class ToolExecuteRequest(BaseModel):
     project_path: str
@@ -426,14 +424,6 @@ async def get_recent_projects_legacy():
     # Keep for old UI compatibility during migration if needed, but we'll update UI soon
     return [{"name": pathlib.Path(p).name, "path": p} for p in _get_dm().data["projects"].keys() if os.path.exists(p)]
 
-@app.post("/api/project/settings")
-async def save_settings(req: ProjectSettingsRequest):
-    dm = _get_dm()
-    proj = dm.get_project_data(req.project_path)
-    proj["excludes"] = req.excludes
-    proj["search_settings"] = req.search_settings
-    dm.save()
-    return {"status": "ok"}
 
 @app.post("/api/project/note")
 async def api_add_note(req: NoteRequest):
@@ -486,6 +476,21 @@ async def update_tools(req: ToolsUpdateRequest):
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/project/stats")
+async def get_staging_stats(req: StatsRequest):
+    """Calculates total token estimate for a list of paths."""
+    total_tokens = 0
+    for p_str in req.paths:
+        p = pathlib.Path(p_str)
+        if p.is_file() and p.exists() and not FileUtils.is_binary(p):
+            try:
+                # Use 'ignore' to handle potential encoding issues silently as this is just for stats
+                content = p.read_text('utf-8', 'ignore')
+                total_tokens += FormatUtils.estimate_tokens(content)
+            except Exception as e:
+                logger.debug(f"Stats calculation failed for {p_str}: {e}")
+    return {"total_tokens": total_tokens}
 
 @app.post("/api/project/categories")
 async def update_categories(req: CategoriesUpdateRequest):
@@ -560,7 +565,6 @@ async def collect_paths_api(req: PathCollectionRequest):
     try:
         # Valid Project Root Check for safety
         if req.project_root:
-            from .security import PathValidator
             if not PathValidator.is_safe(req.project_root, req.project_root): # Self-safety check
                  pass # Still allowed for formatting purposes, but might be restricted later
         

@@ -44,7 +44,7 @@
    ```
 2. 在浏览器中访问：`http://127.0.0.1:8000`
 
-项目包含 **65+** 项覆盖核心逻辑、API、并发压力及 AI 工作流 E2E 的 `pytest` 测试。测试环境实现了 **DataManager 强制隔离重置**，确保跨平台逻辑的绝对可靠性：
+项目包含 **72** 项覆盖核心逻辑、API、并发压力及 AI 工作流 E2E 的 `pytest` 测试。测试环境实现了 **DataManager 强制隔离重置**，确保跨平台逻辑的绝对可靠性：
 ```bash
 python -m pytest
 ```
@@ -63,9 +63,9 @@ python build_exe.py
 
 ## 📂 项目结构
 - `file_cortex_core/`: 微内核逻辑包（配置、安全、工具、行为、搜索）。
-- `file_search.py`: Tkinter 桌面端应用。
-- `web_app.py`: FastAPI Web 应用。
-- `fctx.py`: 现代桌面端逻辑入口。
+- `fctx.py`: CLI orchestration tool for headless workspace management.
+- `web_app.py`: FastAPI backend and modern web interface.
+- `file_search.py`: Tkinter-based desktop GUI for local orchestration.
 - `tests/`: 自动化测试套件（新架构下的拆分式测试）。
 - `static/` & `templates/`: Web 静态资源与模板。
 - `build_exe.py`: 自动化打包脚本。
