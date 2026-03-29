@@ -69,3 +69,17 @@ def test_gitignore_ignore_logic(mock_project):
     # Safe
     rel_path_py = pathlib.Path("src/main.py")
     assert FileUtils.should_ignore("main.py", rel_path_py, ["*.txt"], git_spec) is False
+
+def test_context_formatter_with_str_root_dir(mock_project):
+    """Verify ContextFormatter works when root_dir is a string (not pathlib.Path)."""
+    files = [str(mock_project / "src" / "main.py")]
+    # Pass root_dir as string (as the Web API does)
+    output = ContextFormatter.to_markdown(files, root_dir=str(mock_project))
+    # Should show relative path "src/main.py" or "src\\main.py", NOT just "main.py"
+    assert "src" in output and "main.py" in output
+
+def test_context_formatter_with_none_root_dir(mock_project):
+    """Verify ContextFormatter still works with root_dir=None."""
+    files = [str(mock_project / "src" / "main.py")]
+    output = ContextFormatter.to_markdown(files, root_dir=None)
+    assert "main.py" in output

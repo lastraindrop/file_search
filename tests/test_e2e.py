@@ -93,12 +93,23 @@ def test_v5_workspace_orchestration_e2e(project_client, mock_project):
 
     # 2. Configure project for orchestration
     cmd = f'"{sys.executable}" -c "print(\'E2E_OK_for_{{name}}\')"'
+    # Whitelisted settings (safe)
     project_client.post("/api/project/settings", json={
         "project_path": str(mock_project),
         "settings": {
-            "quick_categories": {"JS_Bin": "scripts/js"},
-            "custom_tools": {"Tester": cmd}
+            "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
+            "max_search_size_mb": 10
         }
+    })
+    # Dedicated tools API
+    project_client.post("/api/project/tools", json={
+        "project_path": str(mock_project),
+        "tools": {"Tester": cmd}
+    })
+    # Dedicated categories API
+    project_client.post("/api/project/categories", json={
+        "project_path": str(mock_project),
+        "categories": {"JS_Bin": "scripts/js"}
     })
 
     # 3. Categorize (Move) the discovered file
@@ -146,10 +157,10 @@ def test_ai_workflow_e2e(project_client, mock_project):
         "template_name": "Code Review"
     })
     assert res.status_code == 200
+    output = res.json()["content"]
+    assert "Please review the following code" in output
+    assert "logic errors" in output
+    assert "main.py" in output
     data = res.json()
-    
-    # 3. Verify
-    assert "Please review the following code" in data["content"] # From default templates
-    assert "main.py" in data["content"]
     assert data["tokens"] > 0
     assert isinstance(data["tokens"], int)

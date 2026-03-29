@@ -90,6 +90,14 @@ class ProjectSettingsRequest(BaseModel):
     project_path: str
     settings: dict
 
+class ToolsUpdateRequest(BaseModel):
+    project_path: str
+    tools: dict  # {name: command_template}
+
+class CategoriesUpdateRequest(BaseModel):
+    project_path: str
+    categories: dict  # {name: relative_target_dir}
+
 class CategorizeRequest(BaseModel):
     project_path: str
     paths: list[str]
@@ -116,6 +124,16 @@ def get_project_config_for_path(path_str: str):
     return root, DataManager().get_project_data(root)
 
 # --- Helpers ---
+def _has_children(path_obj):
+    """Safely check if directory has children without leaking file handles."""
+    try:
+        with os.scandir(path_obj) as entries:
+            return any(True for _ in entries)
+    except PermissionError:
+        return False
+    except Exception:
+        return False
+
 def get_node_info(path_obj, project_root):
     """Returns a single node's info (non-recursive) with formatted metadata."""
     is_d = path_obj.is_dir()
@@ -126,7 +144,7 @@ def get_node_info(path_obj, project_root):
         "name": path_obj.name,
         "path": str(path_obj),
         "type": "dir" if is_d else "file",
-        "has_children": is_d and any(os.scandir(path_obj)),
+        "has_children": is_d and _has_children(path_obj),
         "mtime_fmt": mtime_fmt,
         "size_fmt": FormatUtils.format_size(meta["size"]),
         **meta
@@ -144,15 +162,28 @@ def get_children(path_str):
         return []
     
     project_root = pathlib.Path(project_root)
-    proj_config = DataManager().get_project_data(str(project_root))
     excludes = proj_config.get("excludes", "").split()
     git_spec = FileUtils.get_gitignore_spec(str(project_root))
 
     children = []
     try:
         entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower()))
+        norm_root = PathValidator.norm_path(project_root)
         for entry in entries:
-            rel = pathlib.Path(entry.path).relative_to(project_root)
+            # Use pathlib's own logic for relative paths where possible, but normalize first
+            ep = pathlib.Path(entry.path)
+            try:
+                # relative_to is sensitive to drive casing, so we resolve both
+                rel = ep.resolve().relative_to(pathlib.Path(project_root).resolve())
+            except ValueError:
+                # Fallback to string manipulation if relative_to fails
+                norm_entry = PathValidator.norm_path(entry.path)
+                if norm_entry.startswith(norm_root.rstrip('/') + '/'):
+                    rel = pathlib.Path(norm_entry[len(norm_root):].lstrip('/'))
+                else:
+                    continue
+                    
+
             if FileUtils.should_ignore(entry.name, rel, excludes, git_spec):
                 continue
             children.append(get_node_info(pathlib.Path(entry.path), project_root))
@@ -174,15 +205,17 @@ async def open_project(req: ProjectOpenRequest):
         # Register project in data_mgr to allow safe path access
         p = PathValidator.validate_project(req.path)
         logger.info(f"AUDIT - Opening project: {p}")
-        DataManager().data["last_project"] = str(p)
-        DataManager().get_project_data(str(p))
-        DataManager().save()
+        dm = _get_dm()
+        dm.data["last_directory"] = str(p)
+        dm.get_project_data(str(p))
+        dm.save()
         
         # Returns only root info
         root_node = get_node_info(p, p)
-        return {"status": "ok", "name": p.name, "root": root_node}
+        return root_node
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException: raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -270,6 +303,7 @@ async def delete_files(req: FileDeleteRequest):
 async def api_move(req: FileMoveRequest):
     try:
         moved_paths = []
+        skipped_paths = []
         for src in req.src_paths:
             # Safety Check for src and dst
             src_root = get_valid_project_root(src)
@@ -277,12 +311,24 @@ async def api_move(req: FileMoveRequest):
 
             if not src_root or not dst_root:
                  logger.warning(f"Blocking potentially unsafe move: {src} -> {req.dst_dir}")
+                 skipped_paths.append(src)
                  continue
+            
+            # Cross-project move prevention
+            if PathValidator.norm_path(src_root) != PathValidator.norm_path(dst_root):
+                logger.warning(f"Blocking cross-project move: {src} ({src_root}) -> {req.dst_dir} ({dst_root})")
+                skipped_paths.append(src)
+                continue
 
             logger.info(f"AUDIT - Moving: {src} -> {req.dst_dir}")
             new_path = FileOps.move_file(src, req.dst_dir)
             moved_paths.append(new_path)
-        return {"status": "ok", "new_paths": moved_paths}
+        
+        if skipped_paths and not moved_paths:
+            raise HTTPException(status_code=403, detail=f"All moves blocked or cross-project: {skipped_paths}")
+            
+        return {"status": "ok", "new_paths": moved_paths, "skipped": skipped_paths}
+    except HTTPException: raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -395,6 +441,28 @@ async def update_settings(req: ProjectSettingsRequest):
     DataManager().update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
+@app.post("/api/project/tools")
+async def update_tools(req: ToolsUpdateRequest):
+    """Dedicated endpoint for updating custom_tools (separated from settings for RCE prevention)."""
+    if not get_valid_project_root(req.project_path):
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        DataManager().update_custom_tools(req.project_path, req.tools)
+        return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/project/categories")
+async def update_categories(req: CategoriesUpdateRequest):
+    """Dedicated endpoint for updating quick_categories (separated from settings for security)."""
+    if not get_valid_project_root(req.project_path):
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        DataManager().update_quick_categories(req.project_path, req.categories)
+        return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # --- FileCortex Action APIs ---
 
 @app.post("/api/actions/stage_all")
@@ -444,6 +512,7 @@ async def api_execute_tool(req: ToolExecuteRequest):
             results.append({"path": p, **res})
             
         return {"status": "ok", "results": results}
+    except HTTPException: raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -492,27 +561,22 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
     # Start search in a background thread
     search_task = asyncio.create_task(asyncio.to_thread(run_search))
     
-    # Batch results to reduce WebSocket overhead
-    batch = []
     try:
         while True:
             res = await result_queue.get()
             if res == "DONE":
-                if batch: await websocket.send_json({"batch": batch})
                 await websocket.send_json({"status": "DONE"})
                 break
-            
-            # Yield individual results for backward compatibility with existing tests/UI
-            # but still allow batching if we were to refactor the frontend.
-            # To fix current test failures, we must send individual items.
             await websocket.send_json(res)
     except WebSocketDisconnect:
         logger.info("Search client disconnected")
+        search_task.cancel()
     except Exception as e:
         logger.error(f"Search error: {e}")
+        search_task.cancel()
         try:
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
-        except: pass
+        except Exception: pass
 
 @app.websocket("/ws/actions/execute")
 async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_name: str, path: str):
@@ -559,7 +623,7 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
     except Exception as e:
         logger.error(f"Action stream error: {e}")
         try: await websocket.send_json({"status": "ERROR", "msg": str(e)})
-        except: pass
+        except Exception: pass
 
 if __name__ == "__main__":
     print("Starting Web Server...")

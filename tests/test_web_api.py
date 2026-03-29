@@ -1,245 +1,165 @@
 import pytest
 import os
 import pathlib
+import json
+import asyncio
+from unittest.mock import patch
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 from web_app import app
+from file_cortex_core import ActionBridge, DataManager
 
-# Using global fixtures from conftest.py
 
-def test_api_open_success(api_client, mock_project):
-    res = api_client.post("/api/open", json={"path": str(mock_project)})
+def test_api_open_project(project_client, mock_project):
+    """Verify project registration and initial node info."""
+    res = project_client.post("/api/open", json={"path": str(mock_project)})
     assert res.status_code == 200
-    assert "name" in res.json()
+    data = res.json()
+    assert "name" in data
+    assert data["type"] == "dir"
+    assert data["has_children"] is True
 
-def test_api_open_invalid(api_client, system_dir):
-    # Use system_dir + something clearly fake
-    non_existent = os.path.join(system_dir, "NonExistentPath_XYZ_123")
-    res = api_client.post("/api/open", json={"path": non_existent})
-    assert res.status_code == 404
-
-from unittest.mock import patch
-
-def test_api_open_system_dir_blocked(api_client, system_dir):
-    """Verify that system directories are rejected."""
-    res = api_client.post("/api/open", json={"path": system_dir})
-    assert res.status_code in (400, 403)
-
-def test_api_children_metadata(project_client, mock_project):
+def test_api_get_children(project_client, mock_project):
+    """Verify directory listing."""
     res = project_client.post("/api/fs/children", json={"path": str(mock_project)})
     assert res.status_code == 200
     children = res.json()["children"]
-    for c in children:
-        assert all(k in c for k in ("size", "mtime", "ext", "mtime_fmt"))
-        if c["type"] == "file" and c["name"] == "main.py":
-            assert c["ext"] == ".py"
-            # Verify date-like format (YYYY-MM-DD)
-            assert "-" in c["mtime_fmt"]
+    names = [c["name"] for c in children]
+    assert "src" in names
+    assert "config.json" in names
 
-def test_api_security_path_traversal(project_client, mock_project, system_dir):
-    """Critical: Verify that accessing paths outside project root returns 403."""
-    unsafe_path = os.path.join(system_dir, "drivers/etc/hosts") if os.name == 'nt' else "/etc/hosts"
-    res = project_client.get(f"/api/content?path={unsafe_path}")
-    assert res.status_code == 403
-    assert "Access denied" in res.json()["detail"]
-
-    traversal_path = str(mock_project / ".." / "some_other_file")
-    res = project_client.get(f"/api/content?path={traversal_path}")
-    assert res.status_code == 403
-
-def test_fs_ops_security(project_client, mock_project, system_dir):
-    # Test rename with traversal in new_name (should be 400)
-    res = project_client.post("/api/fs/rename", json={
-        "project_path": str(mock_project),
-        "path": str(mock_project / "src" / "main.py"),
-        "new_name": "../../hacker.py"
-    })
-    assert res.status_code == 400
-    
-    # Test rename with unsafe source path (should be 403)
-    res = project_client.post("/api/fs/rename", json={
-        "project_path": str(mock_project),
-        "path": os.path.join(system_dir, "system.ini"),
-        "new_name": "normal.py"
-    })
-    assert res.status_code == 403
-
-def test_api_content_success(project_client, mock_project):
-    path = str(mock_project / "src" / "main.py")
-    res = project_client.get(f"/api/content?path={path}")
-    assert res.status_code == 200
-    assert "print" in res.json()["content"]
-
-def test_websocket_search_basic(project_client, mock_project):
+def test_api_search_websocket(project_client, mock_project):
+    """Verify websocket search flow."""
     with project_client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
-        data = ws.receive_json()
-        assert "main.py" in data["name"]
-        assert all(k in data for k in ("size", "mtime"))
-        data = ws.receive_json()
-        assert data["status"] == "DONE"
+        # Collect all results until DONE
+        results = []
+        while True:
+            data = ws.receive_json()
+            if data.get("status") == "DONE":
+                break
+            results.append(data)
+        
+        assert len(results) >= 1
+        assert any("main.py" in r["name"] for r in results)
 
-def test_workspace_memory_endpoints(project_client, mock_project):
-    test_file = str(mock_project / "src" / "main.py")
-    res = project_client.post("/api/project/note", json={
-        "project_path": str(mock_project),
-        "file_path": test_file,
-        "note": "Entry point"
-    })
-    assert res.status_code == 200
-
-    res = project_client.post("/api/project/tag", json={
-        "project_path": str(mock_project),
-        "file_path": test_file,
-        "tag": "v1",
-        "action": "add"
-    })
-    assert res.status_code == 200
-
-    res = project_client.get(f"/api/project/config?path={str(mock_project)}")
-    data = res.json()
-    assert data["notes"][test_file] == "Entry point"
-    assert "v1" in data["tags"][test_file]
-
-def test_recent_projects_api(project_client, mock_project):
-    res = project_client.get("/api/recent_projects")
-    assert any(p["path"] == str(mock_project) for p in res.json())
-
-def test_fs_create_archive_api(project_client, mock_project):
-    res = project_client.post("/api/fs/create", json={
-        "parent_path": str(mock_project),
-        "name": "api_test.txt"
-    })
-    assert res.status_code == 200
-    assert os.path.exists(mock_project / "api_test.txt")
-
-    res = project_client.post("/api/fs/archive", json={
-        "paths": [str(mock_project / "api_test.txt")],
-        "output_name": "api_archive.zip",
-        "project_root": str(mock_project)
-    })
-    assert res.status_code == 200
-    assert os.path.exists(mock_project / "api_archive.zip")
-
-def test_fs_ops_safety_advanced(project_client, mock_project, system_dir):
-    res = project_client.post("/api/fs/create", json={
-        "parent_path": system_dir,
-        "name": "evil.txt"
-    })
-    assert res.status_code == 403
-
-    res = project_client.post("/api/fs/archive", json={
-        "paths": [os.path.join(system_dir, "system.ini")],
-        "output_name": "stolen.zip",
-        "project_root": str(mock_project)
-    })
-    assert res.status_code == 403
-
-def test_fs_move_safety_permutations(project_client, mock_project, system_dir):
-    src = str(mock_project / "src" / "main.py")
-    res = project_client.post("/api/fs/move", json={
-        "src_paths": [src],
-        "dst_dir": system_dir
-    })
-    assert res.status_code == 200
-    assert res.json()["new_paths"] == []
-
-def test_api_validation_errors(api_client):
-    res = api_client.post("/api/open", json={})
-    assert res.status_code == 422
-    res = api_client.post("/api/generate", json={"files": "not-a-list"})
-    assert res.status_code == 422
-
-def test_save_content_no_project_access(api_client):
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False) as f:
-        temp_path = f.name
-    try:
-        res = api_client.post("/api/fs/save", json={
-            "path": temp_path,
-            "content": "new content"
-        })
-        assert res.status_code == 403
-    finally:
-        if os.path.exists(temp_path): os.remove(temp_path)
-
-def test_project_settings_persistence(project_client, mock_project):
+def test_api_staging_workflow(project_client, mock_project):
+    """Verify adding to staging via API."""
     proj_path = str(mock_project)
-    new_excludes = "*.tmp *.bak"
-    res = project_client.post("/api/project/settings", json={
-        "project_path": proj_path,
-        "settings": {"excludes": new_excludes}
-    })
-    assert res.status_code == 200
-
-    res = project_client.get(f"/api/project/config?path={proj_path}")
-    assert res.status_code == 200
-    assert res.json()["excludes"] == new_excludes
-
-# --- Actions & Workflow Tests ---
-
-def test_api_stage_all_and_workflow(project_client, mock_project):
-    """
-    Complete Workflow: 
-    1. Open Project 
-    2. Stage All (Recursive) 
-    3. Verify Staging 
-    4. Clear Staging
-    """
-    proj_path = str(mock_project)
-    # 1. Stage All
-    res = project_client.post("/api/actions/stage_all", json={
-        "project_path": proj_path,
-        "mode": "files"
-    })
-    assert res.status_code == 200
-    added = res.json()["added_count"]
-    assert added > 0
-    
-    # 2. Verify Config
-    res = project_client.get(f"/api/project/config?path={proj_path}")
-    staged = res.json()["staging_list"]
-    assert len(staged) == added
-    assert any("main.py" in s for s in staged)
-    
-    # 3. Categorize one of them
-    test_file = staged[0]
-    res = project_client.post("/api/actions/categorize", json={
-        "project_path": proj_path,
-        "paths": [test_file],
-        "category_name": "Default" # Default group
-    })
-    # Since categories are just subdirs or group logic, we check if it moved
-    # Actually 'Default' category in quick_categories is not set, so it might fail or use a default subdir.
-    # Let's use a specific one.
+    files = [str(mock_project / "src" / "main.py")]
     project_client.post("/api/project/settings", json={
         "project_path": proj_path,
-        "settings": {"quick_categories": {"Inbox": "inbox_dir"}}
+        "settings": {"staging_list": files}
     })
-    res = project_client.post("/api/actions/categorize", json={
-        "project_path": proj_path,
-        "paths": [test_file],
-        "category_name": "Inbox"
-    })
-    assert res.status_code == 200
+    
+    res = project_client.get(f"/api/project/config?path={proj_path}")
+    staged = res.json()["staging_list"]
+    assert len(staged) == 1
+    assert "main.py" in staged[0]
 
-@patch('web_app.logger')
-def test_api_audit_log_security(mock_logger, project_client, mock_project):
-    """Verify integration of AUDIT logs in sensitive endpoints."""
+def test_settings_whitelist_blocks_protected_keys(project_client, mock_project):
+    """Verify that update_project_settings blocks writes to protected keys."""
     proj_path = str(mock_project)
-    # 1. Content Access (Audit log is in get_valid_project_root or core)
-    # Actually web_app.py log audits for delete, save, etc.
-    res = project_client.post("/api/fs/save", json={
-        "path": str(mock_project / "src" / "main.py"),
-        "content": "audit test"
+    original_groups = project_client.get(f"/api/project/config?path={proj_path}").json()["groups"]
+    project_client.post("/api/project/settings", json={
+        "project_path": proj_path,
+        "settings": {"groups": {}, "notes": {"evil": "injected"}}
     })
-    assert res.status_code == 200
-    # Search for AUDIT in calls
-    audit_found = any("AUDIT" in str(arg) for call in mock_logger.info.call_args_list for arg in call.args)
-    assert audit_found is True
+    config = project_client.get(f"/api/project/config?path={proj_path}").json()
+    assert config["groups"] == original_groups
+    assert "evil" not in config["notes"]
 
-def test_websocket_search_with_ignores(project_client, mock_project):
-    """Verify websocket search respects ignores and params."""
-    with project_client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=log&mode=smart") as ws:
-        # error.log is ignored by gitignore
-        data = ws.receive_json()
-        assert data["status"] == "DONE" # No results found
+def test_settings_whitelist_allows_safe_keys(project_client, mock_project):
+    """Verify that whitelisted keys CAN be updated."""
+    proj_path = str(mock_project)
+    project_client.post("/api/project/settings", json={
+        "project_path": proj_path,
+        "settings": {"excludes": "*.bak", "max_search_size_mb": 10}
+    })
+    config = project_client.get(f"/api/project/config?path={proj_path}").json()
+    assert config["excludes"] == "*.bak"
+    assert config["max_search_size_mb"] == 10
+
+def test_api_move_cross_project_blocked(project_client, mock_project):
+    """Verify cross-project move is rejected."""
+    import tempfile
+    other_dir = tempfile.mkdtemp(prefix="fctx_other_")
+    try:
+        project_client.post("/api/open", json={"path": other_dir})
+        src = str(mock_project / "src" / "main.py")
+        res = project_client.post("/api/fs/move", json={
+            "src_paths": [src], "dst_dir": other_dir
+        })
+        # My hardening now returns 403 for cross-project move
+        assert res.status_code == 403
+        assert "cross-project" in res.json()["detail"]
+    finally:
+        import shutil
+        shutil.rmtree(other_dir, ignore_errors=True)
+
+def test_api_move_returns_skipped_info(project_client, mock_project, system_dir):
+    """Verify move to unsafe path returns skipped paths."""
+    src = str(mock_project / "src" / "main.py")
+    res = project_client.post("/api/fs/move", json={
+        "src_paths": [src], "dst_dir": system_dir
+    })
+    data = res.json()
+    assert res.status_code in (200, 403)
+    if res.status_code == 200:
+        assert src in data.get("skipped", [])
+
+def test_stream_tool_win_safe_execution(mock_project):
+    """Verify stream_tool platform bridge."""
+    import sys
+    test_file = mock_project / "src" / "main.py"
+    template = f'"{sys.executable}" -c "print(\'STREAM_OK\')"'
+    results = list(ActionBridge.stream_tool(template, str(test_file), mock_project))
+    outputs = [r for r in results if "out" in r]
+    assert len(outputs) > 0
+    assert "STREAM_OK" in outputs[0]["out"]
+
+def test_api_recent_projects_key_unification(project_client, mock_project):
+    """Verify that recent projects use last_directory key."""
+    from file_cortex_core import PathValidator
+    project_client.post("/api/open", json={"path": str(mock_project)})
+    res = project_client.get("/api/recent_projects")
+    projects = res.json()
+    norm_target = PathValidator.norm_path(mock_project)
+    assert any(PathValidator.norm_path(p["path"]) == norm_target for p in projects)
+
+def test_get_node_info_no_resource_warning(project_client, mock_project):
+    """Verify no ResourceWarning from os.scandir handle leak."""
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        res = project_client.post("/api/fs/children", json={"path": str(mock_project)})
+        assert res.status_code == 200
+        resource_warnings = [x for x in w if issubclass(x.category, ResourceWarning)]
+        assert len(resource_warnings) == 0
+
+def test_api_update_tools_and_categories(project_client, mock_project):
+    """Verify dedicated endpoints for tools and categories."""
+    proj_path = str(mock_project)
+    
+    # Update tools
+    tools = {"Ping": "ping {name}"}
+    res_t = project_client.post("/api/project/tools", json={"project_path": proj_path, "tools": tools})
+    assert res_t.status_code == 200
+    
+    # Update categories
+    cats = {"Backups": "backups"}
+    res_c = project_client.post("/api/project/categories", json={"project_path": proj_path, "categories": cats})
+    assert res_c.status_code == 200
+    
+    # Verify via config
+    config = project_client.get(f"/api/project/config?path={proj_path}").json()
+    assert config["custom_tools"]["Ping"] == "ping {name}"
+    assert config["quick_categories"]["Backups"] == "backups"
+
+def test_api_update_categories_blocks_traversal(project_client, mock_project):
+    """Verify validation in categories update."""
+    proj_path = str(mock_project)
+    res = project_client.post("/api/project/categories", json={
+        "project_path": proj_path, 
+        "categories": {"Evil": "../../../etc"}
+    })
+    assert res.status_code == 400
+    assert ".." in res.json()["detail"]

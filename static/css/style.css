@@ -2,16 +2,18 @@
 
 :root {
     --bg-dark: #020617;
-    --panel-bg: rgba(15, 23, 42, 0.6);
-    --accent: #0ea5e9;
-    --accent-glow: rgba(14, 165, 233, 0.3);
+    --panel-bg: rgba(15, 23, 42, 0.65);
+    --accent: #38bdf8;
+    --accent-glow: rgba(56, 189, 248, 0.25);
+    --accent-dim: rgba(56, 189, 248, 0.1);
     --success: #10b981;
-    --danger: #ef4444;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --border: rgba(255, 255, 255, 0.08);
-    --glass-blur: blur(20px);
-    --radius: 12px;
+    --danger: #f43f5e;
+    --text-main: #f1f5f9;
+    --text-muted: #64748b;
+    --border: rgba(255, 255, 255, 0.06);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-blur: blur(16px);
+    --radius: 14px;
 }
 
 body {
@@ -28,8 +30,10 @@ body {
     background: var(--panel-bg);
     backdrop-filter: var(--glass-blur);
     border: 1px solid var(--border);
+    border-top: 1px solid var(--glass-border);
+    border-left: 1px solid var(--glass-border);
     border-radius: var(--radius);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
 }
 
 .navbar {
@@ -47,19 +51,32 @@ body {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     font-size: 0.875rem;
     border: 1px solid transparent;
+    display: flex;
+    align-items: center;
 }
 
 .tree-node:hover, .staging-item:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: var(--border);
+    background: rgba(56, 189, 248, 0.06);
+    border-color: rgba(56, 189, 248, 0.1);
     transform: translateX(4px);
+    color: var(--accent);
 }
 
 .tree-node.active {
-    background: linear-gradient(90deg, var(--accent), transparent) !important;
-    border-left: 3px solid #fff !important;
-    color: white !important;
-    box-shadow: 10px 0 20px -10px var(--accent-glow);
+    background: linear-gradient(90deg, var(--accent-dim), transparent) !important;
+    border-left: 2px solid var(--accent) !important;
+    color: var(--accent) !important;
+    font-weight: 600;
+}
+
+.form-check-input {
+    background-color: rgba(255,255,255,0.05) !important;
+    border-color: var(--border) !important;
+}
+.form-check-input:checked {
+    background-color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 8px var(--accent-glow) !important;
 }
 
 /* Inputs & Buttons */

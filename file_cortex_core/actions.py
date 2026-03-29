@@ -163,20 +163,28 @@ class ActionBridge:
         }
         
         try:
-            tokens = shlex.split(template, posix=(os.name != 'nt'))
-            final_cmd = [t.format(**context) for t in tokens]
-            logger.info(f"AUDIT - Streaming external tool: {' '.join(final_cmd)}")
-            
-            process = subprocess.Popen(
-                final_cmd, 
-                shell=False, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True, 
-                bufsize=1, 
-                encoding='utf-8',
-                errors='replace'
-            )
+            if os.name == 'nt':
+                # Windows: Use shell=True with win_quote, consistent with execute_tool
+                def win_quote(s):
+                    return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
+                safe_context = {k: win_quote(v) for k, v in context.items()}
+                cmd_str = template.format(**safe_context)
+                logger.info(f"AUDIT - Streaming external tool (Win/Shell): {cmd_str}")
+                process = subprocess.Popen(
+                    cmd_str, shell=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, encoding='utf-8', errors='replace'
+                )
+            else:
+                # Unix: Use shell=False with shlex.split, consistent with execute_tool
+                tokens = shlex.split(template, posix=True)
+                final_cmd = [t.format(**context) for t in tokens]
+                logger.info(f"AUDIT - Streaming external tool (Unix/List): {' '.join(final_cmd)}")
+                process = subprocess.Popen(
+                    final_cmd, shell=False,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, encoding='utf-8', errors='replace'
+                )
             
             for line in process.stdout:
                 yield {"out": line}

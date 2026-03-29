@@ -10,6 +10,15 @@ from .utils import FileUtils, FormatUtils
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
                      is_inverse=False, case_sensitive=False, max_results=2000):
+    """
+    Multi-mode file search generator.
+    
+    Mode behaviors:
+    - 'smart': Match file names using keyword splitting
+    - 'exact': Match file names using exact substring
+    - 'regex': Match both file names AND file content (dual-match)
+    - 'content': Match file content only
+    """
     root_dir = pathlib.Path(root_dir)
     excludes = [e.lower().strip() for e in manual_excludes.split() if e.strip()]
     git_spec = FileUtils.get_gitignore_spec(root_dir) if use_gitignore else None
@@ -62,7 +71,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             return False != is_inverse
         except PermissionError:
             return False
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error reading file {path}: {e}")
             return False
 
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
@@ -89,7 +99,11 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 rel_path = rel_root / file
                 if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
                     continue
-                meta = FileUtils.get_metadata(full_path)
+                try:
+                    meta = FileUtils.get_metadata(full_path)
+                except Exception as e:
+                    logger.error(f"Error getting metadata for {full_path}: {e}")
+                    continue
                 if search_mode != 'content':
                     if match_name(file):
                         count += 1

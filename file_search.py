@@ -44,7 +44,7 @@ class FileCortexApp:
             try:
                 self.load_project(last_dir)
             except Exception as e:
-                from core_logic import logger
+                from file_cortex_core import logger
                 logger.error(f"Failed to auto-load last project {last_dir}: {e}")
             
         self.root.after(SEARCH_POLL_MS, self.process_queue)
@@ -244,13 +244,16 @@ class FileCortexApp:
 
     def on_refresh(self):
         if self.current_dir:
-            # Save current UI settings to config before refreshing
-            if self.current_proj_config:
-                self.current_proj_config["excludes"] = self.exclude_var.get()
-                self.data_mgr.save()
-            
-            # Re-browse (now with updated config)
-            self.on_browse(str(self.current_dir))
+            try:
+                # Save current UI settings to config before refreshing
+                if self.current_proj_config:
+                    self.current_proj_config["excludes"] = self.exclude_var.get()
+                    self.data_mgr.save()
+                
+                # Re-browse (now with updated config)
+                self.on_browse(str(self.current_dir))
+            except Exception:
+                pass
         else:
             messagebox.showinfo("刷新", "请先浏览一个项目。")
 
@@ -368,7 +371,7 @@ class FileCortexApp:
                  try:
                      content = p.read_text('utf-8', 'ignore')
                      total_tokens += FormatUtils.estimate_tokens(content)
-                 except: pass
+                 except Exception: pass
         self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_tokens} Tokens")
 
     def on_search_input(self, *args):
@@ -419,7 +422,7 @@ class FileCortexApp:
                 try:
                     num = float(s.split()[0])
                     return num * 1024 if "KB" in s else num * 1024 * 1024
-                except: return 0
+                except Exception: return 0
             l.sort(key=lambda t: parse_sz(t[0]), reverse=reverse)
         else:
             l.sort(reverse=reverse)
@@ -435,7 +438,7 @@ class FileCortexApp:
         full_path = None
         if tree == self.tree_search: full_path = self.current_dir / tree.item(sel[0])['values'][1]
         elif tree == self.tree_proj: full_path = self.get_tree_path(sel[0])
-        elif tree == self.tree_staging: full_path = pathlib.Path(tree.item(sel[0])['values'][1])
+        elif tree == self.tree_staging: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
         elif tree == self.tree_fav: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
         if not full_path or not full_path.exists(): return
         
@@ -491,7 +494,7 @@ class FileCortexApp:
                 
                 node = self.tree_proj.insert(parent_node, "end", text=("📁 " if entry.is_dir() else "📄 ") + entry.name, open=False)
                 if entry.is_dir(): self.tree_proj.insert(node, "end", text="加载中...")
-        except: pass
+        except Exception: pass
 
     def copy_project_tree(self):
         tree_text = FileUtils.generate_ascii_tree(self.current_dir, self.exclude_var.get(), self.use_gitignore_var.get())
@@ -505,7 +508,7 @@ class FileCortexApp:
                 self.staging_files.append(p_str)
                 sz = p.stat().st_size if p.is_file() else 0
                 sz_str = FormatUtils.format_size(sz)
-                self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=("", p_str, sz_str))
+                self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=(p_str, sz_str))
         
         if save_to_disk and self.current_proj_config:
             self.current_proj_config["staging_list"] = self.staging_files
@@ -527,7 +530,7 @@ class FileCortexApp:
 
     def remove_staging_selection(self):
         for i in self.tree_staging.selection():
-            val = self.tree_staging.item(i)['values'][1]
+            val = self.tree_staging.item(i)['values'][0]
             if val in self.staging_files: self.staging_files.remove(val)
             self.tree_staging.delete(i)
         
@@ -591,19 +594,20 @@ class FileCortexApp:
             self.context_menu.post(e.x_root, e.y_root)
 
     def _get_ctx_paths(self):
-        try:
-            paths = []
-            for sel_id in self.active_tree.selection():
+        paths = []
+        for sel_id in self.active_tree.selection():
+            try:
                 if self.active_tree == self.tree_proj: 
                     p = self.get_tree_path(sel_id)
                 else:
                     val = self.active_tree.item(sel_id)['values']
-                    p_str = val[1] if self.active_tree != self.tree_fav else val[0]
-                    if self.active_tree == self.tree_search: p_str = str(self.current_dir / p_str)
+                    p_str = val[0]
+                    if self.active_tree == self.tree_search: p_str = str(self.current_dir / val[1])
                     p = pathlib.Path(p_str)
                 if p: paths.append(p)
-            return paths
-        except: return []
+            except Exception:
+                continue
+        return paths
 
     def ctx_open_location(self):
         paths = self._get_ctx_paths()

@@ -24,25 +24,35 @@ def test_path_validator_is_safe_comprehensive(mock_project, system_dir):
     # --- Unsafe: Absolute system path (No-Hardcode) ---
     assert PathValidator.is_safe(system_dir, root) is False
 
-def test_path_validator_blocked_keywords():
-    """Verify that sensitive system directories are blocked upon project registration."""
-    # Mocking existence and resolution to avoid environment-specific failures
-    from unittest.mock import patch, MagicMock
-    import pathlib
+def test_path_validator_blocked_prefixes(system_dir):
+    """Verify that system directories (prefixes) are blocked."""
+    from file_cortex_core import PathValidator
+    with pytest.raises(PermissionError) as exc:
+        PathValidator.validate_project(system_dir)
+    assert "Access to system directory" in str(exc.value)
 
-    # Test several blocked patterns
-    blocked = ["C:/Windows", "/etc", "/usr/bin", "C:/Program Files/System32"]
-    for b in blocked:
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            with pytest.raises(PermissionError):
-                PathValidator.validate_project(b)
+def test_path_validator_allows_user_dirs_with_system_keywords(mock_project):
+    """Verify that user dirs named 'windows-app' or 'etc-notes' are NOT blocked."""
+    import tempfile
+    import shutil
+    # Create a dir whose name contains a keyword but is NOT a system dir
+    user_dir_path = tempfile.mkdtemp(prefix="windows_")
+    user_dir = pathlib.Path(user_dir_path)
+    try:
+        # Should NOT raise PermissionError
+        p = PathValidator.validate_project(str(user_dir))
+        assert p.exists()
+    finally:
+        shutil.rmtree(user_dir_path, ignore_errors=True)
 
-def test_path_validator_root_drive():
-    """Prevent registering the root drive."""
-    root_drive = "C:/" if os.name == "nt" else "/"
-    with pytest.raises(PermissionError):
-        PathValidator.validate_project(root_drive)
+def test_path_validator_root_drive_blocked():
+    """Verify that root drives ('C:/' or '/') are blocked."""
+    from file_cortex_core import PathValidator
+    import sys
+    root = "C:/" if sys.platform == 'win32' else "/"
+    with pytest.raises(PermissionError) as exc:
+        PathValidator.validate_project(root)
+    assert "root drive" in str(exc.value)
 
 def test_path_validator_non_existent():
     """Raising FileNotFoundError for garbage paths."""

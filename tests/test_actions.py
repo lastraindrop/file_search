@@ -81,3 +81,8 @@ def test_file_ops_archive_logic(mock_project):
     import zipfile
     with zipfile.ZipFile(res, 'r') as z:
         assert "f1.txt" in z.namelist()
+
+def test_stream_tool_nonexistent_path(mock_project):
+    """Verify stream_tool returns error for missing file."""
+    results = list(ActionBridge.stream_tool("echo {name}", "/nonexistent", mock_project))
+    assert any("error" in r for r in results)

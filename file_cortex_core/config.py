@@ -18,7 +18,13 @@ def get_app_dir() -> pathlib.Path:
         logger.error(f"Failed to create app directory: {e}")
     return app_dir
 
-CONFIG_FILE = get_app_dir() / "config.json"
+_CONFIG_FILE = None
+
+def _get_config_file():
+    global _CONFIG_FILE
+    if _CONFIG_FILE is None:
+        _CONFIG_FILE = get_app_dir() / "config.json"
+    return _CONFIG_FILE
 
 class DataManager:
     _instance = None
@@ -38,49 +44,84 @@ class DataManager:
         self._initialized = True
 
     def load(self):
+        """Loads configuration from the disk and merges with default schema."""
         with self._lock:
-            if os.path.exists(CONFIG_FILE):
+            config_file = _get_config_file()
+            if os.path.exists(config_file):
                 try:
-                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        self.data.update(json.load(f))
+                    with open(config_file, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                    # Deep merge: preserve top-level structure, overwrite values
+                    self.data["last_directory"] = loaded.get("last_directory", "")
+                    if "projects" in loaded:
+                        # Normalize all keys on load to ensure cross-platform safety
+                        from .security import PathValidator
+                        norm_projects = {}
+                        for k, v in loaded["projects"].items():
+                            try:
+                                norm_k = PathValidator.norm_path(k)
+                                norm_projects[norm_k] = v
+                            except Exception:
+                                norm_projects[k] = v
+                        self.data["projects"] = norm_projects
                 except Exception as e:
                     logger.error(f"Config load error: {e}")
 
     def save(self):
+        """Atomically saves the current configuration to disk."""
         with self._lock:
+            # Ensure all project keys are normalized before saving
+            from .security import PathValidator
+            new_projects = {}
+            for k, v in self.data["projects"].items():
+                try:
+                    norm_k = PathValidator.norm_path(k)
+                    new_projects[norm_k] = v
+                except Exception:
+                    new_projects[k] = v
+            self.data["projects"] = new_projects
+
+            config_file = _get_config_file()
             try:
-                temp_file = CONFIG_FILE.with_suffix('.json.tmp')
+                temp_file = config_file.with_suffix('.json.tmp')
                 with open(temp_file, 'w', encoding='utf-8') as f:
                     json.dump(self.data, f, ensure_ascii=False, indent=4)
-                os.replace(temp_file, CONFIG_FILE)
+                os.replace(temp_file, config_file)
             except Exception as e:
                 logger.error(f"Config save error: {e}")
 
     def get_project_data(self, path_str: str) -> dict:
+        """Returns (and initializes if needed) the configuration for a given project."""
+        from .security import PathValidator
+        try:
+            path_key = PathValidator.norm_path(path_str)
+        except Exception:
+            path_key = path_str
+            
         DEFAULT_SCHEMA = {
-            "groups": {"Default": []},
+            "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
+            "max_search_size_mb": 10,
+            "staging_list": [],
             "current_group": "Default",
-            "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env",
-            "max_search_size_mb": 5,
+            "groups": {"Default": []},
             "notes": {},
             "tags": {},
             "sessions": [],
-            "staging_list": [],
-            "quick_categories": {}, # {Name: Relative_Target_Dir}
-            "custom_tools": {},      # {Name: Command_Template}
-            "prompt_templates": {    # Feature: Prompt Assembly Base
-                "Code Review": "Please review the following code for logic errors, potential bugs, and code style. Focus on security and performance.",
-                "Unit Test": "Please write comprehensive unit tests for the following code using a suitable testing framework.",
-                "Summary": "Please provide a concise summary of the functionality and purpose of each of the following files."
+            "custom_tools": {
+                 "Summary": "python -c \"import sys; print(f'Summary for {sys.argv[1]}')\" {path}",
+                 "Lint": "python -m py_compile {path}"
+            },
+            "quick_categories": {
+                 "Scripts": "scripts",
+                 "Docs": "docs"
+            },
+            "prompt_templates": {
+                "Code Review": "Please review the following code for logic errors, potential bugs, and code style. Focus on security and performance. {files}",
+                "Summary": "Please provide a concise summary of the functionality and purpose of each of the following files. {files}",
+                "Docstring": "Generate professional docstrings for all functions and classes in these files. {files}"
             }
         }
         
-        # Ensure path_str is canonical for key lookup
-        try:
-            path_key = str(pathlib.Path(path_str).resolve())
-        except:
-            path_key = path_str
-
         if path_key not in self.data["projects"]:
             self.data["projects"][path_key] = copy.deepcopy(DEFAULT_SCHEMA)
         else:
@@ -88,27 +129,34 @@ class DataManager:
             for key, val in DEFAULT_SCHEMA.items():
                 if key not in proj:
                     proj[key] = copy.deepcopy(val)
+        
         return self.data["projects"][path_key]
 
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
+        """Adds multiple paths to the staging list atomically."""
         proj = self.get_project_data(project_path)
         added_count = 0
         for p in paths:
             if p not in proj["staging_list"]:
                 proj["staging_list"].append(p)
                 added_count += 1
-        if added_count > 0:
-            self.save()
+        self.save()
         return added_count
 
     def resolve_project_root(self, target_path_str: str) -> str | None:
+        """Determines if a given path belongs to any registered project root."""
+        from .security import PathValidator
         try:
-            target = pathlib.Path(target_path_str).resolve()
+            target = PathValidator.norm_path(target_path_str)
+            print(f"DEBUG: resolving target={target}, registered={list(self.data['projects'].keys())}")
             for p_root in self.data["projects"]:
-                root = pathlib.Path(p_root).resolve()
-                if target == root or root in target.parents:
-                    return str(root)
-        except Exception:
+                # p_root is already normalized on save/load
+                if target == p_root or target.startswith(p_root.rstrip('/') + '/'):
+                    print(f"DEBUG: match found for {target} -> {p_root}")
+                    return p_root
+            print(f"DEBUG: NO MATCH for {target}")
+        except Exception as e:
+            print(f"DEBUG: exception {e}")
             pass
         return None
 
@@ -135,10 +183,47 @@ class DataManager:
         proj["sessions"] = proj["sessions"][:5]
         self.save()
 
+    # Whitelist of fields that can be updated via the general settings API.
+    # custom_tools and quick_categories are NOT here — they have dedicated APIs
+    # to prevent RCE via config injection.
+    MUTABLE_SETTINGS = frozenset({
+        "excludes", "max_search_size_mb", "staging_list", "current_group",
+        "prompt_templates"
+    })
+
     def update_project_settings(self, project_path, settings: dict):
         proj = self.get_project_data(project_path)
         for k, v in settings.items():
-            proj[k] = v
+            if k in self.MUTABLE_SETTINGS:
+                proj[k] = v
+            else:
+                logger.warning(f"Blocked attempt to modify protected key via settings API: {k}")
+        self.save()
+
+    def update_custom_tools(self, project_path: str, tools: dict):
+        """Dedicated API for updating custom_tools. Validates template format."""
+        proj = self.get_project_data(project_path)
+        # Basic validation: tools must be a dict of str->str
+        if not isinstance(tools, dict):
+            raise ValueError("Tools must be a dict of name -> command template")
+        for name, template in tools.items():
+            if not isinstance(name, str) or not isinstance(template, str):
+                raise ValueError(f"Invalid tool entry: {name}")
+        proj["custom_tools"] = tools
+        self.save()
+
+    def update_quick_categories(self, project_path: str, categories: dict):
+        """Dedicated API for updating quick_categories. Validates relative paths."""
+        proj = self.get_project_data(project_path)
+        if not isinstance(categories, dict):
+            raise ValueError("Categories must be a dict of name -> relative_dir")
+        for name, rel_dir in categories.items():
+            if not isinstance(name, str) or not isinstance(rel_dir, str):
+                raise ValueError(f"Invalid category entry: {name}")
+            # Block path traversal in category targets
+            if '..' in rel_dir:
+                raise ValueError(f"Category target must not contain '..': {rel_dir}")
+        proj["quick_categories"] = categories
         self.save()
 
     def add_to_group(self, project_path, group_name, file_paths):

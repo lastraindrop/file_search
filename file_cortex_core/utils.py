@@ -147,7 +147,7 @@ class FileUtils:
                 "mtime": stat.st_mtime,
                 "ext": path_obj.suffix.lower()
             }
-        except:
+        except Exception:
             return {"size": 0, "mtime": 0, "ext": ""}
 
     @staticmethod
@@ -198,12 +198,13 @@ class ContextFormatter:
         if prompt_prefix:
             blocks.append(f"{prompt_prefix}\n\n---\n\n")
             
+        root = pathlib.Path(root_dir).resolve() if root_dir else None
         for p_str in paths:
             p = pathlib.Path(p_str)
             if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
                 continue
             try:
-                display_name = p.relative_to(root_dir) if root_dir and root_dir in p.parents else p.name
+                display_name = p.relative_to(root) if root and root in p.resolve().parents else p.name
                 stat = p.stat()
                 size_kb = stat.st_size / 1024
                 

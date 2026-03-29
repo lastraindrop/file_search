@@ -22,6 +22,22 @@ const App = {
             .replace(/'/g, "&#039;");
     },
 
+    // Helper for robust error handling
+    _fetch: async (url, options = {}) => {
+        const res = await fetch(url, options);
+        if (!res.ok) {
+            let detail = "Unknown error";
+            try {
+                const data = await res.json();
+                detail = data.detail || detail;
+            } catch (e) {
+                detail = await res.text();
+            }
+            throw new Error(detail);
+        }
+        return res;
+    },
+
     showToast: (message, type = 'success') => {
         const container = document.querySelector('.toast-container');
         const toastEl = document.createElement('div');
@@ -44,7 +60,10 @@ const App = {
     init: async () => {
         App.loadRecentProjects();
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') App.startSearch();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                App.startSearch();
+            }
         });
         
         // Restore search settings from localStorage
@@ -99,17 +118,17 @@ const App = {
         if (!path) return;
 
         try {
-            const res = await fetch('/api/open', {
+            const res = await App._fetch('/api/open', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ path })
             });
-            if (!res.ok) throw new Error((await res.json()).detail);
-            
             const data = await res.json();
+            
             App.state.projectPath = path;
             localStorage.setItem('lastProjectPath', path);
             
+            const configRes = await App._fetch(`/api/project/config?path=${encodeURIComponent(path)}`);
             App.state.projConfig = await configRes.json();
             
             // Fill Prompt Templates dropdown
@@ -123,7 +142,8 @@ const App = {
 
             const rootContainer = document.getElementById('fileTreeRoot');
             rootContainer.innerHTML = '';
-            rootContainer.appendChild(App.renderTree(data.root));
+            // Backend returns the root node object directly
+            rootContainer.appendChild(App.renderTree(data));
             App.renderFavorites();
             App.renderActions();
             App.loadRecentProjects();
@@ -132,7 +152,8 @@ const App = {
             if (App.state.projConfig.excludes && !document.getElementById('excludeInput').value) {
                 document.getElementById('excludeInput').value = App.state.projConfig.excludes;
             }
-        } catch (e) { alert("Error: " + e.message); }
+            App.showToast(`Opened project: ${data.name}`);
+        } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
     },
 
     refreshProject: async () => {
@@ -160,15 +181,35 @@ const App = {
     // --- File Tree Rendering ---
     renderTree: (node) => {
         const container = document.createElement('div');
-        container.className = 'ms-2';
+        container.className = 'ms-1';
         const header = document.createElement('div');
-        header.className = 'tree-node text-truncate animate-in';
+        header.className = 'tree-node d-flex align-items-center text-truncate animate-in';
         header.setAttribute('data-path', node.path);
         
+        // Add Checkbox for files (and maybe dirs if requested, but plan said files)
+        if (node.type === 'file') {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input me-2 x-small';
+            cb.style.width = '0.8rem';
+            cb.style.height = '0.8rem';
+            cb.checked = App.state.selectedFiles.has(node.path);
+            cb.onclick = (e) => {
+                e.stopPropagation();
+                if (cb.checked) App.state.selectedFiles.add(node.path);
+                else App.state.selectedFiles.delete(node.path);
+                App.updateBulkUI();
+            };
+            header.appendChild(cb);
+        }
+
         const icon = node.type === 'dir' ? '📁' : '📄';
         const metaInfo = node.type === 'file' ? ` (${node.size_fmt})` : '';
-        header.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>
-                            <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}${metaInfo}</span>`;
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'flex-grow-1 text-truncate';
+        nameSpan.innerHTML = `<span class="me-1">${icon}</span><span>${App.escapeHtml(node.name)}</span>
+                             <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}${metaInfo}</span>`;
+        header.appendChild(nameSpan);
         container.appendChild(header);
 
         if (node.type === 'dir') {
@@ -224,7 +265,7 @@ const App = {
         codeEl.innerText = "Loading...";
         
         try {
-            const res = await fetch(`/api/content?path=${encodeURIComponent(path)}`);
+            const res = await App._fetch(`/api/content?path=${encodeURIComponent(path)}`);
             const data = await res.json();
             App.state.rawContent = data.content;
             codeEl.innerText = data.content;
@@ -267,7 +308,7 @@ const App = {
     saveFileNote: async () => {
         const note = document.getElementById('noteInput').value.trim();
         try {
-            await fetch('/api/project/note', {
+            await App._fetch('/api/project/note', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -286,8 +327,13 @@ const App = {
         const name = prompt("Archive Name:", "context_backup.zip");
         if (!name) return;
         
+        const btn = document.querySelector('[onclick="App.archiveStaging()"]');
+        const originalText = btn.innerText;
+        btn.innerText = "📦 Archiving...";
+        btn.disabled = true;
+
         try {
-            const res = await fetch('/api/fs/archive', {
+            await App._fetch('/api/fs/archive', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -296,9 +342,12 @@ const App = {
                     project_root: App.state.projectPath
                 })
             });
-            if (!res.ok) throw new Error("Archive failed");
             App.showToast(`✅ Archived to ${name}`, 'success');
         } catch (e) { App.showToast(e.message, 'danger'); }
+        finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
     },
 
     updateTemplateList: () => {
@@ -315,30 +364,31 @@ const App = {
 
     renameFile: async () => {
         if (!App.state.currentFile) return;
-        const newName = prompt("New name:", App.state.currentFile.split(/[\\\/]/).pop());
-        if (!newName) return;
-        const oldPath = App.state.currentFile;
-        const separator = oldPath.includes('\\') ? '\\' : '/';
-        const parts = oldPath.split(/[\\\/]/);
-        parts[parts.length - 1] = newName;
-        const newPath = parts.join(separator);
+        const oldName = App.state.currentFile.split(/[\\\/]/).pop();
+        const newName = prompt("New name:", oldName);
+        if (!newName || newName === oldName) return;
         
         try {
-            await fetch('/api/fs/rename', {
+            await App._fetch('/api/fs/rename', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ project_path: App.state.projectPath, path: oldPath, new_name: newName })
+                body: JSON.stringify({ 
+                    project_path: App.state.projectPath, 
+                    path: App.state.currentFile, 
+                    new_name: newName 
+                })
             });
+            App.showToast("Renamed successfully");
             App.openProject(); // Refresh tree
             App.state.currentFile = null;
             document.getElementById('fileControls').style.display = 'none';
-        } catch (e) { alert("Rename failed"); }
+        } catch (e) { App.showToast("Rename failed: " + e.message, 'danger'); }
     },
 
     deleteFile: async () => {
         if (!App.state.currentFile || !confirm("Are you sure?")) return;
         try {
-            await fetch('/api/fs/delete', {
+            await App._fetch('/api/fs/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ project_path: App.state.projectPath, paths: [App.state.currentFile] })
@@ -428,8 +478,12 @@ const App = {
 
     categorizeStaged: async (catName) => {
         if (App.state.staging.size === 0) return App.showToast("Add files to staging first.", 'warning');
+        const btn = document.querySelector(`[onclick="App.categorizeStaged('${catName}')"]`);
+        const originalText = btn ? btn.innerText : catName;
+        if (btn) { btn.innerText = "..."; btn.disabled = true; }
+
         try {
-            const res = await fetch('/api/actions/categorize', {
+            const res = await App._fetch('/api/actions/categorize', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -439,20 +493,23 @@ const App = {
                 })
             });
             const data = await res.json();
-            if (res.ok) {
-                App.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
-                App.state.staging.clear();
-                App.renderStaging();
-                App.syncStagingToBackend();
-                App.refreshProject();
-            } else throw new Error(data.detail);
+            App.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
+            App.state.staging.clear();
+            App.renderStaging();
+            App.syncStagingToBackend();
+            App.refreshProject();
         } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
+        finally { if (btn) { btn.innerText = originalText; btn.disabled = false; } }
     },
 
     executeToolOnStaged: async (toolName) => {
         if (App.state.staging.size === 0) return App.showToast("Add files to staging first.", 'warning');
+        const btn = document.querySelector(`[onclick="App.executeToolOnStaged('${toolName}')"]`);
+        const originalText = btn ? btn.innerText : toolName;
+        if (btn) { btn.innerText = "Running..."; btn.disabled = true; }
+
         try {
-            const res = await fetch('/api/actions/execute', {
+            const res = await App._fetch('/api/actions/execute', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -462,31 +519,30 @@ const App = {
                 })
             });
             const data = await res.json();
-            if (res.ok) {
-                const modalWrapper = document.getElementById('toolResultModal');
-                const modalBody = document.getElementById('toolResultModalBody');
-                modalBody.innerHTML = '';
-                
-                data.results.forEach(r => {
-                    const block = document.createElement('div');
-                    block.className = 'border-bottom border-secondary p-3';
-                    const color = r.exit_code === 0 ? 'text-success' : 'text-danger';
-                    block.innerHTML = `
-                        <div class="fw-bold mb-2">${App.escapeHtml(r.path)} <span class="badge bg-secondary ms-2 align-middle">Exit: <span class="${color}">${r.exit_code}</span></span></div>
-                        <pre class="m-0 p-2 rounded" style="background:#000; color:#ccc; font-size:0.85rem;"><code>${App.escapeHtml(r.stdout || 'No output')}</code></pre>
-                        ${r.error ? `<div class="text-danger small mt-2">Error: ${App.escapeHtml(r.error)}</div>` : ''}
-                    `;
-                    modalBody.appendChild(block);
-                });
-                
-                const bsModal = new bootstrap.Modal(modalWrapper);
-                bsModal.show();
-                
-                App.state.staging.clear();
-                App.renderStaging();
-                App.syncStagingToBackend();
-            } else throw new Error(data.detail);
+            const modalWrapper = document.getElementById('toolResultModal');
+            const modalBody = document.getElementById('toolResultModalBody');
+            modalBody.innerHTML = '';
+            
+            data.results.forEach(r => {
+                const block = document.createElement('div');
+                block.className = 'border-bottom border-secondary p-3';
+                const color = r.exit_code === 0 ? 'text-success' : 'text-danger';
+                block.innerHTML = `
+                    <div class="fw-bold mb-2">${App.escapeHtml(r.path)} <span class="badge bg-secondary ms-2 align-middle">Exit: <span class="${color}">${r.exit_code}</span></span></div>
+                    <pre class="m-0 p-2 rounded" style="background:#000; color:#ccc; font-size:0.85rem;"><code>${App.escapeHtml(r.stdout || 'No output')}</code></pre>
+                    ${r.error ? `<div class="text-danger small mt-2">Error: ${App.escapeHtml(r.error)}</div>` : ''}
+                `;
+                modalBody.appendChild(block);
+            });
+            
+            const bsModal = new bootstrap.Modal(modalWrapper);
+            bsModal.show();
+            
+            App.state.staging.clear();
+            App.renderStaging();
+            App.syncStagingToBackend();
         } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
+        finally { if (btn) { btn.innerText = originalText; btn.disabled = false; } }
     },
 
     // --- Staging & Generation ---
@@ -529,14 +585,16 @@ const App = {
 
     syncStagingToBackend: async () => {
         if (!App.state.projectPath) return;
-        await fetch('/api/project/settings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                project_path: App.state.projectPath,
-                settings: { "staging_list": Array.from(App.state.staging) }
-            })
-        });
+        try {
+            await App._fetch('/api/project/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    settings: { "staging_list": Array.from(App.state.staging) }
+                })
+            });
+        } catch (e) { console.warn("Staging sync failed", e); }
     },
 
     renderFavorites: () => {
@@ -598,50 +656,58 @@ const App = {
 
     toggleFavorite: async (path, action, group = null) => {
         if (!group) group = document.getElementById('favGroupSelect').value || "Default";
-        const res = await fetch('/api/project/favorites', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                project_path: App.state.projectPath,
-                group_name: group,
-                file_paths: [path],
-                action: action
-            })
-        });
-        
-        if (res.ok) {
+        try {
+            await App._fetch('/api/project/favorites', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    group_name: group,
+                    file_paths: [path],
+                    action: action
+                })
+            });
+            
             // Hot update local config for instant UI feedback
             if (!App.state.projConfig.groups[group]) App.state.projConfig.groups[group] = [];
             if (action === 'add') {
                 if (!App.state.projConfig.groups[group].includes(path)) App.state.projConfig.groups[group].push(path);
+                App.showToast("⭐ Added to favorites");
             } else {
                 App.state.projConfig.groups[group] = App.state.projConfig.groups[group].filter(p => p !== path);
+                App.showToast("Removed from favorites");
             }
             App.renderFavorites();
-        }
+        } catch (e) { App.showToast(e.message, 'danger'); }
     },
 
+    _statsTimer: null,
+
     updateStats: async () => {
+        // Debounce: cancel pending update, schedule new one after 300ms
+        if (App._statsTimer) clearTimeout(App._statsTimer);
+        App._statsTimer = setTimeout(App._updateStatsImpl, 300);
+    },
+
+    _updateStatsImpl: async () => {
         const count = App.state.staging.size;
         const label = document.getElementById('tokenEstimate');
+        if (!label) return;
+        
         if (count === 0) {
-            label.innerText = '0 Tokens';
+            label.innerText = " 清单: 0 项 | 0 Tokens";
             return;
         }
-        
-        // Debounced or throttled update for tokens
+
         try {
-            const res = await fetch('/api/generate', {
+            const res = await App._fetch('/api/project/stats', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    files: Array.from(App.state.staging),
-                    project_path: App.state.projectPath
-                })
+                body: JSON.stringify({ paths: Array.from(App.state.staging) })
             });
             const data = await res.json();
-            label.innerText = `${data.tokens} Tokens`;
-        } catch (e) { 
+            label.innerText = ` 清单: ${count} 项 | 估算 ${data.total_tokens} Tokens`;
+        } catch (e) {
             label.innerText = `${count} Files`;
         }
     },
@@ -649,8 +715,13 @@ const App = {
     generateContext: async () => {
         if (App.state.staging.size === 0) return;
         const templateName = document.getElementById('promptTemplate').value;
+        const btn = document.querySelector('[onclick="App.generateContext()"]');
+        const originalText = btn.innerText;
+        btn.innerText = "🚀 Generating...";
+        btn.disabled = true;
+
         try {
-            const res = await fetch('/api/generate', {
+            const res = await App._fetch('/api/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
@@ -662,7 +733,11 @@ const App = {
             const data = await res.json();
             await navigator.clipboard.writeText(data.content);
             App.showToast("✅ Context copied!", 'success');
-        } catch (e) { App.showToast("Failed to copy", 'danger'); }
+        } catch (e) { App.showToast("Failed to generate context: " + e.message, 'danger'); }
+        finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
     },
 
     toggleEdit: async () => {
@@ -679,7 +754,7 @@ const App = {
             btn.innerText = 'Save';
         } else {
             try {
-                await fetch('/api/fs/save', {
+                await App._fetch('/api/fs/save', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ path: App.state.currentFile, content: editor.value })
@@ -689,7 +764,8 @@ const App = {
                 preview.style.display = 'block';
                 btn.innerText = 'Edit';
                 App.previewFile(App.state.currentFile);
-            } catch (e) { alert("Save failed"); }
+                App.showToast("File saved", 'success');
+            } catch (e) { App.showToast("Save failed: " + e.message, 'danger'); }
         }
     },
 
@@ -734,7 +810,7 @@ const App = {
     bulkDelete: async () => {
         if (App.state.selectedFiles.size === 0 || !confirm(`Delete ${App.state.selectedFiles.size} files forever?`)) return;
         try {
-            await fetch('/api/fs/delete', {
+            await App._fetch('/api/fs/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
@@ -746,11 +822,29 @@ const App = {
             App.updateBulkUI();
             App.openProject();
             App.showToast("Batch delete successful.");
-        } catch (e) { alert("Bulk delete failed"); }
+        } catch (e) { App.showToast("Bulk delete failed: " + e.message, 'danger'); }
     },
 
     bulkMove: async () => {
-        alert("Bulk Move requires a target directory. Please use individual rename/move for now or implement a folder picker.");
+        if (App.state.selectedFiles.size === 0) return;
+        const dstDir = prompt("Enter destination directory path (within project root):");
+        if (!dstDir) return;
+        
+        try {
+            const res = await App._fetch('/api/fs/move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    src_paths: Array.from(App.state.selectedFiles),
+                    dst_dir: dstDir
+                })
+            });
+            const data = await res.json();
+            App.showToast(`Batch Move: ${data.new_paths.length} moved, ${(data.skipped||[]).length} skipped.`);
+            App.state.selectedFiles.clear();
+            App.updateBulkUI();
+            App.openProject(); 
+        } catch (e) { App.showToast("Move failed: " + e.message, 'danger'); }
     }
 };
 

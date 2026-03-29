@@ -7,6 +7,15 @@ from fastapi.testclient import TestClient
 from web_app import app
 from file_cortex_core import DataManager
 
+@pytest.fixture(autouse=True)
+def _reset_singleton():
+    """Ensure DataManager singleton is reset between tests for isolation."""
+    from file_cortex_core import FileUtils
+    yield
+    DataManager._instance = None
+    DataManager._initialized = False  
+    FileUtils.clear_cache()
+
 @pytest.fixture
 def mock_project():
     """Creates a temporary project directory with various files."""
@@ -61,7 +70,7 @@ def clean_config():
     
     from unittest.mock import patch
     from file_cortex_core import FileUtils
-    with patch('file_cortex_core.config.CONFIG_FILE', config_path):
+    with patch('file_cortex_core.config._CONFIG_FILE', config_path):
         # Full Reset for implementation consistency
         DataManager._instance = None
         FileUtils.clear_cache()
@@ -76,13 +85,34 @@ def clean_config():
 
 @pytest.fixture
 def api_client():
-    """FastAPI TestClient instance."""
-    return TestClient(app)
+    """FastAPI TestClient instance with isolated config."""
+    temp_dir = tempfile.mkdtemp()
+    config_path = pathlib.Path(temp_dir) / "api_test_config.json"
+    
+    from unittest.mock import patch
+    from file_cortex_core import FileUtils
+    
+    with patch('file_cortex_core.config._CONFIG_FILE', config_path):
+        # Reset singleton to pick up the new config path
+        DataManager._instance = None
+        DataManager._initialized = False
+        FileUtils.clear_cache()
+        
+        client = TestClient(app)
+        yield client
+        
+        # Cleanup
+        DataManager._instance = None
+        DataManager._initialized = False
+        FileUtils.clear_cache()
+        
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 @pytest.fixture
 def project_client(api_client, mock_project):
     """Client with a project already 'opened' and registered."""
-    api_client.post("/api/open", json={"path": str(mock_project)})
+    res = api_client.post("/api/open", json={"path": str(mock_project)})
+    assert res.status_code == 200
     return api_client
 
 @pytest.fixture

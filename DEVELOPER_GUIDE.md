@@ -12,6 +12,10 @@
     *   **Windows**: 采用 `shell=True` 以兼容复杂的 CMD 模板，但对所有上下文变量（如 `{path}`, `{name}`）进行 `win_quote` (双引号包裹) 强制转义，彻底杜绝注入。
     *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
 *   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
+*   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
+*   **专用配置 API (v5.3)**: `custom_tools` 与 `quick_categories` 已移至专用端点 (`/api/project/tools`, `/api/project/categories`)，并增加了格式校验与路径穿越防护，彻底切断了通过 settings 注入实现 RCE 的可能性。
+*   **跨项目移动防护 (v5.3)**: `/api/fs/move` 路由强制执行 `src_root == dst_root` 校验，禁止在不同项目间移动文件。
+*   **资源泄漏防御 (v5.3)**: 全局强制使用 `with os.scandir(...)` 以确保文件句柄及时关闭，解决 Windows 下的文件占用问题。
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
@@ -37,6 +41,8 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **深拷贝 Schema**: 调用 `get_project_data` 创建新项目时必须执行 `copy.deepcopy(DEFAULT_SCHEMA)`，防止列表/字典等引用类型在多项目间意外共享。
 *   **原子写入**: 配置保存采用**原子重命名策略** (写入 `.json.tmp` 后调用 `os.replace` 覆盖)。这确保了即使在极端情况 (如进程意外中断) 下，配置文件也不会被截断或损坏。
 *   **跨平台 IO 分发**: 避免直接使用如 `os.startfile` 等强依赖系统的 API。所有的原生系统调用均已抽象入 `FileUtils.open_path_in_os`，依据 `sys.platform` 进行动态分发。
+*   **路径归一化强制标准 (v5.3 PRO)**: 为了解决 Windows 大小写不敏感及正反斜杠混用导致的 `KeyError` 或 `403` 误报，**所有内存中的字典键（Dictionary Keys）必须且只能使用 `PathValidator.norm_path` 处理后的字符串。**
+*   **前端通信标准 (_fetch)**: `app.js` 必须一致性地调用 `App._fetch` 而非原生 `fetch`。这一封装确保了 HTTP 非 200 系列的状态码能被捕获并转化为人类可读的 UI Toast 提示，避免 API 拦截引发的静默失败。
 
 ### 4. 文件操作与快速分类 (FileOps & Quick Categorization)
 *   **文件操作**: 实现了安全的文件移动、删除和归档功能。
@@ -51,6 +57,8 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 
 ## 🧪 测试方法论
 本项目坚持 **100% 核心路径覆盖** 且遵循 **“零硬编码”原则**。
+*   **测试隔离与自修复 (v5.3)**: `conftest.py` 引入了 `autouse` fixture，在每个测试运行前后强制重置 `DataManager` 单例和缓存，彻底消除测试间的交叉污染。
+*   **测试隔离规范**: **严禁在单项测试中重写 `TestClient` 或 `DataManager` 实例。** 所有的测试必须共享 `conftest.py` 提供的隔离配置文件 `api_test_config.json`，以防止泄露至用户的真实配置目录。
 *   **参数矩阵覆盖 (Matrix Testing)**: 在 `test_search.py` 中覆盖了搜索模式、正反向、大小写、排除规则的组合。
 *   **零硬编码 (Zero Hardcoding)**: 测试 Fixture 严禁出现绝对路径。使用 `system_dir` 等动态感知 Fixture，确保测试在任何环境下皆能“动态对齐”。
 *   **端到端工作流 (E2E)**: `test_e2e.py` 模拟了从“打开项目 -> 搜索并暂存 -> 选择模板 -> 生成上下文”的完整 AI 辅助心流。
@@ -60,6 +68,7 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
     ```bash
     python -m pytest
     ```
+    v5.3 版本共包含 **80+** 项自动化测试用例。
 
 ## 🛠️ 打包与分发
 *   **桌面版**: 使用 `build_exe.py` (封装了 PyInstaller) 进行单文件打包。
