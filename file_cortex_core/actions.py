@@ -10,7 +10,68 @@ from .config import DataManager, logger
 from .security import PathValidator
 from .utils import FileUtils
 
+import re
+
 class FileOps:
+    @staticmethod
+    def batch_rename(project_path, paths, pattern, replacement, dry_run=True):
+        """
+        Renames multiple files using regex.
+        Returns a list of (old_path, new_path, status) where status is 'ok', 'conflict', or 'error'.
+        """
+        try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            raise ValueError(f"Invalid regex: {e}")
+
+        results = []
+        # Phase 1: Calculate new names and check for internal conflicts in the selection
+        new_names = {}
+        for p_str in paths:
+            p = pathlib.Path(p_str)
+            new_name = regex.sub(replacement, p.name)
+            if new_name == p.name:
+                continue # No change
+            
+            new_path = p.parent / new_name
+            new_names[p_str] = new_path
+
+        # Check for destination existence and selection collisions
+        final_targets = {}
+        for old_p, new_p in new_names.items():
+            status = 'ok'
+            if new_p.exists():
+                status = 'conflict'
+            
+            # Simple conflict resolution: add suffix if it's a conflict
+            if status == 'conflict':
+                base = new_p.stem
+                ext = new_p.suffix
+                counter = 1
+                while True:
+                    candidate = new_p.parent / f"{base}_{counter}{ext}"
+                    if not candidate.exists():
+                        new_p = candidate
+                        status = 'renamed_with_suffix'
+                        break
+                    counter += 1
+
+            final_targets[old_p] = (new_p, status)
+            results.append({"old": old_p, "new": str(new_p), "status": status})
+
+        if not dry_run:
+            for old_p, (new_p, _) in final_targets.items():
+                try:
+                    pathlib.Path(old_p).rename(new_p)
+                except Exception as e:
+                    # Update status in results
+                    for item in results:
+                        if item["old"] == old_p:
+                            item["status"] = f"error: {str(e)}"
+                            break
+        
+        return results
+
     @staticmethod
     def rename_file(old_path_str, new_name):
         old_path = pathlib.Path(old_path_str)
@@ -132,7 +193,8 @@ class ActionBridge:
             "name": p.name,
             "ext": p.suffix,
             "root": str(project_root),
-            "parent": str(p.parent)
+            "parent": str(p.parent),
+            "parent_name": p.parent.name
         }
         
         try:
@@ -177,6 +239,65 @@ class ActionBridge:
             return {"error": str(e)}
 
     @staticmethod
+    def create_process(template, path_str, project_root):
+        """Creates a subprocess Popen object based on template and context."""
+        p = pathlib.Path(path_str)
+        if not p.exists(): raise FileNotFoundError("Path does not exist")
+        
+        context = {
+            "path": str(p),
+            "name": p.name,
+            "ext": p.suffix,
+            "root": str(project_root),
+            "parent": str(p.parent),
+            "parent_name": p.parent.name
+        }
+        
+        if os.name == 'nt':
+            shell_metas = set("&|<>^%")
+            has_meta = any(c in template for c in shell_metas)
+            
+            def win_quote(s):
+                return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
+            
+            if not has_meta:
+                cmd_str = template.format(**context)
+                try:
+                    args = shlex.split(cmd_str, posix=False)
+                    logger.info(f"AUDIT - Creating process (Win/No-Shell): {args}")
+                    return subprocess.Popen(
+                        args, shell=False,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, encoding='utf-8', errors='replace'
+                    )
+                except Exception:
+                    safe_context = {k: win_quote(v) for k, v in context.items()}
+                    cmd_str = template.format(**safe_context)
+                    return subprocess.Popen(
+                        cmd_str, shell=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, encoding='utf-8', errors='replace'
+                    )
+            else:
+                safe_context = {k: win_quote(v) for k, v in context.items()}
+                cmd_str = template.format(**safe_context)
+                logger.info(f"AUDIT - Creating process (Win/Shell-Required): {cmd_str}")
+                return subprocess.Popen(
+                    cmd_str, shell=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, encoding='utf-8', errors='replace'
+                )
+        else:
+            tokens = shlex.split(template, posix=True)
+            final_cmd = [t.format(**context) for t in tokens]
+            logger.info(f"AUDIT - Creating process (Unix/List): {' '.join(final_cmd)}")
+            return subprocess.Popen(
+                final_cmd, shell=False,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, encoding='utf-8', errors='replace'
+            )
+
+    @staticmethod
     def stream_tool(template, path_str, project_root):
         p = pathlib.Path(path_str)
         if not p.exists():
@@ -188,53 +309,12 @@ class ActionBridge:
             "name": p.name,
             "ext": p.suffix,
             "root": str(project_root),
-            "parent": str(p.parent)
+            "parent": str(p.parent),
+            "parent_name": p.parent.name
         }
         
         try:
-            if os.name == 'nt':
-                shell_metas = set("&|<>^%")
-                has_meta = any(c in template for c in shell_metas)
-                
-                def win_quote(s):
-                    return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
-                
-                if not has_meta:
-                    cmd_str = template.format(**context)
-                    try:
-                        args = shlex.split(cmd_str, posix=False)
-                        logger.info(f"AUDIT - Streaming external tool (Win/No-Shell): {args}")
-                        process = subprocess.Popen(
-                            args, shell=False,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1, encoding='utf-8', errors='replace'
-                        )
-                    except Exception:
-                        safe_context = {k: win_quote(v) for k, v in context.items()}
-                        cmd_str = template.format(**safe_context)
-                        process = subprocess.Popen(
-                            cmd_str, shell=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1, encoding='utf-8', errors='replace'
-                        )
-                else:
-                    safe_context = {k: win_quote(v) for k, v in context.items()}
-                    cmd_str = template.format(**safe_context)
-                    logger.info(f"AUDIT - Streaming external tool (Win/Shell-Required): {cmd_str}")
-                    process = subprocess.Popen(
-                        cmd_str, shell=True,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1, encoding='utf-8', errors='replace'
-                    )
-            else:
-                tokens = shlex.split(template, posix=True)
-                final_cmd = [t.format(**context) for t in tokens]
-                logger.info(f"AUDIT - Streaming external tool (Unix/List): {' '.join(final_cmd)}")
-                process = subprocess.Popen(
-                    final_cmd, shell=False,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, encoding='utf-8', errors='replace'
-                )
+            process = ActionBridge.create_process(template, path_str, project_root)
             
             for line in process.stdout:
                 yield {"out": line}

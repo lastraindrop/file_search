@@ -10,8 +10,13 @@ import pathlib
 import json
 import asyncio
 from file_cortex_core import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, FormatUtils, ActionBridge, logger
+import signal
 
-app = FastAPI(title="FileCortex v5.0 API")
+app = FastAPI(title="FileCortex v5.4 API")
+
+# --- Global State ---
+ACTIVE_PROCESSES = {} # { pid: process_obj }
+PROCESS_LOCK = asyncio.Lock()
 
 # --- Static & Templates ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -119,6 +124,16 @@ class ToolExecuteRequest(BaseModel):
     project_path: str
     paths: list[str]
     tool_name: str
+
+class BatchRenameRequest(BaseModel):
+    project_path: str
+    paths: list[str]
+    pattern: str
+    replacement: str
+    dry_run: bool = True
+
+class ProcessTerminateRequest(BaseModel):
+    pid: int
 
 def is_path_safe(target_path: str, project_root: str) -> bool:
     """Delegates to PathValidator for safe traversal checks."""
@@ -295,6 +310,26 @@ async def rename_file(req: FileRenameRequest):
         return {"status": "ok", "new_path": new_path}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/fs/batch_rename")
+async def api_batch_rename(req: BatchRenameRequest):
+    project_root = get_valid_project_root(req.project_path)
+    if not project_root:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Safety Check: all paths must be safe
+    for p in req.paths:
+        if not is_path_safe(p, project_root):
+            raise HTTPException(status_code=403, detail=f"Path unsafe: {p}")
+            
+    try:
+        logger.info(f"AUDIT - Batch Renaming ({'Dry' if req.dry_run else 'Live'}): {len(req.paths)} items")
+        results = FileOps.batch_rename(req.project_path, req.paths, req.pattern, req.replacement, req.dry_run)
+        return {"status": "ok", "results": results}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/fs/delete")
 async def delete_files(req: FileDeleteRequest):
@@ -548,8 +583,27 @@ async def api_execute_tool(req: ToolExecuteRequest):
         for p in req.paths:
             if not is_path_safe(p, project_root):
                 continue
-            res = ActionBridge.execute_tool(template, p, project_root)
-            results.append({"path": p, **res})
+            
+            # Use Popen-based execution for consistency and potential termination tracking
+            try:
+                proc = ActionBridge.create_process(template, p, project_root)
+                async with PROCESS_LOCK:
+                    ACTIVE_PROCESSES[proc.pid] = proc
+                
+                stdout, stderr = proc.communicate() # Blocking for standard API
+                
+                async with PROCESS_LOCK:
+                    ACTIVE_PROCESSES.pop(proc.pid, None)
+                    
+                results.append({
+                    "path": p, 
+                    "stdout": stdout, 
+                    "stderr": stderr, 
+                    "exit_code": proc.returncode,
+                    "pid": proc.pid
+                })
+            except Exception as e:
+                 results.append({"path": p, "error": str(e)})
             
         return {"status": "ok", "results": results}
     except HTTPException: raise
@@ -573,6 +627,25 @@ async def collect_paths_api(req: PathCollectionRequest):
     except Exception as e:
         logger.error(f"Path collection error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/actions/terminate")
+async def api_terminate_process(req: ProcessTerminateRequest):
+    async with PROCESS_LOCK:
+        proc = ACTIVE_PROCESSES.get(req.pid)
+        if proc:
+            logger.info(f"AUDIT - Terminating process {req.pid}")
+            try:
+                if os.name == 'nt':
+                    # Use taskkill to ensure child processes are also handled on Windows
+                    import subprocess
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(req.pid)], capture_output=True)
+                else:
+                    os.kill(req.pid, signal.SIGTERM)
+                return {"status": "ok"}
+            except Exception as e:
+                return {"status": "error", "msg": str(e)}
+        else:
+            return {"status": "error", "msg": "Process not found or already finished"}
 
 @app.websocket("/ws/search")
 async def websocket_search(websocket: WebSocket, path: str, query: str, mode: str = "smart", 
@@ -661,10 +734,25 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
         return
 
     def run_stream():
-        for res in ActionBridge.stream_tool(template, path, project_root):
-             # Ensure UI gets immediate feedback
-             main_loop.call_soon_threadsafe(result_queue.put_nowait, res)
-        main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+        try:
+            proc = ActionBridge.create_process(template, path, project_root)
+            # Register process for potential termination
+            # Note: We can't easily await inside this thread, but ACTIVE_PROCESSES is a dict
+            ACTIVE_PROCESSES[proc.pid] = proc
+            
+            # Send PID to frontend immediately
+            main_loop.call_soon_threadsafe(result_queue.put_nowait, {"pid": proc.pid})
+            
+            for line in proc.stdout:
+                main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
+            
+            proc.wait()
+            ACTIVE_PROCESSES.pop(proc.pid, None)
+            main_loop.call_soon_threadsafe(result_queue.put_nowait, {"exit_code": proc.returncode})
+        except Exception as e:
+            main_loop.call_soon_threadsafe(result_queue.put_nowait, {"error": str(e)})
+        finally:
+            main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
 
     result_queue = asyncio.Queue()
     main_loop = asyncio.get_running_loop()

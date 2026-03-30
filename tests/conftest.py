@@ -9,12 +9,14 @@ from file_cortex_core import DataManager
 
 @pytest.fixture(autouse=True)
 def _reset_singleton():
-    """Ensure DataManager singleton is reset between tests for isolation."""
+    """Ensure DataManager singleton and global process registry are reset between tests."""
     from file_cortex_core import FileUtils
+    from web_app import ACTIVE_PROCESSES
     yield
     DataManager._instance = None
     DataManager._initialized = False  
     FileUtils.clear_cache()
+    ACTIVE_PROCESSES.clear()
 
 @pytest.fixture
 def mock_project():
@@ -45,6 +47,49 @@ def mock_project():
     
     yield base
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+@pytest.fixture
+def noisy_project():
+    """Creates a project with complex encoding, minified code, and noise."""
+    temp_dir = tempfile.mkdtemp(prefix="fctx_noisy_")
+    base = pathlib.Path(temp_dir)
+    
+    # 1. GBK Encoded File (Common in some Chinese heritage codebases)
+    gbk_file = base / "legacy_zh.py"
+    # "测试内容" in GBK
+    gbk_file.write_bytes(b"\xb2\xe2\xca\xd4\xc4\xda\xc8\xdd")
+    
+    # 2. Minified File (Noise)
+    min_file = base / "library.min.js"
+    long_line = "var a=1;" + "b=2;" * 1000 + "console.log(a+b);"
+    min_file.write_text(long_line, encoding="utf-8")
+    
+    # 3. Clean File
+    clean_file = base / "app.py"
+    clean_file.write_text("print('Hello World')", encoding="utf-8")
+    
+    yield base
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+@pytest.fixture
+def mock_popen(monkeypatch):
+    """Mocks subprocess.Popen for safe process management testing."""
+    from unittest.mock import MagicMock
+    import subprocess
+    
+    mock_proc = MagicMock()
+    mock_proc.pid = 9999
+    mock_proc.stdout = ["Line 1\n", "Line 2\n"]
+    mock_proc.stderr = []
+    mock_proc.returncode = 0
+    mock_proc.poll.return_value = 0
+    mock_proc.communicate.return_value = ("stdout", "stderr")
+    
+    def _mock_popen_init(*args, **kwargs):
+        return mock_proc
+        
+    monkeypatch.setattr(subprocess, "Popen", _mock_popen_init)
+    return mock_proc
 
 @pytest.fixture
 def stress_project():

@@ -35,6 +35,8 @@ class FileCortexApp:
         self.recursive_copy_var = tk.BooleanVar(value=True)
         self.use_gitignore_var = tk.BooleanVar(value=True)
         self.selected_template_var = tk.StringVar(value="None")
+        self.positive_tags = []
+        self.negative_tags = []
 
         self._init_ui()
         self._init_context_menu()
@@ -69,12 +71,14 @@ class FileCortexApp:
         ttk.Button(top_bar, text="🌲 复制项目结构", command=self.copy_project_tree).pack(side=tk.RIGHT, padx=5)
 
     def _init_main_body(self):
-        self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Improvement: Using vanilla tk.PanedWindow for highly visible sashes
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, 
+                                        sashwidth=4, sashrelief=tk.RAISED, bg="#f0f0f0")
+        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         # Left: Search & Tree
         self.left_nav = ttk.Notebook(self.main_paned)
-        self.main_paned.add(self.left_nav, weight=2)
+        self.main_paned.add(self.left_nav)
         
         self.tab_search_frame = ttk.Frame(self.left_nav)
         self.left_nav.add(self.tab_search_frame, text="🔍 搜索")
@@ -89,7 +93,7 @@ class FileCortexApp:
 
         # Right: Staging & Favorites
         self.right_nav = ttk.Notebook(self.main_paned)
-        self.main_paned.add(self.right_nav, weight=2)
+        self.main_paned.add(self.right_nav)
         self.tab_staging = ttk.Frame(self.right_nav)
         self.right_nav.add(self.tab_staging, text="🛒 清单")
         self._init_staging_tab()
@@ -102,7 +106,7 @@ class FileCortexApp:
 
     def _init_preview_area(self):
         self.preview_frame = ttk.LabelFrame(self.main_paned, text="📄 内容预览 (只读)", padding=5)
-        self.main_paned.add(self.preview_frame, weight=4)
+        self.main_paned.add(self.preview_frame)
         
         self.preview_ctrl = ttk.Frame(self.preview_frame)
         self.preview_ctrl.pack(fill=tk.X, pady=(0, 2))
@@ -128,19 +132,36 @@ class FileCortexApp:
         ttk.Entry(ctrl, textvariable=self.exclude_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
         s_box = ttk.Frame(f, padding=5); s_box.pack(fill=tk.X)
-        self.search_var = tk.StringVar(); self.search_var.trace("w", self.on_search_input)
-        self.search_entry = ttk.Entry(s_box, textvariable=self.search_var); self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(s_box, textvariable=self.search_var)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.search_entry.bind("<Return>", lambda e: self.add_search_tag())
+        ttk.Button(s_box, text="🔍 搜索", command=self.trigger_search).pack(side=tk.LEFT, padx=5)
+        
+        # New Tag Bar
+        self.tag_bar = ttk.Frame(f, padding=(5, 0))
+        self.tag_bar.pack(fill=tk.X)
         
         m_box = ttk.Frame(f, padding=2); m_box.pack(fill=tk.X)
         for v, t in {"smart":"智能","exact":"精确","regex":"正则","content":"内容"}.items():
-            ttk.Radiobutton(m_box, text=t, variable=self.search_mode_var, value=v, command=self.on_search_input).pack(side=tk.LEFT, padx=2)
+            ttk.Radiobutton(m_box, text=t, variable=self.search_mode_var, value=v, command=self.trigger_search).pack(side=tk.LEFT, padx=2)
         
         adv_box = ttk.Frame(f, padding=2); adv_box.pack(fill=tk.X)
-        ttk.Checkbutton(adv_box, text="反向匹配", variable=self.is_inverse_var, command=self.on_search_input).pack(side=tk.LEFT, padx=5)
-        ttk.Checkbutton(adv_box, text="区分大小写", variable=self.case_sensitive_var, command=self.on_search_input).pack(side=tk.LEFT, padx=5)
-        ttk.Checkbutton(adv_box, text="包括目录", variable=self.search_include_dirs_var, command=self.on_search_input).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(adv_box, text="反向匹配", variable=self.is_inverse_var, command=self.trigger_search).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(adv_box, text="区分大小写", variable=self.case_sensitive_var, command=self.trigger_search).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(adv_box, text="包括目录", variable=self.search_include_dirs_var, command=self.trigger_search).pack(side=tk.LEFT, padx=5)
         
-        self.tree_search = ttk.Treeview(f, columns=("file", "path", "size", "mtime", "ext"), show="headings", selectmode="extended")
+        # Wrapped Treeview with Scrollbar
+        tree_container = ttk.Frame(f)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+        
+        self.tree_search = ttk.Treeview(tree_container, columns=("file", "path", "size", "mtime", "ext"), show="headings", selectmode="extended")
+        # Using tk.Scrollbar for maximum cross-platform visibility (older style but reliable)
+        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_search.yview, width=16)
+        self.tree_search.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_search.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         self.tree_search.heading("file", text="文件名", command=lambda: self.sort_tree_column(self.tree_search, "file", False))
         self.tree_search.column("file", width=120)
         self.tree_search.heading("path", text="相对路径", command=lambda: self.sort_tree_column(self.tree_search, "path", False))
@@ -151,13 +172,18 @@ class FileCortexApp:
         self.tree_search.column("mtime", width=120)
         self.tree_search.heading("ext", text="类型", command=lambda: self.sort_tree_column(self.tree_search, "ext", False))
         self.tree_search.column("ext", width=60)
-        self.tree_search.pack(fill=tk.BOTH, expand=True)
+        
         self.tree_search.bind("<<TreeviewSelect>>", self.on_tree_select_preview)
         self.tree_search.bind("<Double-1>", lambda e: self.add_selected_to_staging())
 
     def _init_project_tree_tab(self):
-        self.tree_proj = ttk.Treeview(self.tab_tree_frame, show="tree", selectmode="extended")
-        self.tree_proj.pack(fill=tk.BOTH, expand=True)
+        tree_container = ttk.Frame(self.tab_tree_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+        self.tree_proj = ttk.Treeview(tree_container, show="tree", selectmode="extended")
+        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_proj.yview, width=16)
+        self.tree_proj.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_proj.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.tree_proj.bind("<<TreeviewSelect>>", self.on_tree_select_preview)
         self.tree_proj.bind("<Double-1>", self.on_tree_double_click)
         self.tree_proj.bind("<<TreeviewOpen>>", self.on_tree_expand)
@@ -167,16 +193,29 @@ class FileCortexApp:
         self.combo_groups = ttk.Combobox(c, textvariable=self.current_group_var, state="readonly", width=15)
         self.combo_groups.pack(side=tk.LEFT, padx=5); self.combo_groups.bind("<<ComboboxSelected>>", self.on_group_changed)
         ttk.Button(c, text="➕", width=3, command=self.create_group).pack(side=tk.LEFT)
-        self.tree_fav = ttk.Treeview(self.tab_fav, columns=("path",), show="tree", selectmode="extended")
-        self.tree_fav.pack(fill=tk.BOTH, expand=True)
+        
+        tree_container = ttk.Frame(self.tab_fav)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+        self.tree_fav = ttk.Treeview(tree_container, columns=("path",), show="tree", selectmode="extended")
+        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_fav.yview, width=16)
+        self.tree_fav.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_fav.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         ttk.Button(self.tab_fav, text="⬇ 载入到清单", command=self.load_group_to_staging).pack(fill=tk.X)
 
     def _init_staging_tab(self):
-        self.tree_staging = ttk.Treeview(self.tab_staging, columns=("path", "size"), show="tree headings", selectmode="extended")
+        tree_container = ttk.Frame(self.tab_staging)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+        
+        self.tree_staging = ttk.Treeview(tree_container, columns=("path", "size"), show="tree headings", selectmode="extended")
+        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_staging.yview, width=16)
+        self.tree_staging.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_staging.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         self.tree_staging.heading("#0", text="文件"); self.tree_staging.column("#0", width=150)
         self.tree_staging.column("path", width=0, stretch=False)
         self.tree_staging.heading("size", text="大小"); self.tree_staging.column("size", width=80)
-        self.tree_staging.pack(fill=tk.BOTH, expand=True)
         
         act = ttk.Frame(self.tab_staging, padding=5); act.pack(fill=tk.X)
         
@@ -219,6 +258,9 @@ class FileCortexApp:
         tool_group.pack(fill=tk.X)
         self.tool_btn_frame = ttk.Frame(tool_group)
         self.tool_btn_frame.pack(fill=tk.X)
+        
+        ttk.Separator(f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Button(f, text="🕵️ 查找重复文件 (SHA256)", command=self.open_duplicate_finder).pack(fill=tk.X, padx=5)
 
     def _init_context_menu(self):
         self.context_menu = tk.Menu(self.root, tearoff=0)
@@ -250,6 +292,7 @@ class FileCortexApp:
 
     def on_refresh(self):
         if self.current_dir:
+            FileUtils.clear_cache()
             self.save_project_settings()
             self.load_project(str(self.current_dir))
         else:
@@ -300,7 +343,7 @@ class FileCortexApp:
         self.refresh_template_combo()
         self._refresh_tree()
         self.update_stats()
-        self.on_search_input()
+        self.trigger_search()
         
         self.lbl_status.config(text=f"已就绪: {self.current_dir.name}")
 
@@ -396,10 +439,71 @@ class FileCortexApp:
                  except Exception: pass
         self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_tokens} Tokens")
 
-    def on_search_input(self, *args):
-        if hasattr(self, '_search_timer') and self._search_timer:
-            self.root.after_cancel(self._search_timer)
-        self._search_timer = self.root.after(300, self._perform_search)
+    def add_search_tag(self, *args):
+        txt = self.search_var.get().strip()
+        if not txt:
+            self.trigger_search() # Double enter = search
+            return
+            
+        if txt.startswith('-') and len(txt) > 1:
+            val = txt[1:].strip()
+            if val and val not in self.negative_tags:
+                self.negative_tags.append(val)
+        elif txt.startswith('/') and txt.endswith('/') and len(txt) > 2:
+            # Sub-regex tag (internal treat as positive for now)
+            if txt not in self.positive_tags:
+                self.positive_tags.append(txt)
+        else:
+            if txt not in self.positive_tags:
+                self.positive_tags.append(txt)
+        
+        self.search_var.set("")
+        self.render_tags()
+        self.trigger_search()
+
+    def remove_search_tag(self, tag, is_positive=True):
+        if is_positive:
+            if tag in self.positive_tags: self.positive_tags.remove(tag)
+        else:
+            if tag in self.negative_tags: self.negative_tags.remove(tag)
+        self.render_tags()
+        self.trigger_search()
+
+    def render_tags(self):
+        for w in self.tag_bar.winfo_children(): w.destroy()
+        
+        if not self.positive_tags and not self.negative_tags:
+            return
+
+        btn_clear = tk.Button(self.tag_bar, text="🗑️ 清空标签", bg="#f9fafb", bd=0, 
+                             font=("Segoe UI", 8, "italic"), fg="gray", 
+                             command=self.clear_all_tags)
+        btn_clear.pack(side=tk.RIGHT, padx=5)
+
+        # Positive Tags (Greenish)
+        for t in self.positive_tags:
+            f = tk.Frame(self.tag_bar, bg="#dcfce7", padx=2, pady=1)
+            f.pack(side=tk.LEFT, padx=2, pady=2)
+            tk.Label(f, text=t, bg="#dcfce7", font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            tk.Button(f, text="×", bg="#dcfce7", bd=0, font=("Segoe UI", 8, "bold"), 
+                      command=lambda tag=t: self.remove_search_tag(tag, True)).pack(side=tk.LEFT)
+        
+        # Negative Tags (Reddish)
+        for t in self.negative_tags:
+            f = tk.Frame(self.tag_bar, bg="#fee2e2", padx=2, pady=1)
+            f.pack(side=tk.LEFT, padx=2, pady=2)
+            tk.Label(f, text=f"-{t}", bg="#fee2e2", font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            tk.Button(f, text="×", bg="#fee2e2", bd=0, font=("Segoe UI", 8, "bold"), 
+                      command=lambda tag=t: self.remove_search_tag(tag, False)).pack(side=tk.LEFT)
+
+    def clear_all_tags(self):
+        self.positive_tags.clear()
+        self.negative_tags.clear()
+        self.render_tags()
+        self.trigger_search()
+
+    def trigger_search(self):
+        self._perform_search()
 
     def _perform_search(self):
         self._search_timer = None
@@ -413,7 +517,9 @@ class FileCortexApp:
                                          self.exclude_var.get(), self.search_include_dirs_var.get(), 
                                          self.result_queue, self.stop_event, self.use_gitignore_var.get(),
                                          is_inverse=self.is_inverse_var.get(), case_sensitive=self.case_sensitive_var.get(),
-                                         max_size_mb=max_size)
+                                         max_size_mb=max_size,
+                                         positive_tags=list(self.positive_tags),
+                                         negative_tags=list(self.negative_tags))
         self.search_thread.start()
 
     def process_queue(self):
@@ -850,7 +956,119 @@ class FileCortexApp:
         is_pinned = str(self.current_dir) in self.data_mgr.data.get("pinned_projects", [])
         self.btn_pin.config(text="⭐" if is_pinned else "☆")
 
+    def open_duplicate_finder(self):
+        from file_cortex_core import DuplicateWorker
+        if not self.current_dir:
+            messagebox.showwarning("提示", "请先打开一个项目目录。")
+            return
+        DuplicateFinderWindow(self.root, self.data_mgr, self.current_dir, 
+                              self.exclude_var.get(), self.use_gitignore_var.get())
+
     def open_batch_io_dialog(self): pass 
+
+class DuplicateFinderWindow(tk.Toplevel):
+    def __init__(self, parent, data_mgr, current_dir, excludes, use_gitignore):
+        super().__init__(parent)
+        self.title(f"🕵️ 重复文件查找器 | {current_dir.name}")
+        self.geometry("1100x700")
+        self.data_mgr = data_mgr
+        self.current_dir = current_dir
+        self.excludes = excludes
+        self.use_gitignore = use_gitignore
+        
+        self.stop_event = threading.Event()
+        self.result_queue = queue.Queue()
+        self.duplicate_groups = {} # {hash: [path, ...]}
+        
+        self._init_ui()
+        self.start_scan()
+        self.poll_results()
+
+    def _init_ui(self):
+        main_f = ttk.Frame(self, padding=10)
+        main_f.pack(fill=tk.BOTH, expand=True)
+
+        self.lbl_head = ttk.Label(main_f, text="🔍 正在扫描项目重复文件...", font=("Segoe UI", 12, "bold"))
+        self.lbl_head.pack(fill=tk.X, pady=5)
+        
+        self.tree = ttk.Treeview(main_f, columns=("path", "size"), show="tree headings", selectmode="extended")
+        self.tree.heading("#0", text="重复组 / 文件")
+        self.tree.heading("path", text="完整路径")
+        self.tree.heading("size", text="大小")
+        self.tree.column("#0", width=300)
+        self.tree.column("path", width=500)
+        self.tree.column("size", width=100)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+
+        btn_f = ttk.Frame(main_f, padding=10)
+        btn_f.pack(fill=tk.X)
+        self.btn_delete = ttk.Button(btn_f, text="🗑️ 彻底删除选中文件", command=self.delete_selected, state=tk.DISABLED)
+        self.btn_delete.pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_f, text="❌ 停止扫描", command=self.on_close).pack(side=tk.RIGHT, padx=5)
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def start_scan(self):
+        from file_cortex_core import DuplicateWorker
+        self.worker = DuplicateWorker(self.current_dir, self.excludes, self.use_gitignore, self.result_queue, self.stop_event)
+        self.worker.start()
+
+    def poll_results(self):
+        try:
+            while True:
+                res = self.result_queue.get_nowait()
+                if isinstance(res, tuple):
+                    if res[0] == "DONE":
+                        self.lbl_head.config(text=f"✅ 扫描完成: 发现 {len(self.duplicate_groups)} 组重复文件")
+                        self.btn_delete.config(state=tk.NORMAL)
+                    elif res[0] == "ERROR":
+                        messagebox.showerror("错误", f"扫描失败: {res[1]}")
+                        self.destroy()
+                    return
+                
+                h = res["hash"]
+                sz_fmt = FormatUtils.format_size(res["size"])
+                group_id = self.tree.insert("", "end", text=f"📦 Group {h[:8]} ({sz_fmt})", open=True)
+                self.duplicate_groups[h] = res["paths"]
+                
+                for p_str in res["paths"]:
+                    p = pathlib.Path(p_str)
+                    rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
+                    self.tree.insert(group_id, "end", text=f"📄 {rel}", values=(p_str, sz_fmt))
+        except queue.Empty:
+            pass
+        self.after(200, self.poll_results)
+
+    def delete_selected(self):
+        sel = self.tree.selection()
+        if not sel: return
+        
+        to_delete = []
+        for s in sel:
+            vals = self.tree.item(s)["values"]
+            if vals and len(vals) > 0:
+                to_delete.append(vals[0])
+        
+        if not to_delete:
+            messagebox.showwarning("警告", "请选中特定的重复文件（而非整个分组）。")
+            return
+            
+        if messagebox.askyesno("二次确认", f"确定要永久删除这 {len(to_delete)} 个重复文件吗？\n删除操作不可逆！建议为每组至少留一份原件。"):
+            from file_cortex_core import FileOps
+            for p_str in to_delete:
+                try:
+                    FileOps.delete_file(p_str)
+                    # We need to find the specific item in the tree to delete it visually
+                    for item in self.tree.selection():
+                         if self.tree.item(item)["values"] and self.tree.item(item)["values"][0] == p_str:
+                             self.tree.delete(item)
+                except Exception as e:
+                    messagebox.showerror("错误", f"删除 {p_str} 失败: {e}")
+            messagebox.showinfo("成功", "所选重复文件已清理完毕。")
+
+    def on_close(self):
+        self.stop_event.set()
+        self.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk(); ttk.Style().theme_use('clam'); app = FileCortexApp(root); root.mainloop()

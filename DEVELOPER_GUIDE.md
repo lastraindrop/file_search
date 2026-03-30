@@ -35,6 +35,9 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **Schema 自愈 (Self-Healing)**: `DataManager._apply_default_schema` 是核心稳定性来源。任何配置读取均会自动合并 `DEFAULT_SCHEMA`，确保即使用户手动修改了配置文件或使用了旧版配置，系统也能自动补全缺失字段（如 `search_settings`），防止运行时 `KeyError`。
 *   **路径归一化强制标准 (Normalization)**: v5.3 确立了 `PathValidator.norm_path` 作为内存缓存键和字典键的唯一标准。这消除了 Windows 上驱动器号大小写不一致及斜杠方向差异带来的“路径逻辑孤岛”。
 *   **UI 数据驱动 (Data-Driven UI)**: Web 前端（`app.js`）与后端通过严格的 API Contract 对齐。UI 层的 Prompt 模板和 Tool 下拉列表必须且只能由对应的 API 实地驱动，绝不硬编码配置 Key。
+*   **参数对齐协议 (Parameter Alignment Protocol - v5.6)**: 
+    *   **核心函数同步**: 对 `search_generator` 等核心函数签名的任何变更，必须同步更新所有的调用者（`file_search.py`, `web_app.py`, `SearchWorker`）。
+    *   **UI 库参数隔离**: 严格区分 Tkinter 原生组件与 Ttk 主题组件。**严禁** 将 `ttk` 独有参数（如 `weight`）传递给 `tk` 组件（如 `tk.PanedWindow`），由于此类错误在静态检查中难以发现，必须通过模拟启动进行回归验证。
 *   **SSOT (Single Source of Truth)**: `DataManager` 实例作为配置的单一事实来源。所有的配置更新必须通过 `update_project_settings` 等专用方法，这些方法内置了 `MUTABLE_SETTINGS` 白名单校验。
 
 ### 5. 并发安全与持久化 (Concurrency & Persistence)

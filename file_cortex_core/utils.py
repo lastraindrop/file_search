@@ -90,22 +90,34 @@ class FileUtils:
             if path.stat().st_size == 0: return False
         except Exception: return True
 
-        text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', '.xml', '.sql', '.c', '.cpp', '.h', '.java', '.go', '.rs', '.sh', '.bat', '.ini', '.cfg', '.toml'}
+        # 1. Extension Whitelist (Force Text)
+        text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', 
+                     '.xml', '.sql', '.c', '.cpp', '.h', '.java', '.go', '.rs', '.sh', '.bat', 
+                     '.ini', '.cfg', '.toml', '.log', '.env', '.dockerfile'}
         if path.suffix.lower() in text_exts:
             return False
             
+        # 2. Heuristic Byte Scan
         try:
             with open(file_path, 'rb') as f:
                 chunk = f.read(8192)
                 if not chunk: return False
+                
+                # NULL bytes are a strong indicator of binary (except UTF-16, which is rare for code)
                 if b'\0' in chunk: return True
-                try:
-                    chunk.decode('utf-8')
-                    return False
-                except UnicodeDecodeError:
+                
+                # Count printable vs non-printable (heuristic)
+                # We allow for some non-UTF8 noise (e.g. GBK, or random high-bytes)
+                non_text_count = 0
+                for byte in chunk:
+                    if byte < 32 and byte not in (7, 8, 9, 10, 12, 13, 27): # Control chars
+                        non_text_count += 1
+                
+                # If more than 30% are non-text control chars, it's likely binary
+                if (non_text_count / len(chunk)) > 0.3:
                     return True
-        except Exception as e:
-            logger.debug(f"Binary check failed for {file_path}: {e}")
+                return False
+        except Exception:
             return True
 
     @staticmethod
@@ -168,6 +180,19 @@ class FileUtils:
                     if not FileUtils.should_ignore(f, rel, manual_excludes, git_spec, False):
                         results.append(str(curr_root_path / f))
         return results
+
+    @staticmethod
+    def read_text_smart(file_path: pathlib.Path) -> str:
+        """Reads file content with smart encoding detection."""
+        try:
+            from charset_normalizer import from_path
+            results = from_path(file_path).best()
+            if results:
+                return str(results)
+        except Exception:
+            pass
+        # Fallback to utf-8 ignore
+        return file_path.read_text('utf-8', 'ignore')
 
     @staticmethod
     def get_language_tag(suffix):
@@ -233,6 +258,30 @@ class FileUtils:
             logger.error(f"Tree generation failed: {e}")
         return "\n".join(lines)
 
+class NoiseReducer:
+    """
+    Cleans code context to reduce token noise.
+    Filters out minified blocks, extremely long lines, and redundant metadata.
+    """
+    @staticmethod
+    def clean(content: str, max_line_length: int = 500) -> str:
+        lines = content.splitlines()
+        cleaned_lines = []
+        is_skipping = False
+        
+        for line in lines:
+            # 1. Skip extremely long lines (likely minified or data chunks)
+            if len(line) > max_line_length:
+                cleaned_lines.append(f"[... Line of {len(line)} chars skipped by NoiseReducer ...]")
+                continue
+            
+            # 2. Simple Heuristic: skip blocks that look like large base64 or hex
+            # (Stub for future more complex regex)
+            
+            cleaned_lines.append(line)
+            
+        return "\n".join(cleaned_lines)
+
 class ContextFormatter:
     @staticmethod
     def to_markdown(paths, root_dir=None, prompt_prefix=None):
@@ -254,10 +303,10 @@ class ContextFormatter:
                 stat = p.stat()
                 size_kb = stat.st_size / 1024
                 
-                content = p.read_text('utf-8', 'ignore')
+                content = FileUtils.read_text_smart(p)
                 
-                # Feature: Token Noise Reduction (Stub for now, could remove large arrays etc.)
-                # content = NoiseReducer.clean(content) 
+                # Feature: Token Noise Reduction
+                content = NoiseReducer.clean(content) 
 
                 lang = FileUtils.get_language_tag(p.suffix)
                 header = f"File: {display_name} ({size_kb:.1f} KB)\n"

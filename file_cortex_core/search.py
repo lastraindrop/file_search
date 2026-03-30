@@ -9,8 +9,9 @@ from .utils import FileUtils, FormatUtils
 
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
-                     is_inverse=False, case_sensitive=False, max_results=2000,
-                     max_size_mb=5, stop_event=None):
+                     is_inverse=False, case_sensitive=False, max_results=5000,
+                     max_size_mb=5, stop_event=None,
+                     positive_tags=None, negative_tags=None):
     """
     Multi-mode file search generator.
     """
@@ -20,7 +21,28 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
     
     count = 0
     search_text_processed = search_text.strip() if case_sensitive else search_text.lower().strip()
-    keywords = search_text_processed.split()
+    # Merge raw search_text (split into keywords) and positive_tags
+    all_pos = positive_tags.copy() if positive_tags else []
+    if search_text_processed:
+        for kw in search_text_processed.split():
+            if kw not in all_pos:
+                all_pos.append(kw)
+    
+    all_neg = negative_tags or []
+    neg_keywords = [k if case_sensitive else k.lower() for k in all_neg]
+    
+    plain_pos = []
+    regex_pos = []
+    flags = 0 if case_sensitive else re.IGNORECASE
+    for tag in all_pos:
+        # Check if it's a sub-regex tag like /pattern/
+        if tag.startswith('/') and tag.endswith('/') and len(tag) > 2:
+            try:
+                regex_pos.append(re.compile(tag[1:-1], flags))
+                continue
+            except re.error: pass
+        
+        plain_pos.append(tag if case_sensitive else tag.lower())
     
     re_obj = None
     if search_mode == 'regex' and search_text.strip():
@@ -30,22 +52,36 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
         except re.error:
             return 
 
-    def match_name(name):
-        if not search_text: return True != is_inverse
-        target = name if case_sensitive else name.lower()
-        
-        found = False
-        if search_mode == 'smart':
-            found = all(k in target for k in keywords)
-        elif search_mode == 'exact':
-            found = search_text_processed in target
-        elif search_mode == 'regex' and re_obj:
-            found = re_obj.search(name) is not None
+    def match_name(name, rel_path=None):
+        # Allow empty search_text if tags are present
+        if not (search_text_processed or plain_pos or regex_pos or all_neg) or search_text_processed in ('.', '..'): 
+            found = False
+        else:
+            target_name = name if case_sensitive else name.lower()
+            target_path = str(rel_path).replace("\\", "/") if rel_path else target_name
+            if not case_sensitive: target_path = target_path.lower()
+            
+            found = False
+            if search_mode == 'smart':
+                # Path matching: all positive keywords AND all regex tags AND no negative tags
+                has_plain = all(k in target_path for k in plain_pos)
+                has_regex = all(r.search(target_path) for r in regex_pos)
+                has_neg = any(nk in target_path for nk in neg_keywords)
+                found = has_plain and has_regex and not has_neg
+            elif search_mode == 'exact':
+                # Similar logic for exact: check full match on all plain_pos?
+                # Usually exact means "this substring must be present". If multiple, all must be present.
+                has_plain = all(k in target_path for k in plain_pos)
+                has_regex = all(r.search(target_path) for r in regex_pos)
+                has_neg = any(nk in target_path for nk in neg_keywords)
+                found = has_plain and has_regex and not has_neg
+            elif search_mode == 'regex' and re_obj:
+                found = re_obj.search(name) is not None
             
         return found != is_inverse
     
     def match_content(path):
-        if search_mode not in ('content', 'regex') or not search_text: return False
+        if search_mode not in ('content', 'regex') or not search_text_processed: return False
         try:
             limit = max_size_mb * 1024 * 1024
             if path.stat().st_size > limit: return False
@@ -78,7 +114,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 
                 if include_dirs:
                     for d in dirs:
-                        if match_name(d):
+                        if match_name(d, rel_root / d):
                             full_d = pathlib.Path(root) / d
                             meta = FileUtils.get_metadata(full_d)
                             yield {
@@ -100,9 +136,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         continue
                     
                     # Logic branching by mode
-                    if search_mode in ('smart', 'exact'):
+                    if search_mode in ('smart', 'exact', 'regex'):
                         # Filename-centric modes
-                        if match_name(file):
+                        if match_name(file, rel_path):
                             count += 1
                             yield {
                                 "path": str(full_path),
@@ -148,8 +184,12 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                 except Exception:
                                     if f in content_futures: content_futures.pop(f)
                             if count >= max_results: break
-                    if count >= max_results or (stop_event and stop_event.is_set()): break
-                if count >= max_results or (stop_event and stop_event.is_set()): break
+                    if count >= max_results or (stop_event and stop_event.is_set()): 
+                        break
+                if count >= max_results or (stop_event and stop_event.is_set()): 
+                    # Use a custom flag or modify dirs to stop os.walk
+                    dirs[:] = [] 
+                    break
 
             # Process remaining
             for f in as_completed(content_futures):
@@ -176,8 +216,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
 class SearchWorker(threading.Thread):
     def __init__(self, root_dir, search_text, search_mode, manual_excludes, 
                  include_dirs, result_queue, stop_event, use_gitignore=True,
-                 is_inverse=False, case_sensitive=False, max_results=2000,
-                 max_size_mb=5):
+                 is_inverse=False, case_sensitive=False, max_results=5000,
+                 max_size_mb=5, positive_tags=None, negative_tags=None):
         super().__init__()
         self.root_dir = root_dir
         self.search_text = search_text
@@ -191,13 +231,16 @@ class SearchWorker(threading.Thread):
         self.case_sensitive = case_sensitive
         self.max_results = max_results
         self.max_size_mb = max_size_mb
+        self.positive_tags = positive_tags
+        self.negative_tags = negative_tags
         self.daemon = True
 
     def run(self):
         gen = search_generator(self.root_dir, self.search_text, self.search_mode, 
                                self.manual_excludes, self.include_dirs, self.use_gitignore,
-                                self.is_inverse, self.case_sensitive, self.max_results,
-                                max_size_mb=self.max_size_mb, stop_event=self.stop_event)
+                                 self.is_inverse, self.case_sensitive, self.max_results,
+                                 max_size_mb=self.max_size_mb, stop_event=self.stop_event,
+                                 positive_tags=self.positive_tags, negative_tags=self.negative_tags)
         if gen is None:
             self.result_queue.put(("DONE", "DONE"))
             return

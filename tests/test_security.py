@@ -14,6 +14,17 @@ def test_path_validator_is_safe_comprehensive(mock_project, system_dir):
     # --- Unsafe: Parent traversal ---
     assert PathValidator.is_safe(str(mock_project / ".." / "outside"), root) is False
     assert PathValidator.is_safe(str(mock_project / "src" / ".." / ".." / "etc" / "passwd"), root) is False
+    assert PathValidator.is_safe(os.path.join(root, ".."), root) is False
+
+    # --- Windows Specific Extended Paths (Bypass attempts) ---
+    if os.name == 'nt':
+        assert PathValidator.is_safe(r"\\?\C:\Windows\System32", root) is False
+        assert PathValidator.is_safe(r"//?/C:/Windows", root) is False
+        assert PathValidator.is_safe(r"C:..\..\Windows", root) is False
+
+    # --- Neutral Traversal (Should be safe) ---
+    assert PathValidator.is_safe(os.path.join(root, ".", "src"), root) is True
+    assert PathValidator.is_safe(os.path.join(root, "src", "..", "src", "main.py"), root) is True
 
     # --- Unsafe: Fake Prefix ---
     # root: /fake/proj

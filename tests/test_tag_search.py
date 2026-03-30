@@ -1,0 +1,43 @@
+import pytest
+import pathlib
+from file_cortex_core.search import search_generator
+
+import tempfile
+import shutil
+
+def test_search_with_tags():
+    # Use manual temp dir to avoid Windows permission issues in some environments
+    tmp_base = tempfile.mkdtemp(prefix="fctx_test_")
+    tmp_path = pathlib.Path(tmp_base)
+    try:
+        # Setup dummy project
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.py").write_text("print('hello')")
+        (tmp_path / "src" / "utils.py").write_text("def util(): pass")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_main.py").write_text("import main")
+        (tmp_path / "README.md").write_text("Docs")
+
+        # 1. Positive tags: 'src' and 'main'
+        results = list(search_generator(tmp_path, "", "smart", "", positive_tags=["src", "main"]))
+        names = [pathlib.Path(r['path']).name for r in results]
+        assert "main.py" in names
+        assert "test_main.py" not in names # test_main.py is in 'tests', not 'src'
+        
+        # 2. Negative tags: '-test'
+        results = list(search_generator(tmp_path, "py", "smart", "", negative_tags=["test"]))
+        names = [pathlib.Path(r['path']).name for r in results]
+        assert "main.py" in names
+        assert "utils.py" in names
+        assert "test_main.py" not in names
+
+        # 3. Regex tags: /u[t|l]/
+        results = list(search_generator(tmp_path, "", "smart", "", positive_tags=["/u[t|l]/"]))
+        names = [pathlib.Path(r['path']).name for r in results]
+        assert "utils.py" in names
+        assert "main.py" not in names
+    finally:
+        shutil.rmtree(tmp_base, ignore_errors=True)
+
+if __name__ == "__main__":
+    pytest.main([__file__])

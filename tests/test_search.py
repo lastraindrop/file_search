@@ -15,22 +15,30 @@ from file_cortex_core import search_generator, FileUtils
     ("MAIN.PY", "exact", False, True, False, True, []),
     (".js", "exact", False, False, False, True, ["utils.js"]),
 
-    # --- Regex (Content-based) Matrix ---
-    (r"console\..*", "regex", False, False, False, True, ["utils.js"]),
-    (r"print\(.*", "regex", False, False, False, True, ["main.py"]),
-    (r"NON_EXISTENT", "regex", False, False, False, True, []),
+    # --- Regex (Filename-based) ---
+    (r"utils\..*", "regex", False, False, False, True, ["utils.js"]),
+    (r"data_version_\d+", "regex", False, False, False, True, []), 
 
     # --- Content Search Matrix ---
     ("print", "content", False, False, False, True, ["main.py", "utils.js"]),
     ("console", "content", False, False, False, True, ["utils.js"]),
     ("non-existent-string", "content", False, False, False, True, []),
     
+    # --- Special Symbols and Spaces ---
+    ("src/main", "smart", False, False, False, True, ["main.py"]),
+    ("!main", "smart", True, False, False, True, ["utils.js"]),
+
     # --- Gitignore & Ignores ---
     ("error", "smart", False, False, False, False, ["error.log"]), # Found with gitignore=False
     ("error", "smart", False, False, False, True, []),              # Ignored by default
     
     # --- Directory Inclusion ---
     ("src", "smart", False, False, True, True, ["src"]),
+    
+    # --- Edge Cases ---
+    ("", "smart", False, False, False, True, []), # Empty query
+    (".", "smart", False, False, False, True, []), # Dot (should be handled safely)
+    ("..", "smart", False, False, False, True, []), # Traversal in query
 ])
 def test_search_generator_matrix(mock_project, query, mode, inverse, case, inc_dirs, use_git, expected_names):
     """

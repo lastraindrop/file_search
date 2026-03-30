@@ -4,28 +4,28 @@ import pathlib
 import sys
 from file_cortex_core import ActionBridge, FileOps, DataManager
 
+@pytest.mark.parametrize("template, expected_in_out", [
+    ("echo {name}", "main.py"),
+    ("echo {ext}", ".py"),
+    ("echo {parent_name}", "src"),
+])
+def test_action_bridge_variable_expansion(mock_project, template, expected_in_out):
+    """Verify that {name}, {ext}, {parent_name} variables are expanded correctly."""
+    test_file = mock_project / "src" / "main.py"
+    res = ActionBridge.execute_tool(template, str(test_file), str(mock_project))
+    # We use lower() to handle Windows case-insensitivity in paths
+    assert expected_in_out.lower() in res["stdout"].lower()
+
 def test_action_bridge_win_quote_injection(mock_project):
     """Verify shell injection prevention (Win platform simulation)."""
-    # Malicious injection attempt: {name} as "; touch injected.txt"
-    # Actually context variables are escaped using win_quote
-    test_file = mock_project / "src" / "main.py"
-    
-    # Simulating a template that would be dangerous without win_quote
-    malicious_template = "echo {name} ; exit"
-    
-    # We patch os.name to simulate windows and then verify win_quote behavior
-    # Note: ActionBridge.execute_tool uses sys.executable inside some contexts,
-    # but the key is the string formatting.
-    
-    # We'll use a safer check: can it echo a filename with special chars?
     special_name = "test & %WHOAMI%.txt"
     special_path = mock_project / special_name
     special_path.touch()
     
+    # We use a template that would be dangerous if {name} wasn't quoted
+    # On Windows, & is a command separator.
     res = ActionBridge.execute_tool("echo {name}", str(special_path), mock_project)
     
-    # If injection occurred on Windows, we'd see %WHOAMI% expanded or error.
-    # If quoted, it remains as part of the string.
     assert special_name in res["stdout"]
 
 def test_file_ops_crud_lifecycle(mock_project):

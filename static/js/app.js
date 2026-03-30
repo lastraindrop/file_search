@@ -9,7 +9,8 @@ const App = {
         selectedFiles: new Set(),
         searchResults: [],
         projConfig: {},
-        isSidebarExpanded: false
+        isSidebarExpanded: false,
+        activePid: null
     },
 
     escapeHtml: (str) => {
@@ -306,9 +307,22 @@ const App = {
             const res = await App._fetch(`/api/content?path=${encodeURIComponent(path)}`);
             const data = await res.json();
             App.state.rawContent = data.content;
-            codeEl.innerText = data.content;
-            hljs.highlightElement(codeEl);
-        } catch (e) { codeEl.innerText = "Error loading file."; }
+            
+            const ext = path.split('.').pop().toLowerCase();
+            codeEl.className = 'hljs h-100 d-block p-4'; // Reset
+            
+            if (ext === 'md') {
+                codeEl.innerHTML = marked.parse(data.content);
+                codeEl.classList.remove('hljs');
+            } else if (ext === 'mermaid') {
+                codeEl.innerHTML = `<div class="mermaid">${App.escapeHtml(data.content)}</div>`;
+                await mermaid.run({ nodes: [codeEl.querySelector('.mermaid')] });
+                codeEl.classList.remove('hljs');
+            } else {
+                codeEl.innerText = data.content;
+                hljs.highlightElement(codeEl);
+            }
+        } catch (e) { codeEl.innerText = "Error loading file: " + e.message; }
     },
 
     copyPath: async () => {
@@ -436,6 +450,58 @@ const App = {
             document.getElementById('fileControls').style.display = 'none';
         } catch (e) { alert("Delete failed"); }
     },
+
+    batchRename: async () => {
+        const files = Array.from(App.state.selectedFiles);
+        if (files.length === 0) return App.showToast("Select files first", 'warning');
+        
+        const pattern = prompt("Regex Pattern (e.g. ^IMG_(\\d+)):");
+        if (!pattern) return;
+        const replacement = prompt("Replacement (e.g. Photo_$1):");
+        if (replacement === null) return;
+
+        try {
+            // First do a Dry Run
+            const dryRes = await App._fetch('/api/fs/batch_rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    paths: files,
+                    pattern: pattern,
+                    replacement: replacement,
+                    dry_run: true
+                })
+            });
+            const dryData = await dryRes.json();
+            
+            // Show preview and ask for confirmation
+            let previewText = "Preview of changes:\n\n";
+            dryData.results.forEach(r => {
+                previewText += `${r.old.split(/[\\\/]/).pop()} -> ${r.new.split(/[\\\/]/).pop()} [${r.status}]\n`;
+            });
+            
+            if (!confirm(previewText + "\nProceed with rename?")) return;
+
+            // Do the Live Run
+            await App._fetch('/api/fs/batch_rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    paths: files,
+                    pattern: pattern,
+                    replacement: replacement,
+                    dry_run: false
+                })
+            });
+
+            App.showToast("Batch rename completed!");
+            App.state.selectedFiles.clear();
+            App.updateBulkUI();
+            App.refreshProject();
+        } catch (e) { App.showToast("Batch rename failed: " + e.message, 'danger'); }
+    },
     startSearch: () => {
         if (!App.state.projectPath) return;
         const query = document.getElementById('searchInput').value;
@@ -546,45 +612,81 @@ const App = {
 
     executeToolOnStaged: async (toolName) => {
         if (App.state.staging.size === 0) return App.showToast("Add files to staging first.", 'warning');
-        const btn = document.querySelector(`[onclick="App.executeToolOnStaged('${toolName}')"]`);
-        const originalText = btn ? btn.innerText : toolName;
-        if (btn) { btn.innerText = "Running..."; btn.disabled = true; }
+        
+        const modalWrapper = document.getElementById('toolResultModal');
+        const modalBody = document.getElementById('toolResultModalBody');
+        const modalHeader = document.querySelector('#toolResultModal .modal-header');
+        
+        modalBody.innerHTML = '<div class="p-4 text-center">Initializing stream...</div>';
+        
+        // Add Stop button to header if it doesn't exist
+        let stopBtn = document.getElementById('btnStopTool');
+        if (!stopBtn) {
+            stopBtn = document.createElement('button');
+            stopBtn.id = 'btnStopTool';
+            stopBtn.className = 'btn btn-outline-danger btn-sm ms-auto me-3';
+            stopBtn.innerText = '🛑 Stop';
+            stopBtn.onclick = () => App.terminateProcess();
+            modalHeader.insertBefore(stopBtn, modalHeader.lastElementChild);
+        }
+        stopBtn.style.display = 'none'; // Hide until we have a PID
 
+        const bsModal = new bootstrap.Modal(modalWrapper);
+        bsModal.show();
+
+        const paths = Array.from(App.state.staging);
+        // We only support streaming for the first selected file for now in the simple UI
+        // In a real general utility, we'd loop or use a batch stream API
+        const path = paths[0]; 
+
+        const wsUrl = `ws://${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
+        const socket = new WebSocket(wsUrl);
+        let outputDiv = null;
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.pid) {
+                App.state.activePid = data.pid;
+                stopBtn.style.display = 'block';
+                modalBody.innerHTML = `<div class="p-3 border-bottom border-secondary small text-muted">Running PID: ${data.pid} on ${path.split(/[\\\/]/).pop()}</div>
+                                       <pre id="streamOutput" class="m-0 p-3 h-100" style="background:#000; color:#0f0; font-family:monospace; min-height:300px; white-space:pre-wrap;"></pre>`;
+                outputDiv = document.getElementById('streamOutput');
+            }
+            
+            if (data.out && outputDiv) {
+                outputDiv.innerText += data.out;
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            }
+            
+            if (data.exit_code !== undefined || data.status === "DONE" || data.error) {
+                stopBtn.style.display = 'none';
+                App.state.activePid = null;
+                if (data.error) {
+                    modalBody.innerHTML += `<div class="p-3 text-danger">Error: ${data.error}</div>`;
+                }
+                if (data.exit_code !== undefined) {
+                    modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-info">Process exited with code: ${data.exit_code}</div>`;
+                }
+                socket.close();
+            }
+        };
+
+        App.state.staging.clear();
+        App.renderStaging();
+        App.syncStagingToBackend();
+    },
+
+    terminateProcess: async () => {
+        if (!App.state.activePid) return;
         try {
-            const res = await App._fetch('/api/actions/execute', {
+            const res = await App._fetch('/api/actions/terminate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    project_path: App.state.projectPath,
-                    paths: Array.from(App.state.staging),
-                    tool_name: toolName
-                })
+                body: JSON.stringify({ pid: App.state.activePid })
             });
-            const data = await res.json();
-            const modalWrapper = document.getElementById('toolResultModal');
-            const modalBody = document.getElementById('toolResultModalBody');
-            modalBody.innerHTML = '';
-            
-            data.results.forEach(r => {
-                const block = document.createElement('div');
-                block.className = 'border-bottom border-secondary p-3';
-                const color = r.exit_code === 0 ? 'text-success' : 'text-danger';
-                block.innerHTML = `
-                    <div class="fw-bold mb-2">${App.escapeHtml(r.path)} <span class="badge bg-secondary ms-2 align-middle">Exit: <span class="${color}">${r.exit_code}</span></span></div>
-                    <pre class="m-0 p-2 rounded" style="background:#000; color:#ccc; font-size:0.85rem;"><code>${App.escapeHtml(r.stdout || 'No output')}</code></pre>
-                    ${r.error ? `<div class="text-danger small mt-2">Error: ${App.escapeHtml(r.error)}</div>` : ''}
-                `;
-                modalBody.appendChild(block);
-            });
-            
-            const bsModal = new bootstrap.Modal(modalWrapper);
-            bsModal.show();
-            
-            App.state.staging.clear();
-            App.renderStaging();
-            App.syncStagingToBackend();
-        } catch (e) { App.showToast("Error: " + e.message, 'danger'); }
-        finally { if (btn) { btn.innerText = originalText; btn.disabled = false; } }
+            App.showToast("Termination signal sent");
+        } catch (e) { App.showToast("Termination failed: " + e.message, 'danger'); }
     },
 
     // --- Staging & Generation ---
