@@ -25,17 +25,25 @@ class PathValidator:
 
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
-        """Canonicalize path for comparison: resolve, lowercase, and use forward slashes."""
-        if p is None: return ""
+        """Canonicalize path: absolute, lowercase, posix-style, and trail-slash standardized."""
+        if not p: return ""
         try:
-            # resolve() handles '..' and case-normalization on most Windows versions
-            resolved = pathlib.Path(p).resolve()
-            # On some Windows environments, resolve() still returns varying casing for the drive letter
-            # We enforce lowercase and forward slashes for a unique dictionary key.
-            return str(resolved).lower().replace('\\', '/')
+            # Use os.path.abspath for industrial-strength determinism on Windows
+            p_str = os.path.abspath(str(p)).replace('\\', '/').lower()
+            
+            # Protection for roots:
+            # Unix root: '/'
+            if p_str == '/': return '/'
+            # Windows drive root: 'c:/'
+            if len(p_str) == 3 and p_str[1:3] == ':/': return p_str
+            
+            # Standard paths: remove trailing slash
+            return p_str.rstrip('/')
         except Exception:
-            # Fallback if resolve fails (e.g. path too long or invalid)
-            return str(p).lower().replace('\\', '/')
+            s = str(p).lower().replace('\\', '/')
+            if s == '/': return '/'
+            if len(s) == 3 and s[1:3] == ':/': return s
+            return s.rstrip('/')
 
     @staticmethod
     def validate_project(path_str: str) -> pathlib.Path:

@@ -11,6 +11,8 @@ import json
 import asyncio
 from file_cortex_core import DataManager, FileUtils, search_generator, FileOps, PathValidator, ContextFormatter, FormatUtils, ActionBridge, logger
 import signal
+import threading
+import subprocess
 
 app = FastAPI(title="FileCortex v5.4 API")
 
@@ -668,6 +670,9 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
     result_queue = asyncio.Queue()
     main_loop = asyncio.get_running_loop()
     
+    # Use a threading.Event to bridge sync cancellation
+    stop_event = threading.Event()
+    
     def run_search():
         try:
             # Pass inverse and case_sensitive to search_generator
@@ -676,7 +681,9 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
                                             include_dirs=False, 
                                             is_inverse=inverse,
                                             case_sensitive=case_sensitive,
-                                            max_size_mb=max_size):
+                                            max_size_mb=max_size,
+                                            stop_event=stop_event):
+                if stop_event.is_set(): break
                 # Use call_soon_threadsafe to put results into the main loop's queue
                 main_loop.call_soon_threadsafe(result_queue.put_nowait, {
                     "name": os.path.basename(res_dict["path"]),
@@ -702,6 +709,7 @@ async def websocket_search(websocket: WebSocket, path: str, query: str, mode: st
             await websocket.send_json(res)
     except WebSocketDisconnect:
         logger.info("Search client disconnected")
+        stop_event.set()
         search_task.cancel()
     except Exception as e:
         logger.error(f"Search error: {e}")
@@ -733,11 +741,14 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
         await websocket.close()
         return
 
+    current_pid = [None]
+
     def run_stream():
+        proc = None
         try:
             proc = ActionBridge.create_process(template, path, project_root)
+            current_pid[0] = proc.pid
             # Register process for potential termination
-            # Note: We can't easily await inside this thread, but ACTIVE_PROCESSES is a dict
             ACTIVE_PROCESSES[proc.pid] = proc
             
             # Send PID to frontend immediately
@@ -752,6 +763,8 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
         except Exception as e:
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"error": str(e)})
         finally:
+            if proc and proc.pid in ACTIVE_PROCESSES:
+                 ACTIVE_PROCESSES.pop(proc.pid, None)
             main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
 
     result_queue = asyncio.Queue()
@@ -766,11 +779,23 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
                 break
             await websocket.send_json(res)
     except WebSocketDisconnect:
-        pass
+        # Crucial Hardening: Kill the process if user closes the socket before it finishes
+        if current_pid[0]:
+            pid = current_pid[0]
+            logger.info(f"AUDIT - Terminating abandoned process {pid} due to WebSocket disconnect")
+            try:
+                if os.name == 'nt':
+                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                else:
+                     os.kill(pid, signal.SIGTERM)
+            except Exception as e:
+                logger.error(f"Cleanup failed for pid {pid}: {e}")
     except Exception as e:
         logger.error(f"Action stream error: {e}")
         try: await websocket.send_json({"status": "ERROR", "msg": str(e)})
         except Exception: pass
+    finally:
+        stream_task.cancel()
 
 if __name__ == "__main__":
     print("Starting Web Server...")

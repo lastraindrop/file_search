@@ -33,11 +33,9 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 ### 4. 数据一致性与参数对齐 (Dynamic Alignment)
 为了确保多端（Web, Desktop, CLI）及不同版本间的稳定性，本项目遵循以下核心原则：
 *   **Schema 自愈 (Self-Healing)**: `DataManager._apply_default_schema` 是核心稳定性来源。任何配置读取均会自动合并 `DEFAULT_SCHEMA`，确保即使用户手动修改了配置文件或使用了旧版配置，系统也能自动补全缺失字段（如 `search_settings`），防止运行时 `KeyError`。
-*   **路径归一化强制标准 (Normalization)**: v5.3 确立了 `PathValidator.norm_path` 作为内存缓存键和字典键的唯一标准。这消除了 Windows 上驱动器号大小写不一致及斜杠方向差异带来的“路径逻辑孤岛”。
-*   **UI 数据驱动 (Data-Driven UI)**: Web 前端（`app.js`）与后端通过严格的 API Contract 对齐。UI 层的 Prompt 模板和 Tool 下拉列表必须且只能由对应的 API 实地驱动，绝不硬编码配置 Key。
-*   **参数对齐协议 (Parameter Alignment Protocol - v5.6)**: 
-    *   **核心函数同步**: 对 `search_generator` 等核心函数签名的任何变更，必须同步更新所有的调用者（`file_search.py`, `web_app.py`, `SearchWorker`）。
-    *   **UI 库参数隔离**: 严格区分 Tkinter 原生组件与 Ttk 主题组件。**严禁** 将 `ttk` 独有参数（如 `weight`）传递给 `tk` 组件（如 `tk.PanedWindow`），由于此类错误在静态检查中难以发现，必须通过模拟启动进行回归验证。
+*   **路径归一化确定性标准 (Deterministic Normalization - v5.7)**: 为了彻底消除 Windows 路径漂移，项目强制要求所有外部路径（TreeView 选择、API 参数等）通过 `PathValidator.norm_path` 处理。该方法改用 `os.path.abspath` 以绕过 `pathlib` 随 CWD 变动的特性，并强制执行 **小写化 + POSIX 斜杠** 转换，确保内存缓存键的唯一性。
+*   **状态同步隔离原则 (Memory Reference Isolation - v5.7)**: 为了防止 UI 列表与后台 `DataManager` 共享内存引用，规定在 UI 刷新或清单修改时必须使用 `list()` 或 `.copy()`。这杜绝了 UI `clear()` 操作误伤持久化配置的问题。
+*   **参数对齐协议 (Parameter Alignment Protocol - v5.6)**: 对 `search_generator` 等核心函数签名的任何变更，必须同步更新所有的调用者。严格区分 Tkinter 与 Ttk 组件参数，防止非法参数传递导致的崩溃。
 *   **SSOT (Single Source of Truth)**: `DataManager` 实例作为配置的单一事实来源。所有的配置更新必须通过 `update_project_settings` 等专用方法，这些方法内置了 `MUTABLE_SETTINGS` 白名单校验。
 
 ### 5. 并发安全与持久化 (Concurrency & Persistence)
@@ -71,12 +69,13 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **零硬编码 (Zero Hardcoding)**: 测试 Fixture 严禁出现绝对路径。使用 `system_dir` 等动态感知 Fixture，确保测试在任何环境下皆能“动态对齐”。
 *   **端到端工作流 (E2E)**: `test_e2e.py` 模拟了从“打开项目 -> 搜索并暂存 -> 选择模板 -> 生成上下文”的完整 AI 辅助心流。
 *   **Mock 边界**: 使用 `pytest` 对 PowerShell 或 subprocess 调用进行隔离 Mock，确保逻辑验证不依赖于特定宿主环境的权限。
-*   **并发压力测试**: 对核心引擎（如自适应检索、配置读写锁）进行 Stress Testing 覆盖。
+*   **状态隔离专项测试 (v5.7)**: [test_ui_state_isolation.py](tests/test_ui_state_isolation.py) 专门验证 UI 操作与后台配置的内存解耦。
+*   **递归与去重测试 (v5.7)**: [test_recursive_collection.py](tests/test_recursive_collection.py) 验证复杂目录结构下的上下文输出唯一性。
 *   **测试运行**: 
     ```bash
     python -m pytest
     ```
-    v5.3 版本共包含 **80+** 项自动化测试用例。
+    v5.7 版本共包含 **107** 项全自动化测试用例，涵盖安全、并发与同步加固。
 
 ## 🛠️ 打包与分发
 *   **桌面版**: 使用 `build_exe.py` (封装了 PyInstaller) 进行单文件打包。

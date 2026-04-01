@@ -59,16 +59,14 @@ class DataManager:
                     # Deep merge: preserve top-level structure, overwrite values
                     self.data["last_directory"] = loaded.get("last_directory", "")
                     if "projects" in loaded:
-                        # Normalize all keys on load to ensure cross-platform safety
+                        # Defensive: clean legacy non-canonical keys
                         from .security import PathValidator
-                        norm_projects = {}
-                        for k, v in loaded["projects"].items():
+                        for k, v in list(loaded["projects"].items()):
                             try:
                                 norm_k = PathValidator.norm_path(k)
-                                norm_projects[norm_k] = v
+                                self.data["projects"][norm_k] = v
                             except Exception:
-                                norm_projects[k] = v
-                        self.data["projects"] = norm_projects
+                                self.data["projects"][k] = v
                     
                     self.data["recent_projects"] = loaded.get("recent_projects", [])
                     self.data["pinned_projects"] = loaded.get("pinned_projects", [])
@@ -78,25 +76,21 @@ class DataManager:
     def save(self):
         """Atomically saves the current configuration to disk."""
         with self._lock:
-            # Ensure all project keys are normalized before saving
-            from .security import PathValidator
-            new_projects = {}
-            for k, v in self.data["projects"].items():
-                try:
-                    norm_k = PathValidator.norm_path(k)
-                    new_projects[norm_k] = v
-                except Exception:
-                    new_projects[k] = v
-            self.data["projects"] = new_projects
+            # Audit: track save state
+            logger.debug(f"Config Save: Persisting {len(self.data['projects'])} projects.")
+            # Note: Aggressive re-normalization is removed from save() 
+            # to preserve memory references (v). 
+            # Normalization is now enforced at all entry points (get_project_data, load).
+            data_to_save = copy.deepcopy(self.data)
 
-            config_file = _get_config_file()
-            try:
-                temp_file = config_file.with_suffix('.json.tmp')
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.data, f, ensure_ascii=False, indent=4)
-                os.replace(temp_file, config_file)
-            except Exception as e:
-                logger.error(f"Config save error: {e}")
+        config_file = _get_config_file()
+        try:
+            temp_file = config_file.with_suffix('.json.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, ensure_ascii=False, indent=4)
+            os.replace(temp_file, config_file)
+        except Exception as e:
+            logger.error(f"Config save error: {e}")
 
     DEFAULT_SCHEMA = {
         "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
@@ -173,6 +167,7 @@ class DataManager:
         from .security import PathValidator
         try:
             path_key = PathValidator.norm_path(path_str)
+            logger.debug(f"Config Access: Request='{path_str}' -> Key='{path_key}'")
         except Exception:
             path_key = path_str
             

@@ -6,7 +6,8 @@ import threading
 import queue
 import sys
 import subprocess
-from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge, PathValidator
+import re
+from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge, PathValidator, logger
 
 # --- Constants ---
 PREVIEW_LIMIT = 100000  # Max characters to display in preview
@@ -428,16 +429,26 @@ class FileCortexApp:
         self.populate_tree(root_node, self.current_dir)
 
     def update_stats(self):
-        count = len(self.staging_files)
+        # Recursively expand and de-duplicate files for accurate stats
+        ex_str = self.exclude_var.get()
+        use_git = self.use_gitignore_var.get()
+        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+        
+        all_files = FileUtils.flatten_paths(self.staging_files, str(self.current_dir), 
+                                           manual_excludes, use_git)
+        
+        count = len(all_files)
         total_tokens = 0
-        for p_str in self.staging_files:
-            p = pathlib.Path(p_str)
-            if p.is_file() and p.exists() and not FileUtils.is_binary(p):
+        for f_str in all_files:
+            p = pathlib.Path(f_str)
+            if p.is_file() and not FileUtils.is_binary(p):
                  try:
                      content = p.read_text('utf-8', 'ignore')
                      total_tokens += FormatUtils.estimate_tokens(content)
                  except Exception: pass
-        self.lbl_stats.config(text=f"清单: {count} 项 | 估算 {total_tokens} Tokens")
+        
+        item_count = len(self.staging_files)
+        self.lbl_stats.config(text=f"清单: {item_count} 项 ({count} 文件) | 估算 {total_tokens} Tokens")
 
     def add_search_tag(self, *args):
         txt = self.search_var.get().strip()
@@ -646,21 +657,31 @@ class FileCortexApp:
         self.staging_files.clear()
         for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
         if self.current_proj_config:
-            self._add_paths_to_staging(self.current_proj_config.get("staging_list", []), save_to_disk=False)
+            # Data Isolation: pass a COPY of the config list to the UI 
+            # so UI clearing doesn't wipe the config.
+            staging_data = list(self.current_proj_config.get("staging_list", []))
+            self._add_paths_to_staging(staging_data, save_to_disk=False)
 
     def _add_paths_to_staging(self, paths, save_to_disk=True):
         for p_raw in paths:
+            # Sync: always normalize to match DataManager's internal key format
             p_str = PathValidator.norm_path(p_raw)
             if p_str not in self.staging_files:
                 p = pathlib.Path(p_str)
-                if not p.exists(): continue
+                # Note: Windows is case-insensitive, so norm_path's lowercase 
+                # will not prevent exists() from working.
+                if not p.exists():
+                    logger.warning(f"Staging Skip: Path does not exist on disk: '{p_str}'")
+                    continue
+                
                 self.staging_files.append(p_str)
                 sz = p.stat().st_size if p.is_file() else 0
                 sz_str = FormatUtils.format_size(sz)
                 self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=(p_str, sz_str))
         
         if save_to_disk and self.current_proj_config:
-            self.current_proj_config["staging_list"] = self.staging_files
+            # Data Isolation: store a COPY to prevent back-pollution
+            self.current_proj_config["staging_list"] = list(self.staging_files)
             self.data_mgr.save()
             
         self.update_stats()
@@ -675,6 +696,10 @@ class FileCortexApp:
     def clear_staging(self):
         self.staging_files.clear()
         for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
+        if self.current_proj_config:
+            # Data Isolation
+            self.current_proj_config["staging_list"] = []
+            self.data_mgr.save()
         self.update_stats()
 
     def remove_staging_selection(self):
@@ -684,7 +709,8 @@ class FileCortexApp:
             self.tree_staging.delete(i)
         
         if self.current_proj_config:
-            self.current_proj_config["staging_list"] = self.staging_files
+            # Data Isolation: store a COPY
+            self.current_proj_config["staging_list"] = list(self.staging_files)
             self.data_mgr.save()
         self.update_stats()
 
@@ -693,8 +719,16 @@ class FileCortexApp:
         tpl_name = self.selected_template_var.get()
         if tpl_name != "None" and self.current_proj_config:
             prefix = self.current_proj_config.get("prompt_templates", {}).get(tpl_name)
+        
+        # Pass filters for recursive expansion and de-duplication
+        ex_str = self.exclude_var.get()
+        use_git = self.use_gitignore_var.get()
+        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
             
-        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir, prompt_prefix=prefix)
+        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir, 
+                                                 prompt_prefix=prefix,
+                                                 manual_excludes=manual_excludes,
+                                                 use_gitignore=use_git)
         if final_text:
             self.root.clipboard_clear()
             self.root.clipboard_append(final_text)
@@ -872,14 +906,19 @@ class FileCortexApp:
         paths = self._get_ctx_paths()
         if not paths: return
         if len(paths) > 1:
-            messagebox.showwarning("警告", "无法同时对多个文件或目录进行重命名！请单独选中一项。")
+            # Multi-file rename: Open the Batch Rename dialog
+            BatchRenameWindow(self.root, self.current_dir, paths, callback=lambda: self.load_project(str(self.current_dir)))
             return
+        
+        # Single-file rename: Use simple prompt
         p = paths[0]
-        new_name = simpledialog.askstring("重命名", "新名称:", initialvalue=p.name)
+        new_name = simpledialog.askstring("📝 重命名", "输入新文件名:", initialvalue=p.name)
         if new_name and new_name != p.name:
             try:
-                FileOps.rename_file(str(p), new_name); self.load_project(str(self.current_dir))
-            except Exception as e: messagebox.showerror("错误", str(e))
+                FileOps.rename_file(str(p), new_name)
+                self.load_project(str(self.current_dir))
+            except Exception as e: 
+                messagebox.showerror("错误", str(e))
 
     def ctx_delete_file(self):
         paths = self._get_ctx_paths()
@@ -965,6 +1004,148 @@ class FileCortexApp:
                               self.exclude_var.get(), self.use_gitignore_var.get())
 
     def open_batch_io_dialog(self): pass 
+
+class BatchRenameWindow(tk.Toplevel):
+    """
+    GUI for bulk renaming files using regex or simple replacement.
+    """
+    def __init__(self, parent, project_root, selected_paths, callback=None):
+        super().__init__(parent)
+        self.project_root = project_root
+        self.selected_paths = selected_paths
+        self.callback = callback
+        
+        self.title(f"📝 批量重命名 | 选中 {len(selected_paths)} 个项目")
+        self.geometry("900x600")
+        self.transient(parent)
+        self.grab_set()
+
+        self.pattern_var = tk.StringVar()
+        self.replacement_var = tk.StringVar()
+        self.mode_var = tk.StringVar(value="regex") # or "simple"
+        
+        self._init_ui()
+        self.update_preview()
+
+    def _init_ui(self):
+        main_f = ttk.Frame(self, padding=12)
+        main_f.pack(fill=tk.BOTH, expand=True)
+
+        # Config Area
+        ctrl_f = ttk.LabelFrame(main_f, text="🔧 重命名规则", padding=10)
+        ctrl_f.pack(fill=tk.X, pady=(0, 10))
+
+        # First row: Regex vs Simple
+        top_row = ttk.Frame(ctrl_f)
+        top_row.pack(fill=tk.X, pady=2)
+        ttk.Label(top_row, text="模式:", font=("Bold", 9)).pack(side=tk.LEFT)
+        ttk.Radiobutton(top_row, text="正则表达式 (Regex)", variable=self.mode_var, value="regex", command=self.update_preview).pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(top_row, text="普通替换 (Simple Replace)", variable=self.mode_var, value="simple", command=self.update_preview).pack(side=tk.LEFT, padx=10)
+
+        # Second row: From/To
+        grid_f = ttk.Frame(ctrl_f)
+        grid_f.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(grid_f, text="查找:").grid(row=0, column=0, sticky=tk.W, padx=2)
+        self.entry_pattern = ttk.Entry(grid_f, textvariable=self.pattern_var)
+        self.entry_pattern.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.pattern_var.trace_add("write", lambda *a: self.update_preview())
+
+        ttk.Label(grid_f, text="替换为:").grid(row=1, column=0, sticky=tk.W, padx=2)
+        self.entry_repl = ttk.Entry(grid_f, textvariable=self.replacement_var)
+        self.entry_repl.grid(row=1, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.replacement_var.trace_add("write", lambda *a: self.update_preview())
+        
+        grid_f.columnconfigure(1, weight=1)
+
+        # Preview Area
+        preview_f = ttk.LabelFrame(main_f, text="👁️ 效果预览", padding=5)
+        preview_f.pack(fill=tk.BOTH, expand=True)
+
+        tree_container = ttk.Frame(preview_f)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        self.tree = ttk.Treeview(tree_container, columns=("old", "new", "status"), show="headings")
+        self.tree.heading("old", text="原名称")
+        self.tree.heading("new", text="新名称预览")
+        self.tree.heading("status", text="状态/冲突")
+        self.tree.column("old", width=250)
+        self.tree.column("new", width=250)
+        self.tree.column("status", width=120)
+        
+        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bottom Buttons
+        btn_f = ttk.Frame(main_f, padding=5)
+        btn_f.pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(btn_f, text="🚩 立即应用变更", command=self.execute_rename, style="Accent.TButton").pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_f, text="取消", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def update_preview(self):
+        pattern = self.pattern_var.get()
+        replacement = self.replacement_var.get()
+        mode = self.mode_var.get()
+        
+        # Clear
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        if not pattern:
+            for p in self.selected_paths:
+                self.tree.insert("", "end", values=(p.name, p.name, "无变化"))
+            return
+
+        try:
+            # Prepare regex if simple mode
+            final_pattern = pattern
+            if mode == "simple":
+                final_pattern = re.escape(pattern)
+            
+            results = FileOps.batch_rename(str(self.project_root), [str(p) for p in self.selected_paths], 
+                                          final_pattern, replacement, dry_run=True)
+            
+            # Map back to original list for those not changed
+            changed_map = {item["old"]: item for item in results}
+            
+            for p in self.selected_paths:
+                p_str = str(p)
+                if p_str in changed_map:
+                    item = changed_map[p_str]
+                    self.tree.insert("", "end", values=(p.name, pathlib.Path(item["new"]).name, item["status"]))
+                else:
+                    self.tree.insert("", "end", values=(p.name, p.name, "无匹配"))
+                    
+        except Exception as e:
+            self.tree.insert("", "end", values=("错误", "---", str(e)))
+
+    def execute_rename(self):
+        pattern = self.pattern_var.get()
+        replacement = self.replacement_var.get()
+        mode = self.mode_var.get()
+        
+        if not pattern: return
+        
+        msg = f"确定要重命名这 {len(self.selected_paths)} 个项目吗？\n该操作不可撤销。"
+        if not messagebox.askyesno("确认批量重命名", msg): return
+        
+        try:
+            final_pattern = pattern
+            if mode == "simple":
+                final_pattern = re.escape(pattern)
+                
+            FileOps.batch_rename(str(self.project_root), [str(p) for p in self.selected_paths], 
+                                final_pattern, replacement, dry_run=False)
+            
+            if self.callback: self.callback()
+            messagebox.showinfo("成功", "批量重命名已完成。")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("错误", f"重命名失败: {e}")
 
 class DuplicateFinderWindow(tk.Toplevel):
     def __init__(self, parent, data_mgr, current_dir, excludes, use_gitignore):

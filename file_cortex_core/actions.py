@@ -29,7 +29,7 @@ class FileOps:
         new_names = {}
         for p_str in paths:
             p = pathlib.Path(p_str)
-            new_name = regex.sub(replacement, p.name)
+            new_name = regex.sub(replacement, p.name, count=1)
             if new_name == p.name:
                 continue # No change
             
@@ -38,9 +38,18 @@ class FileOps:
 
         # Check for destination existence and selection collisions
         final_targets = {}
+        target_norm_set = set()
+        
+        def norm_path_str(p):
+            abs_p = str(p.absolute())
+            return abs_p.lower() if os.name == 'nt' else abs_p
+
         for old_p, new_p in new_names.items():
             status = 'ok'
-            if new_p.exists():
+            norm_new = norm_path_str(new_p)
+            
+            # Check filesystem AND the currently planned batch targets
+            if new_p.exists() or norm_new in target_norm_set:
                 status = 'conflict'
             
             # Simple conflict resolution: add suffix if it's a conflict
@@ -50,13 +59,15 @@ class FileOps:
                 counter = 1
                 while True:
                     candidate = new_p.parent / f"{base}_{counter}{ext}"
-                    if not candidate.exists():
+                    norm_candidate = norm_path_str(candidate)
+                    if not candidate.exists() and norm_candidate not in target_norm_set:
                         new_p = candidate
                         status = 'renamed_with_suffix'
                         break
                     counter += 1
 
             final_targets[old_p] = (new_p, status)
+            target_norm_set.add(norm_path_str(new_p))
             results.append({"old": old_p, "new": str(new_p), "status": status})
 
         if not dry_run:
@@ -205,24 +216,27 @@ class ActionBridge:
                 has_meta = any(c in template for c in shell_metas)
                 
                 def win_quote(s):
+                    # Windows CMD shell metacharacters that require escaping or quoting
+                    # " is handled by replacing with \" and wrapping in " "
+                    # Other characters like ^, &, |, <, >, %, ( ) are handled by wrapping in " "
+                    # Our current strategy: wrap the whole string in double quotes and escape internal double quotes.
+                    # This is generally safe for Windows paths in CMD.
                     return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
                 
                 if not has_meta:
-                    # Parse command and args using a simple split for shell=False
-                    # Note: This assumes simple templates like "cmd {path}"
                     cmd_str = template.format(**context)
-                    # Use shlex for simple tokenizing even on Windows (good enough for simple paths)
                     try:
                         args = shlex.split(cmd_str, posix=False)
                         logger.info(f"AUDIT - Executing external tool (Win/No-Shell): {args}")
                         res = subprocess.run(args, shell=False, capture_output=True, text=True, check=False)
                     except Exception:
-                        # Fallback if shlex fails
                         logger.warning("shlex failed on Windows, falling back to shell=True")
                         safe_context = {k: win_quote(v) for k, v in context.items()}
+                        # Re-format with quoted values
                         cmd_str = template.format(**safe_context)
                         res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
                 else:
+                    # Template has metacharacters, we MUST use shell=True and be safe
                     safe_context = {k: win_quote(v) for k, v in context.items()}
                     cmd_str = template.format(**safe_context)
                     logger.info(f"AUDIT - Executing external tool (Win/Shell-Required): {cmd_str}")

@@ -182,6 +182,48 @@ class FileUtils:
         return results
 
     @staticmethod
+    def flatten_paths(paths: list[str], root_dir: str = None, 
+                      manual_excludes: list[str] = None, use_gitignore: bool = True) -> list[str]:
+        """
+        Expands all directories in the list recursively and returns a unique set of files.
+        Applies filtering (gitignore/manual) to exclude unwanted noise.
+        """
+        if not paths: return []
+        unique_files = set()
+        root = pathlib.Path(root_dir).resolve() if root_dir else None
+        git_spec = FileUtils.get_gitignore_spec(str(root)) if (root and use_gitignore) else None
+        excludes = manual_excludes or []
+        
+        for p_str in paths:
+            p = pathlib.Path(p_str).resolve()
+            if not p.exists(): continue
+            
+            if p.is_file():
+                # Direct file addition
+                unique_files.add(str(p))
+            elif p.is_dir():
+                # Recursive folder addition
+                for curr_root, dirs, files in os.walk(p):
+                    curr_root_path = pathlib.Path(curr_root).resolve()
+                    
+                    # Filter directories in-place for os.walk efficiency
+                    valid_dirs = []
+                    for d in dirs:
+                        d_path = curr_root_path / d
+                        rel = d_path.relative_to(root) if (root and root in d_path.parents) else d_path
+                        if not FileUtils.should_ignore(d, rel, excludes, git_spec, True):
+                            valid_dirs.append(d)
+                    dirs[:] = valid_dirs
+                    
+                    for f in files:
+                        f_path = curr_root_path / f
+                        rel = f_path.relative_to(root) if (root and root in f_path.parents) else f_path
+                        if not FileUtils.should_ignore(f, rel, excludes, git_spec, False):
+                            unique_files.add(str(f_path))
+                            
+        return sorted(list(unique_files))
+
+    @staticmethod
     def read_text_smart(file_path: pathlib.Path) -> str:
         """Reads file content with smart encoding detection."""
         try:
@@ -284,33 +326,38 @@ class NoiseReducer:
 
 class ContextFormatter:
     @staticmethod
-    def to_markdown(paths, root_dir=None, prompt_prefix=None):
+    def to_markdown(paths: list[str], root_dir: str = None, prompt_prefix: str = None, 
+                    manual_excludes: list[str] = None, use_gitignore: bool = True):
         """
-        Converts a list of file paths to a formatted markdown block.
-        Optionally includes a prompt prefix at the top.
+        Converts a list of file paths (and directories) to a formatted markdown block.
+        Recursively expands directories and de-duplicates files.
         """
+        # 1. Flatten and De-duplicate
+        all_files = FileUtils.flatten_paths(paths, root_dir, manual_excludes, use_gitignore)
+        
         blocks = []
         if prompt_prefix:
             blocks.append(f"{prompt_prefix}\n\n---\n\n")
             
         root = pathlib.Path(root_dir).resolve() if root_dir else None
-        for p_str in paths:
-            p = pathlib.Path(p_str)
+        
+        for f_str in all_files:
+            p = pathlib.Path(f_str)
             if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
                 continue
+            
             try:
-                display_name = p.relative_to(root) if root and root in p.resolve().parents else p.name
+                rel_path = p.relative_to(root) if root and root in p.resolve().parents else p.name
+                lang = FileUtils.get_language_tag(p.suffix)
                 stat = p.stat()
                 size_kb = stat.st_size / 1024
                 
                 content = FileUtils.read_text_smart(p)
+                content = NoiseReducer.clean(content)
                 
-                # Feature: Token Noise Reduction
-                content = NoiseReducer.clean(content) 
-
-                lang = FileUtils.get_language_tag(p.suffix)
-                header = f"File: {display_name} ({size_kb:.1f} KB)\n"
+                header = f"File: {rel_path} ({size_kb:.1f} KB)\n"
                 blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
             except Exception as e:
-                logger.error(f"Failed to format {p_str}: {e}")
+                logger.error(f"Failed to format file {f_str} for context: {e}")
+                
         return "".join(blocks)
