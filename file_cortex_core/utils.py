@@ -32,7 +32,8 @@ class FormatUtils:
         Refined token estimation (approx 4 chars/token for code).
         Can be improved in future with BPE or professional libraries.
         """
-        if not text: return 0
+        if not text:
+            return 0
         return len(text) // 4
 
     @staticmethod
@@ -86,9 +87,12 @@ class FileUtils:
     def is_binary(file_path):
         path = pathlib.Path(file_path)
         try:
-            if not path.exists(): return False
-            if path.stat().st_size == 0: return False
-        except Exception: return True
+            if not path.exists():
+                return False
+            if path.stat().st_size == 0:
+                return False
+        except Exception:
+            return True
 
         # 1. Extension Whitelist (Force Text)
         text_exts = {'.py', '.js', '.ts', '.html', '.css', '.json', '.md', '.txt', '.yml', '.yaml', 
@@ -101,7 +105,8 @@ class FileUtils:
         try:
             with open(file_path, 'rb') as f:
                 chunk = f.read(8192)
-                if not chunk: return False
+                if not chunk:
+                    return False
                 
                 # NULL bytes are a strong indicator of binary (except UTF-16, which is rare for code)
                 if b'\0' in chunk: return True
@@ -196,7 +201,8 @@ class FileUtils:
         
         for p_str in paths:
             p = pathlib.Path(p_str).resolve()
-            if not p.exists(): continue
+            if not p.exists():
+                continue
             
             if p.is_file():
                 # Direct file addition
@@ -225,12 +231,15 @@ class FileUtils:
 
     @staticmethod
     def read_text_smart(file_path: pathlib.Path) -> str:
-        """Reads file content with smart encoding detection."""
+        """Reads file content with smart encoding detection (safe for large files)."""
         try:
-            from charset_normalizer import from_path
-            results = from_path(file_path).best()
-            if results:
-                return str(results)
+            from charset_normalizer import from_bytes
+            # Only read header for encoding detection to prevent OOM
+            with open(file_path, 'rb') as f:
+                header = f.read(32768)
+            results = from_bytes(header).best()
+            encoding = results.encoding if results else 'utf-8'
+            return file_path.read_text(encoding=encoding, errors='ignore')
         except Exception:
             pass
         # Fallback to utf-8 ignore

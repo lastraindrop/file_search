@@ -18,7 +18,7 @@ app = FastAPI(title="FileCortex v5.4 API")
 
 # --- Global State ---
 ACTIVE_PROCESSES = {} # { pid: process_obj }
-PROCESS_LOCK = asyncio.Lock()
+PROCESS_LOCK = threading.Lock()
 
 # --- Static & Templates ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -121,6 +121,7 @@ class CategorizeRequest(BaseModel):
 
 class StatsRequest(BaseModel):
     paths: list[str]
+    project_path: str | None = None
 
 class ToolExecuteRequest(BaseModel):
     project_path: str
@@ -229,7 +230,7 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/api/open")
-async def open_project(req: ProjectOpenRequest):
+def open_project(req: ProjectOpenRequest):
     try:
         # Register project in data_mgr to allow safe path access
         p = PathValidator.validate_project(req.path)
@@ -251,12 +252,12 @@ async def open_project(req: ProjectOpenRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/children")
-async def api_children(req: ChildrenRequest):
+def api_children(req: ChildrenRequest):
     children = get_children(req.path)
     return {"status": "ok", "children": children}
 
 @app.get("/api/content")
-async def get_content(path: str):
+def get_content(path: str):
     p = pathlib.Path(path)
     
     # Safety Check: Must be within a known project
@@ -277,7 +278,7 @@ async def get_content(path: str):
         raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
 
 @app.post("/api/generate")
-async def generate_context(req: GenerateRequest):
+def generate_context(req: GenerateRequest):
     root, proj_config = None, None
     prompt_prefix = None
     if req.project_path:
@@ -294,7 +295,7 @@ async def generate_context(req: GenerateRequest):
 
 # --- File Operations APIs ---
 @app.post("/api/fs/rename")
-async def rename_file(req: FileRenameRequest):
+def rename_file(req: FileRenameRequest):
     project_root = get_valid_project_root(req.project_path)
     if not project_root:
         raise HTTPException(status_code=403, detail="Access denied (Invalid project path)")
@@ -314,7 +315,7 @@ async def rename_file(req: FileRenameRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/batch_rename")
-async def api_batch_rename(req: BatchRenameRequest):
+def api_batch_rename(req: BatchRenameRequest):
     project_root = get_valid_project_root(req.project_path)
     if not project_root:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -334,7 +335,7 @@ async def api_batch_rename(req: BatchRenameRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/fs/delete")
-async def delete_files(req: FileDeleteRequest):
+def delete_files(req: FileDeleteRequest):
     project_root = get_valid_project_root(req.project_path)
     if not project_root:
         raise HTTPException(status_code=403, detail="Access denied (Invalid project path)")
@@ -351,7 +352,7 @@ async def delete_files(req: FileDeleteRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/move")
-async def api_move(req: FileMoveRequest):
+def api_move(req: FileMoveRequest):
     try:
         moved_paths = []
         skipped_paths = []
@@ -384,7 +385,7 @@ async def api_move(req: FileMoveRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/save")
-async def api_save(req: FileSaveRequest):
+def api_save(req: FileSaveRequest):
     try:
         # Safety Check: Must be within a known project
         if not get_valid_project_root(req.path):
@@ -399,7 +400,7 @@ async def api_save(req: FileSaveRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/create")
-async def api_create(req: FileCreateRequest):
+def api_create(req: FileCreateRequest):
     try:
         if not get_valid_project_root(req.parent_path):
              raise HTTPException(status_code=403, detail="Access denied")
@@ -411,7 +412,7 @@ async def api_create(req: FileCreateRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/fs/archive")
-async def api_archive(req: FileArchiveRequest):
+def api_archive(req: FileArchiveRequest):
     try:
         # project_root itself must be safe
         if not get_valid_project_root(req.project_root):
@@ -435,24 +436,24 @@ async def api_archive(req: FileArchiveRequest):
 
 # --- Workspace Memory APIs ---
 @app.get("/api/project/config")
-async def get_proj_config(path: str):
+def get_proj_config(path: str):
     if not get_valid_project_root(path):
          raise HTTPException(status_code=403, detail="Access denied")
     return DataManager().get_project_data(path)
 
 @app.get("/api/project/prompt_templates")
-async def get_prompt_templates(path: str):
+def get_prompt_templates(path: str):
     root, proj_config = get_project_config_for_path(path)
     if not root:
          raise HTTPException(status_code=403, detail="Access denied")
     return proj_config.get("prompt_templates", {})
 
 @app.get("/api/workspaces")
-async def get_workspaces():
+def get_workspaces():
     return _get_dm().get_workspaces_summary()
 
 @app.post("/api/workspaces/pin")
-async def toggle_pin(req: WorkspacePinRequest):
+def toggle_pin(req: WorkspacePinRequest):
     status = _get_dm().toggle_pinned(req.path)
     return {"is_pinned": status}
 
@@ -463,14 +464,14 @@ async def get_recent_projects_legacy():
 
 
 @app.post("/api/project/note")
-async def api_add_note(req: NoteRequest):
+def api_add_note(req: NoteRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     DataManager().add_note(req.project_path, req.file_path, req.note)
     return {"status": "ok"}
 
 @app.post("/api/project/tag")
-async def api_manage_tag(req: TagRequest):
+def api_manage_tag(req: TagRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     if req.action == "add":
@@ -480,14 +481,14 @@ async def api_manage_tag(req: TagRequest):
     return {"status": "ok"}
 
 @app.post("/api/project/session")
-async def api_save_session(req: SessionRequest):
+def api_save_session(req: SessionRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     DataManager().save_session(req.project_path, req.data)
     return {"status": "ok"}
 
 @app.post("/api/project/favorites")
-async def api_manage_favorites(req: FavoriteRequest):
+def api_manage_favorites(req: FavoriteRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     if req.action == "add":
@@ -497,14 +498,14 @@ async def api_manage_favorites(req: FavoriteRequest):
     return {"status": "ok"}
 
 @app.post("/api/project/settings")
-async def update_settings(req: ProjectSettingsRequest):
+def update_settings(req: ProjectSettingsRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     DataManager().update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
 @app.post("/api/project/tools")
-async def update_tools(req: ToolsUpdateRequest):
+def update_tools(req: ToolsUpdateRequest):
     """Dedicated endpoint for updating custom_tools (separated from settings for RCE prevention)."""
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -515,22 +516,39 @@ async def update_tools(req: ToolsUpdateRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/project/stats")
-async def get_staging_stats(req: StatsRequest):
-    """Calculates total token estimate for a list of paths."""
+def get_staging_stats(req: StatsRequest):
+    """Calculates total token estimate for a list of paths, including recursive expansion."""
+    root = get_valid_project_root(req.project_path) if req.project_path else None
+    
+    # Get configuration for excludes if project is valid
+    manual_excludes = []
+    use_git = True
+    if root:
+        proj_data = DataManager().get_project_data(root)
+        ex_str = proj_data.get("excludes", "")
+        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+
+    # Flatten paths to include all files in directories (De-duplicate & Expand)
+    all_files = FileUtils.flatten_paths(req.paths, root, manual_excludes, use_git)
+    
     total_tokens = 0
-    for p_str in req.paths:
-        p = pathlib.Path(p_str)
+    for f_str in all_files:
+        p = pathlib.Path(f_str)
         if p.is_file() and p.exists() and not FileUtils.is_binary(p):
             try:
-                # Use 'ignore' to handle potential encoding issues silently as this is just for stats
-                content = p.read_text('utf-8', 'ignore')
+                # Use read_text_smart for efficiency and OOM protection
+                content = FileUtils.read_text_smart(p)
                 total_tokens += FormatUtils.estimate_tokens(content)
             except Exception as e:
-                logger.debug(f"Stats calculation failed for {p_str}: {e}")
-    return {"total_tokens": total_tokens}
+                logger.debug(f"Stats calculation failed for {f_str}: {e}")
+                
+    return {
+        "total_tokens": total_tokens,
+        "file_count": len(all_files)
+    }
 
 @app.post("/api/project/categories")
-async def update_categories(req: CategoriesUpdateRequest):
+def update_categories(req: CategoriesUpdateRequest):
     """Dedicated endpoint for updating quick_categories (separated from settings for security)."""
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -543,7 +561,7 @@ async def update_categories(req: CategoriesUpdateRequest):
 # --- FileCortex Action APIs ---
 
 @app.post("/api/actions/stage_all")
-async def api_stage_all(req: StageAllRequest):
+def api_stage_all(req: StageAllRequest):
     root, proj_config = get_project_config_for_path(req.project_path)
     if not root:
         raise HTTPException(status_code=403, detail="Project not registered")
@@ -558,7 +576,7 @@ async def api_stage_all(req: StageAllRequest):
         logger.error(f"Stage All failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 @app.post("/api/actions/categorize")
-async def api_categorize(req: CategorizeRequest):
+def api_categorize(req: CategorizeRequest):
     try:
         if not get_valid_project_root(req.project_path):
             raise HTTPException(status_code=403, detail="Access denied")
@@ -570,7 +588,7 @@ async def api_categorize(req: CategorizeRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/actions/execute")
-async def api_execute_tool(req: ToolExecuteRequest):
+def api_execute_tool(req: ToolExecuteRequest):
     try:
         project_root = get_valid_project_root(req.project_path)
         if not project_root:
@@ -589,12 +607,12 @@ async def api_execute_tool(req: ToolExecuteRequest):
             # Use Popen-based execution for consistency and potential termination tracking
             try:
                 proc = ActionBridge.create_process(template, p, project_root)
-                async with PROCESS_LOCK:
+                with PROCESS_LOCK:
                     ACTIVE_PROCESSES[proc.pid] = proc
                 
                 stdout, stderr = proc.communicate() # Blocking for standard API
                 
-                async with PROCESS_LOCK:
+                with PROCESS_LOCK:
                     ACTIVE_PROCESSES.pop(proc.pid, None)
                     
                 results.append({
@@ -614,7 +632,7 @@ async def api_execute_tool(req: ToolExecuteRequest):
 
 # --- WebSocket Search ---
 @app.post("/api/fs/collect_paths")
-async def collect_paths_api(req: PathCollectionRequest):
+def collect_paths_api(req: PathCollectionRequest):
     """
     Format a list of paths into a single string with custom separators.
     """
@@ -631,8 +649,8 @@ async def collect_paths_api(req: PathCollectionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/actions/terminate")
-async def api_terminate_process(req: ProcessTerminateRequest):
-    async with PROCESS_LOCK:
+def api_terminate_process(req: ProcessTerminateRequest):
+    with PROCESS_LOCK:
         proc = ACTIVE_PROCESSES.get(req.pid)
         if proc:
             logger.info(f"AUDIT - Terminating process {req.pid}")
@@ -749,7 +767,8 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
             proc = ActionBridge.create_process(template, path, project_root)
             current_pid[0] = proc.pid
             # Register process for potential termination
-            ACTIVE_PROCESSES[proc.pid] = proc
+            with PROCESS_LOCK:
+                ACTIVE_PROCESSES[proc.pid] = proc
             
             # Send PID to frontend immediately
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"pid": proc.pid})
@@ -758,13 +777,15 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
                 main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
             
             proc.wait()
-            ACTIVE_PROCESSES.pop(proc.pid, None)
+            with PROCESS_LOCK:
+                ACTIVE_PROCESSES.pop(proc.pid, None)
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"exit_code": proc.returncode})
         except Exception as e:
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"error": str(e)})
         finally:
-            if proc and proc.pid in ACTIVE_PROCESSES:
-                 ACTIVE_PROCESSES.pop(proc.pid, None)
+            if proc and proc.pid:
+                with PROCESS_LOCK:
+                    ACTIVE_PROCESSES.pop(proc.pid, None)
             main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
 
     result_queue = asyncio.Queue()
@@ -785,15 +806,20 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
             logger.info(f"AUDIT - Terminating abandoned process {pid} due to WebSocket disconnect")
             try:
                 if os.name == 'nt':
-                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
                 else:
-                     os.kill(pid, signal.SIGTERM)
+                    os.kill(pid, signal.SIGTERM)
+                
+                with PROCESS_LOCK:
+                    ACTIVE_PROCESSES.pop(pid, None)
             except Exception as e:
                 logger.error(f"Cleanup failed for pid {pid}: {e}")
     except Exception as e:
         logger.error(f"Action stream error: {e}")
-        try: await websocket.send_json({"status": "ERROR", "msg": str(e)})
-        except Exception: pass
+        try:
+            await websocket.send_json({"status": "ERROR", "msg": str(e)})
+        except Exception:
+            pass
     finally:
         stream_task.cancel()
 

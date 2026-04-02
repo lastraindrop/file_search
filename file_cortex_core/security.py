@@ -26,16 +26,22 @@ class PathValidator:
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
         """Canonicalize path: absolute, lowercase, posix-style, and trail-slash standardized."""
-        if not p: return ""
+        if not p:
+            return ""
         try:
             # Use os.path.abspath for industrial-strength determinism on Windows
             p_str = os.path.abspath(str(p)).replace('\\', '/').lower()
             
-            # Protection for roots:
+            # Protection for UNC/Long paths on Windows
+            if p_str.startswith('//?/'):
+                return p_str.rstrip('/')
+            
             # Unix root: '/'
-            if p_str == '/': return '/'
+            if p_str == '/':
+                return '/'
             # Windows drive root: 'c:/'
-            if len(p_str) == 3 and p_str[1:3] == ':/': return p_str
+            if len(p_str) == 3 and p_str[1:3] == ':/':
+                return p_str
             
             # Standard paths: remove trailing slash
             return p_str.rstrip('/')
@@ -48,8 +54,10 @@ class PathValidator:
     @staticmethod
     def validate_project(path_str: str) -> pathlib.Path:
         p = pathlib.Path(path_str).resolve()
-        if not p.exists(): raise FileNotFoundError(f"Path does not exist: {path_str}")
-        if not p.is_dir(): raise NotADirectoryError(f"Not a directory: {path_str}")
+        if not p.exists():
+            raise FileNotFoundError(f"Path does not exist: {path_str}")
+        if not p.is_dir():
+            raise NotADirectoryError(f"Not a directory: {path_str}")
         
         # Block root drives first
         if len(p.parts) <= 1:

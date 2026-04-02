@@ -23,6 +23,7 @@ dist/
 .coverage
 htmlcov/
 tests/.pytest_cache/
+mypy_cache/
 
 # App Data
 .ai_context_workbench/

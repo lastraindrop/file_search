@@ -1,0 +1,202 @@
+对 FileCortex 项目的代码审查已经完成。
+
+作为一名前端与后端架构、并发编程及系统安全领域的资深审查员，我详细审阅了你提供的所有代码。首先，我必须肯定该项目在架构设计上的成熟度：核心业务逻辑解耦（file_cortex_core）、测试环境的沙箱隔离（conftest.py 强制重置单例）、以及对路径穿越和命令注入的高度防范意识，都体现了非常高的专业水准。
+
+然而，在极致的并发安全、FastAPI 异步机制的底层理解、内存控制以及 PEP 8 代码规范上，当前代码仍存在若干致命缺陷（Critical）和性能瓶颈（High）。
+
+以下是极其细致的深度代码审查报告及后续的全面整改计划。
+
+一、 深度代码审查报告 (Code Review Findings)
+[Critical] 1. DataManager 单例模式存在并发初始化数据竞争
+
+文件位置: file_cortex_core/config.py (DataManager.__new__ 与 __init__)
+
+问题描述: 双重检查锁定（Double-Checked Locking）实现存在严重漏洞。__new__ 中的锁仅保护了实例的创建，但 __init__ 中的 self._initialized 检查是无锁的。如果线程 A 创建了实例但尚未完成 __init__，线程 B 获取实例后发现 _initialized 仍为 False，将导致 self.data 被二次重置，覆盖线程 A 的修改。
+
+改进建议: 将初始化逻辑移入 __new__ 的锁内部，彻底废弃 __init__ 中的状态判定。
+
+code
+Python
+download
+content_copy
+expand_less
+def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(DataManager, cls).__new__(cls)
+                # 必须在锁内完成初始化，确保其他线程拿到时已是完全体
+                cls._instance._init_data() 
+            return cls._instance
+
+    def __init__(self):
+        pass # 废弃，防并发污染
+
+    def _init_data(self):
+        self.data = {"last_directory": "", "projects": {}, "recent_projects": [], "pinned_projects": []}
+        self.load()
+[Critical] 2. FastAPI 异步与同步阻塞的严重混用 (Event Loop Blocking)
+
+文件位置: web_app.py (所有带有物理 I/O 的 async def 路由)
+
+问题描述: 在 FastAPI 中，定义为 async def 的路由将强制在**主事件循环（Main Thread）**中运行。你在 /api/open, /api/fs/rename 等路由中直接调用了 os.scandir, os.rename, DataManager().save() 等同步磁盘 I/O 操作。在高并发下，这会导致整个 Web 服务器假死，WebSocket 断连。
+
+改进建议: FastAPI 的最佳实践是：如果函数内有阻塞型同步 I/O，必须定义为常规 def（FastAPI 会自动将其放入外部线程池执行），或者使用 asyncio.to_thread。
+
+code
+Python
+download
+content_copy
+expand_less
+# 修改前
+@app.post("/api/open")
+async def open_project(req: ProjectOpenRequest): ...
+
+# 修改后 (去掉 async，交由 FastAPI 线程池调度)
+@app.post("/api/open")
+def open_project(req: ProjectOpenRequest): ...
+[Critical] 3. 跨线程的 Asyncio Lock 滥用引发竞态条件
+
+文件位置: web_app.py (websocket_action_stream 与 api_execute_tool)
+
+问题描述: 全局变量 ACTIVE_PROCESSES 在 api_execute_tool 中使用 asyncio.Lock() (PROCESS_LOCK) 保护。但在 websocket_action_stream 内部的同步后台线程 run_stream 中，却直接执行了 ACTIVE_PROCESSES[proc.pid] = proc。同步线程无视了 asyncio 的锁，必然导致字典在迭代或并发写入时抛出 RuntimeError: dictionary changed size during iteration。
+
+改进建议: 移除 asyncio.Lock，改用 Python 标准库的 threading.Lock()，以确保跨同步/异步边界的绝对安全。
+
+[High] 4. 多线程搜索引发的线程池爆炸 (Thread Starvation)
+
+文件位置: file_cortex_core/search.py (search_generator)
+
+问题描述: 每次调用 search_generator 都会新建一个 ThreadPoolExecutor(max_workers=os.cpu_count() or 4)。如果前端有 10 个用户同时发起 WebSocket 搜索，系统会瞬间创建 10 * 16 = 160 个线程，导致严重的上下文切换开销和内存飙升。
+
+改进建议: 在模块级别声明一个全局的 GLOBAL_SEARCH_EXECUTOR，所有搜索任务共享此线程池，限制系统总并发量。
+
+[High] 5. Tkinter 主线程阻塞 (UI Freezing)
+
+文件位置: file_search.py (update_stats)
+
+问题描述: update_stats 内部调用了 FileUtils.flatten_paths，该方法包含递归 os.walk。如果 Staging List 中包含诸如 node_modules 这样巨大的目录，UI 线程将彻底卡死数秒。
+
+改进建议: update_stats 必须放入后台线程执行，计算完毕后通过 self.root.after(0, update_label) 回调更新 UI。
+
+[Medium] 6. 大文件字符编码推断导致内存溢出 (OOM Risk)
+
+文件位置: file_cortex_core/utils.py (read_text_smart)
+
+问题描述: from_path(file_path).best() 会将整个文件读入内存进行推断。如果遇到 2GB 的日志文件（即使用户尝试强制读取），会导致程序崩溃。
+
+改进建议: 只读取前 32KB 进行编码探测，随后以流式或按行读取。
+
+[Low] 7. 违反 PEP 8 规范 (Code Style)
+
+文件位置: 全局多处
+
+问题描述: 大量存在 if not path.exists(): return False 或 for i in range(5): do_something(); do_other() 这种将控制流写在同一行的做法。这严重降低了代码的可读性和调试时的断点准确性。
+
+改进建议: 强制换行，保持每行一条语句。
+
+二、 现阶段系统重构与验证计划 (Action Plan)
+
+鉴于发现的底层并发和异步阻塞问题较多，现制定以下细致且全方位的修复与验证计划。必须严格按顺序执行，以防止系统发生回归崩溃。
+
+阶段 1：并发隔离与状态机加固 (Core Synchronization)
+
+工作目标: 解决 DataManager 单例竞态、FastAPI 同步阻塞及跨域锁污染问题。
+
+修改内容与位置:
+
+file_cortex_core/config.py:
+
+重构 DataManager.__new__，引入 _init_data()，并删除 __init__。
+
+在 MUTABLE_SETTINGS 校验处增加类型强校验，防止恶意嵌套覆盖。
+
+web_app.py:
+
+将 PROCESS_LOCK = asyncio.Lock() 替换为 PROCESS_LOCK = threading.Lock()。
+
+对所有读写 ACTIVE_PROCESSES 的地方，无论是 async 路由还是 run_stream 后台线程，统一使用 with PROCESS_LOCK:。
+
+剥离所有的 async def（除了 WebSocket 和纯内存计算），将 /api/open, /api/fs/* 统一修改为常规 def，交托 FastAPI 底层线程池。
+
+file_cortex_core/search.py:
+
+将 ThreadPoolExecutor 提取为模块级单例 SHARED_SEARCH_POOL = ThreadPoolExecutor(max_workers=os.cpu_count())。
+
+单元检测 (Unit Testing):
+
+新建 tests/test_concurrency_core.py:
+
+用例 1: test_datamanager_strict_singleton: 启动 100 个线程同时调用 DataManager()，断言它们的 id() 绝对一致，且 load() 只被触发一次。
+
+用例 2: test_process_registry_lock: 模拟 50 个线程同时读写 ACTIVE_PROCESSES 字典，断言没有抛出 RuntimeError: dictionary changed size。
+
+阶段 2：UI 防阻塞与内存安全 (Memory & UI Responsiveness)
+
+工作目标: 消除 UI 假死，控制 OOM 风险。
+
+修改内容与位置:
+
+file_search.py:
+
+将 update_stats 修改为异步触发机制。引入 queue.Queue 接收后台 flatten_paths 计算的结果，并在 process_queue 中轮询更新 UI 标签。
+
+清理无意义的轮询：如果 self.result_queue 和新的计算队列均为空，并处于非搜索状态，延长 after 的轮询间隔至 500ms 降低 CPU 占用。
+
+file_cortex_core/utils.py:
+
+修改 read_text_smart：
+
+code
+Python
+download
+content_copy
+expand_less
+# 截取头部进行推断
+raw_data = file_path.open('rb').read(32768)
+results = charset_normalizer.from_bytes(raw_data).best()
+encoding = results.encoding if results else 'utf-8'
+return file_path.read_text(encoding=encoding, errors='ignore')
+
+单元检测 (Unit Testing):
+
+新建 tests/test_memory_limits.py:
+
+用例 1: test_read_smart_large_file: 动态生成一个 100MB 的非标准编码文本文件，断言 read_text_smart 的执行时间在合理阈值内且内存未飙升超 10MB。
+
+用例 2: test_update_stats_non_blocking: 构造一个包含 10,000 个文件的目录加入 staging，断言计算过程中允许主线程继续响应其他事件。
+
+阶段 3：PEP 8 规范化与安全审计闭环 (Standardization)
+
+工作目标: 代码风格规范化，修复潜在的路径和注入边缘判定。
+
+修改内容与位置:
+
+全局格式化: 运行 black 或手动拆分所有的 if ...: return 单行语句。
+
+file_cortex_core/security.py:
+
+修复 Windows Root 判断逻辑，加入 UNC 路径免疫：
+
+code
+Python
+download
+content_copy
+expand_less
+def norm_path(p):
+    p_str = os.path.abspath(str(p)).replace('\\', '/').lower()
+    if p_str.startswith('//?/'): return p_str # 保护 UNC 路径
+    ...
+
+file_cortex_core/actions.py:
+
+针对 batch_rename 失败继续的问题：引入事务机制（记录已改名列表），若发生异常且 dry_run=False，尝试进行回滚操作（Rollback），保证工程文件的原子性。
+
+单元检测 (Unit Testing):
+
+增补 tests/test_filesystem_edge_cases.py:
+
+用例 1: test_batch_rename_rollback: 触发 batch_rename，使得第 5 个文件抛出 PermissionError，断言前 4 个文件成功恢复为原始名称。
+
+用例 2: test_unc_path_security: 输入 \\?\C:\Windows\System32，断言 norm_path 和 is_safe 能正确识别并拦截此高级越权攻击。
+
+请认真审阅上述审查结果与实施计划。你的核心安全逻辑和框架搭建得非常出色，现在的重点是从“能跑且安全”向“工业级高并发抗压”演进。

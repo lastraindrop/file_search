@@ -4,6 +4,8 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+SHARED_SEARCH_POOL = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+
 from .config import logger
 from .utils import FileUtils, FormatUtils
 
@@ -81,11 +83,14 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
         return found != is_inverse
     
     def match_content(path):
-        if search_mode not in ('content', 'regex') or not search_text_processed: return False
+        if search_mode not in ('content', 'regex') or not search_text_processed:
+            return False
         try:
             limit = max_size_mb * 1024 * 1024
-            if path.stat().st_size > limit: return False
-            if FileUtils.is_binary(path): return False
+            if path.stat().st_size > limit:
+                return False
+            if FileUtils.is_binary(path):
+                return False
             
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
@@ -96,7 +101,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         line_to_check = line if case_sensitive else line.lower()
                         found = search_text_processed in line_to_check
                     
-                    if found: return True != is_inverse
+                    if found:
+                        return True != is_inverse
             return False != is_inverse
         except PermissionError:
             return False
@@ -104,114 +110,121 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             logger.error(f"Error reading file {path}: {e}")
             return False
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
-        content_futures = {}
+    executor = SHARED_SEARCH_POOL
+    content_futures = {}
 
-        try:
-            for root, dirs, files in os.walk(root_dir):
-                rel_root = pathlib.Path(root).relative_to(root_dir)
-                dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
-                
-                if include_dirs:
-                    for d in dirs:
-                        if match_name(d, rel_root / d):
-                            full_d = pathlib.Path(root) / d
-                            meta = FileUtils.get_metadata(full_d)
-                            yield {
-                                "path": str(full_d),
-                                "match_type": "📁 Folder",
-                                "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
-                                **meta
-                            }
-
-                for file in files:
-                    full_path = pathlib.Path(root) / file
-                    rel_path = rel_root / file
-                    if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
-                        continue
-                    try:
-                        meta = FileUtils.get_metadata(full_path)
-                    except Exception as e:
-                        logger.error(f"Error getting metadata for {full_path}: {e}")
-                        continue
-                    
-                    # Logic branching by mode
-                    if search_mode in ('smart', 'exact', 'regex'):
-                        # Filename-centric modes
-                        if match_name(file, rel_path):
-                            count += 1
-                            yield {
-                                "path": str(full_path),
-                                "match_type": "Inverse Match" if is_inverse else "Match",
-                                "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
-                                **meta
-                            }
-                            if count >= max_results: break
-                        continue # Skip content check for path-focused modes
-                    
-                    if search_mode in ('content', 'regex') and search_text:
-                        if stop_event and stop_event.is_set(): break
-                        
-                        future = executor.submit(match_content, full_path)
-                        content_futures[future] = {
-                            "path": str(full_path),
-                            "is_inverse": is_inverse,
+    try:
+        for root, dirs, files in os.walk(root_dir):
+            rel_root = pathlib.Path(root).relative_to(root_dir)
+            dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, is_dir=True)]
+            
+            if include_dirs:
+                for d in dirs:
+                    if match_name(d, rel_root / d):
+                        full_d = pathlib.Path(root) / d
+                        meta = FileUtils.get_metadata(full_d)
+                        yield {
+                            "path": str(full_d),
+                            "match_type": "📁 Folder",
+                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
-                        if len(content_futures) >= 40:
-                            # Adaptive Batching
-                            batch = [f for f in content_futures if f.done()]
-                            if not batch:
-                                try:
-                                    next(as_completed(content_futures, timeout=0.01))
-                                    batch = [f for f in content_futures if f.done()]
-                                except: pass
-                            for f in batch:
-                                try:
-                                    is_match = f.result()
-                                    info = content_futures.pop(f)
-                                    if is_match:
-                                        count += 1
-                                        yield {
-                                            "path": info["path"],
-                                            "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                                            "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                                            "size": info["size"],
-                                            "mtime": info["mtime"],
-                                            "ext": info["ext"]
-                                        }
-                                        if count >= max_results: break
-                                except Exception:
-                                    if f in content_futures: content_futures.pop(f)
-                            if count >= max_results: break
-                    if count >= max_results or (stop_event and stop_event.is_set()): 
-                        break
-                if count >= max_results or (stop_event and stop_event.is_set()): 
-                    # Use a custom flag or modify dirs to stop os.walk
-                    dirs[:] = [] 
-                    break
 
-            # Process remaining
-            for f in as_completed(content_futures):
-                if count >= max_results: break
+            for file in files:
+                full_path = pathlib.Path(root) / file
+                rel_path = rel_root / file
+                if FileUtils.should_ignore(file, rel_path, excludes, git_spec, is_dir=False):
+                    continue
                 try:
-                    is_match = f.result()
-                    info = content_futures.pop(f)
-                    if is_match:
+                    meta = FileUtils.get_metadata(full_path)
+                except Exception as e:
+                    logger.error(f"Error getting metadata for {full_path}: {e}")
+                    continue
+                
+                # Logic branching by mode
+                if search_mode in ('smart', 'exact', 'regex'):
+                    # Filename-centric modes
+                    if match_name(file, rel_path):
                         count += 1
                         yield {
-                            "path": info["path"],
-                            "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                            "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                            "size": info["size"],
-                            "mtime": info["mtime"],
-                            "ext": info["ext"]
+                            "path": str(full_path),
+                            "match_type": "Inverse Match" if is_inverse else "Match",
+                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
+                            **meta
                         }
-                except Exception: pass
-        finally:
-            # Shutdown executor quickly if generator is closed
-            # This is hard to do perfectly but we ensure all remaining tasks in content_futures are cleared from our tracking
-            content_futures.clear()
+                        if count >= max_results:
+                            break
+                    continue # Skip content check for path-focused modes
+                
+                if search_mode in ('content', 'regex') and search_text:
+                    if stop_event and stop_event.is_set():
+                        break
+                    
+                    future = executor.submit(match_content, full_path)
+                    content_futures[future] = {
+                        "path": str(full_path),
+                        "is_inverse": is_inverse,
+                        **meta
+                    }
+                    if len(content_futures) >= 40:
+                        # Adaptive Batching
+                        batch = [f for f in content_futures if f.done()]
+                        if not batch:
+                            try:
+                                next(as_completed(content_futures, timeout=0.01))
+                                batch = [f for f in content_futures if f.done()]
+                            except: pass
+                        for f in batch:
+                            try:
+                                is_match = f.result()
+                                info = content_futures.pop(f)
+                                if is_match:
+                                    count += 1
+                                    yield {
+                                        "path": info["path"],
+                                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
+                                        "size": info["size"],
+                                        "mtime": info["mtime"],
+                                        "ext": info["ext"]
+                                    }
+                                    if count >= max_results:
+                                        break
+                            except Exception:
+                                if f in content_futures:
+                                    content_futures.pop(f)
+                        if count >= max_results:
+                            break
+                if count >= max_results or (stop_event and stop_event.is_set()): 
+                    break
+            if count >= max_results or (stop_event and stop_event.is_set()): 
+                # Use a custom flag or modify dirs to stop os.walk
+                dirs[:] = [] 
+                break
+
+        # Process remaining
+        for f in as_completed(content_futures):
+            if count >= max_results:
+                break
+            try:
+                is_match = f.result()
+                info = content_futures.pop(f)
+                if is_match:
+                    count += 1
+                    yield {
+                        "path": info["path"],
+                        "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
+                        "size": info["size"],
+                        "mtime": info["mtime"],
+                        "ext": info["ext"]
+                    }
+            except Exception:
+                pass
+    finally:
+        # Shutdown search quickly if generator is closed
+        # We ensure all remaining tasks in content_futures are cleared from our tracking
+        content_futures.clear()
 
 class SearchWorker(threading.Thread):
     def __init__(self, root_dir, search_text, search_mode, manual_excludes, 

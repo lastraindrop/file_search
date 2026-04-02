@@ -35,11 +35,15 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **Schema 自愈 (Self-Healing)**: `DataManager._apply_default_schema` 是核心稳定性来源。任何配置读取均会自动合并 `DEFAULT_SCHEMA`，确保即使用户手动修改了配置文件或使用了旧版配置，系统也能自动补全缺失字段（如 `search_settings`），防止运行时 `KeyError`。
 *   **路径归一化确定性标准 (Deterministic Normalization - v5.7)**: 为了彻底消除 Windows 路径漂移，项目强制要求所有外部路径（TreeView 选择、API 参数等）通过 `PathValidator.norm_path` 处理。该方法改用 `os.path.abspath` 以绕过 `pathlib` 随 CWD 变动的特性，并强制执行 **小写化 + POSIX 斜杠** 转换，确保内存缓存键的唯一性。
 *   **状态同步隔离原则 (Memory Reference Isolation - v5.7)**: 为了防止 UI 列表与后台 `DataManager` 共享内存引用，规定在 UI 刷新或清单修改时必须使用 `list()` 或 `.copy()`。这杜绝了 UI `clear()` 操作误伤持久化配置的问题。
-*   **参数对齐协议 (Parameter Alignment Protocol - v5.6)**: 对 `search_generator` 等核心函数签名的任何变更，必须同步更新所有的调用者。严格区分 Tkinter 与 Ttk 组件参数，防止非法参数传递导致的崩溃。
-*   **SSOT (Single Source of Truth)**: `DataManager` 实例作为配置的单一事实来源。所有的配置更新必须通过 `update_project_settings` 等专用方法，这些方法内置了 `MUTABLE_SETTINGS` 白名单校验。
+*   **参数动态对齐协议 (Parameter Alignment Protocol - v5.7)**: 
+    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。这是为了在调用 `FileUtils.flatten_paths` 时能够动态定位 `.gitignore` 过滤器，确保前端统计与后端处理的过滤逻辑达到 100% 同步。
+    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。该方法限制了编码采样的最大字节数，并在读取前进行二进制检测，防止因读取 GB 级日志而发生 OOM 崩溃。
 
-### 5. 并发安全与持久化 (Concurrency & Persistence)
-*   **原子化读写锁**: `DataManager` 内嵌了 `threading.RLock()`，所有的持久化 I/O 操作均处于锁保护下。
+### 5. 并发控制模型 (Concurrency Control Model - v5.7)
+*   **单例原子锁 (Atomic Singleton Lock)**: `DataManager` 在 `__new__` 阶段实现了双重检查锁定，且所有写操作均由 `self._lock` (RLock) 保护，严禁在高并发循环中直接读写私有成员。
+*   **Web 路由线程策略**:
+    - **同步 `def` 路由**: 适用于所有 I/O 密集型操作（如文件读取、重命名、归档）。FastAPI 会在独立线程池中执行这些路由，避免阻塞主事件循环。
+    - **异步 `async def` 路由**: 仅适用于纯 CPU 逻辑、单纯的数据库查询或 Websocket 握手，严禁在其中执行阻塞式 `os` 或 `pathlib` 调用。
 *   **原子写入策略**: 使用 `.tmp` 临时文件 + `os.replace` 确保文件写入的完整性。
 
 ### 6. 防错检查清单 (Post-Audit Anti-Patterns)

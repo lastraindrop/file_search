@@ -602,6 +602,8 @@ const App = {
             });
             const data = await res.json();
             App.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
+            // We keep staging files that might have failed if backend supports it, 
+            // but currently backend moves all or none in core.
             App.state.staging.clear();
             App.renderStaging();
             App.syncStagingToBackend();
@@ -617,7 +619,11 @@ const App = {
         const modalBody = document.getElementById('toolResultModalBody');
         const modalHeader = document.querySelector('#toolResultModal .modal-header');
         
-        modalBody.innerHTML = '<div class="p-4 text-center">Initializing stream...</div>';
+        const bsModal = new bootstrap.Modal(modalWrapper);
+        bsModal.show();
+
+        const paths = Array.from(App.state.staging);
+        modalBody.innerHTML = `<div class="p-4 text-center">Preparing to execute ${toolName} on ${paths.length} items...</div>`;
         
         // Add Stop button to header if it doesn't exist
         let stopBtn = document.getElementById('btnStopTool');
@@ -629,52 +635,57 @@ const App = {
             stopBtn.onclick = () => App.terminateProcess();
             modalHeader.insertBefore(stopBtn, modalHeader.lastElementChild);
         }
-        stopBtn.style.display = 'none'; // Hide until we have a PID
+        stopBtn.style.display = 'none';
 
-        const bsModal = new bootstrap.Modal(modalWrapper);
-        bsModal.show();
-
-        const paths = Array.from(App.state.staging);
-        // We only support streaming for the first selected file for now in the simple UI
-        // In a real general utility, we'd loop or use a batch stream API
-        const path = paths[0]; 
-
-        const wsUrl = `ws://${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
-        const socket = new WebSocket(wsUrl);
-        let outputDiv = null;
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            if (data.pid) {
-                App.state.activePid = data.pid;
-                stopBtn.style.display = 'block';
-                modalBody.innerHTML = `<div class="p-3 border-bottom border-secondary small text-muted">Running PID: ${data.pid} on ${path.split(/[\\\/]/).pop()}</div>
-                                       <pre id="streamOutput" class="m-0 p-3 h-100" style="background:#000; color:#0f0; font-family:monospace; min-height:300px; white-space:pre-wrap;"></pre>`;
-                outputDiv = document.getElementById('streamOutput');
-            }
-            
-            if (data.out && outputDiv) {
-                outputDiv.innerText += data.out;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            }
-            
-            if (data.exit_code !== undefined || data.status === "DONE" || data.error) {
-                stopBtn.style.display = 'none';
-                App.state.activePid = null;
-                if (data.error) {
-                    modalBody.innerHTML += `<div class="p-3 text-danger">Error: ${data.error}</div>`;
+        // Helper for sequential execution
+        const runNext = async (index) => {
+            if (index >= paths.length) {
+                modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-success fw-bold">✨ All ${paths.length} tasks completed.</div>`;
+                if (confirm("Tasks finished. Clear staging?")) {
+                    App.state.staging.clear();
+                    App.renderStaging();
+                    App.syncStagingToBackend();
                 }
-                if (data.exit_code !== undefined) {
-                    modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-info">Process exited with code: ${data.exit_code}</div>`;
-                }
-                socket.close();
+                return;
             }
+
+            const path = paths[index];
+            const fileName = path.split(/[\\\/]/).pop();
+            const logId = `tool-log-${index}`;
+            
+            modalBody.innerHTML += `<div class="p-2 border-bottom border-secondary x-small text-muted bg-dark">(${index+1}/${paths.length}) Executing on: ${fileName}</div>
+                                   <pre id="${logId}" class="m-0 p-3" style="background:#000; color:#0f0; font-family:monospace; min-height:150px; white-space:pre-wrap; font-size: 12px;"></pre>`;
+            
+            const outputDiv = document.getElementById(logId);
+            const wsUrl = `ws://${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
+            
+            return new Promise((resolve) => {
+                const socket = new WebSocket(wsUrl);
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.pid) {
+                        App.state.activePid = data.pid;
+                        stopBtn.style.display = 'block';
+                    }
+                    if (data.out && outputDiv) {
+                        outputDiv.innerText += data.out;
+                        outputDiv.scrollTop = outputDiv.scrollHeight;
+                        modalWrapper.querySelector('.modal-body').scrollTop = modalWrapper.querySelector('.modal-body').scrollHeight;
+                    }
+                    if (data.exit_code !== undefined || data.status === "DONE" || data.error) {
+                        stopBtn.style.display = 'none';
+                        App.state.activePid = null;
+                        if (data.error) outputDiv.innerText += `\nERROR: ${data.error}`;
+                        if (data.exit_code !== undefined) outputDiv.innerText += `\n[Process exited with code: ${data.exit_code}]`;
+                        socket.close();
+                        resolve();
+                    }
+                };
+                socket.onerror = () => { resolve(); };
+            }).then(() => runNext(index + 1));
         };
 
-        App.state.staging.clear();
-        App.renderStaging();
-        App.syncStagingToBackend();
+        await runNext(0);
     },
 
     terminateProcess: async () => {
@@ -839,7 +850,7 @@ const App = {
         if (!label) return;
         
         if (count === 0) {
-            label.innerText = " 清单: 0 项 | 0 Tokens";
+            label.innerText = "0 Tokens";
             return;
         }
 
@@ -847,12 +858,15 @@ const App = {
             const res = await App._fetch('/api/project/stats', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ paths: Array.from(App.state.staging) })
+                body: JSON.stringify({ 
+                    paths: Array.from(App.state.staging),
+                    project_path: App.state.projectPath
+                })
             });
             const data = await res.json();
-            label.innerText = ` 清单: ${count} 项 | 估算 ${data.total_tokens} Tokens`;
+            label.innerText = `${data.file_count} Files | ${data.total_tokens} Tokens`;
         } catch (e) {
-            label.innerText = `${count} Files`;
+            label.innerText = `${count} Items`;
         }
     },
 
@@ -989,6 +1003,15 @@ const App = {
             App.updateBulkUI();
             App.openProject(); 
         } catch (e) { App.showToast("Move failed: " + e.message, 'danger'); }
+    },
+
+    clearStaging: () => {
+        if (App.state.staging.size === 0) return;
+        if (!confirm("Clear whole staging list?")) return;
+        App.state.staging.clear();
+        App.renderStaging();
+        App.syncStagingToBackend();
+        App.showToast("Staging cleared");
     },
 
     // --- Path Collection ---

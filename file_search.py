@@ -16,7 +16,7 @@ SEARCH_POLL_MS = 100    # Queue polling interval
 class FileCortexApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("FileCortex v5.0 | 工作区编排助手")
+        self.root.title("FileCortex v5.7 Production | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -429,26 +429,40 @@ class FileCortexApp:
         self.populate_tree(root_node, self.current_dir)
 
     def update_stats(self):
-        # Recursively expand and de-duplicate files for accurate stats
-        ex_str = self.exclude_var.get()
-        use_git = self.use_gitignore_var.get()
-        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+        """Recursively calculate staging stats in a background thread."""
+        if not self.current_dir:
+            return
         
-        all_files = FileUtils.flatten_paths(self.staging_files, str(self.current_dir), 
-                                           manual_excludes, use_git)
-        
-        count = len(all_files)
-        total_tokens = 0
-        for f_str in all_files:
-            p = pathlib.Path(f_str)
-            if p.is_file() and not FileUtils.is_binary(p):
-                 try:
-                     content = p.read_text('utf-8', 'ignore')
-                     total_tokens += FormatUtils.estimate_tokens(content)
-                 except Exception: pass
-        
-        item_count = len(self.staging_files)
-        self.lbl_stats.config(text=f"清单: {item_count} 项 ({count} 文件) | 估算 {total_tokens} Tokens")
+        self.lbl_stats.config(text="清单: 正在计算...")
+        def run_calc():
+            try:
+                ex_str = self.exclude_var.get()
+                use_git = self.use_gitignore_var.get()
+                manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+                
+                all_files = FileUtils.flatten_paths(self.staging_files, str(self.current_dir), 
+                                                manual_excludes, use_git)
+                
+                count = len(all_files)
+                total_tokens = 0
+                for f_str in all_files:
+                    p = pathlib.Path(f_str)
+                    if p.is_file() and not FileUtils.is_binary(p):
+                        try:
+                            content = FileUtils.read_text_smart(p)
+                            total_tokens += FormatUtils.estimate_tokens(content)
+                        except Exception:
+                            pass
+                
+                item_count = len(self.staging_files)
+                self.root.after(0, lambda: self._update_stats_ui(item_count, count, total_tokens))
+            except Exception as e:
+                logger.error(f"Stats calculation failed: {e}")
+
+        threading.Thread(target=run_calc, daemon=True).start()
+
+    def _update_stats_ui(self, item_count, file_count, token_count):
+        self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens")
 
     def add_search_tag(self, *args):
         txt = self.search_var.get().strip()
@@ -518,10 +532,14 @@ class FileCortexApp:
 
     def _perform_search(self):
         self._search_timer = None
-        if not self.current_dir: return
-        if self.search_thread and self.search_thread.is_alive(): self.stop_event.set()
-        for item in self.tree_search.get_children(): self.tree_search.delete(item)
-        self.stop_event = threading.Event(); self.result_queue = queue.Queue()
+        if not self.current_dir:
+            return
+        if self.search_thread and self.search_thread.is_alive():
+            self.stop_event.set()
+        for item in self.tree_search.get_children():
+            self.tree_search.delete(item)
+        self.stop_event = threading.Event()
+        self.result_queue = queue.Queue()
         self.lbl_status.config(text="扫描中...")
         max_size = self.current_proj_config.get("max_search_size_mb", 5) if self.current_proj_config else 5
         self.search_thread = SearchWorker(self.current_dir, self.search_var.get(), self.search_mode_var.get(), 

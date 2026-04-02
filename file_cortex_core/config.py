@@ -34,11 +34,13 @@ class DataManager:
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super(DataManager, cls).__new__(cls)
-                cls._instance._initialized = False
+                cls._instance._init_data()
             return cls._instance
 
     def __init__(self):
-        if self._initialized: return
+        pass # Initialization handled in __new__ to prevent race conditions
+
+    def _init_data(self):
         self.data = {
             "last_directory": "", 
             "projects": {}, 
@@ -46,7 +48,6 @@ class DataManager:
             "pinned_projects": []
         }
         self.load()
-        self._initialized = True
 
     def load(self):
         """Loads configuration from the disk and merges with default schema."""
@@ -214,8 +215,10 @@ class DataManager:
 
     def add_tag(self, project_path, file_path, tag):
         proj = self.get_project_data(project_path)
-        if file_path not in proj["tags"]: proj["tags"][file_path] = []
-        if tag not in proj["tags"][file_path]: proj["tags"][file_path].append(tag)
+        if file_path not in proj["tags"]:
+            proj["tags"][file_path] = []
+        if tag not in proj["tags"][file_path]:
+            proj["tags"][file_path].append(tag)
         self.save()
 
     def remove_tag(self, project_path, file_path, tag):

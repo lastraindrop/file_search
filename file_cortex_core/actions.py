@@ -71,31 +71,38 @@ class FileOps:
             results.append({"old": old_p, "new": str(new_p), "status": status})
 
         if not dry_run:
-            for old_p, (new_p, _) in final_targets.items():
-                try:
+            renamed_stack = []
+            try:
+                for old_p, (new_p, _) in final_targets.items():
                     pathlib.Path(old_p).rename(new_p)
-                except Exception as e:
-                    # Update status in results
-                    for item in results:
-                        if item["old"] == old_p:
-                            item["status"] = f"error: {str(e)}"
-                            break
+                    renamed_stack.append((old_p, new_p))
+            except Exception as e:
+                logger.error(f"Batch rename failed: {e}. Attempting rollback of {len(renamed_stack)} items.")
+                for old_p, new_p in reversed(renamed_stack):
+                    try:
+                        new_p.rename(old_p)
+                    except Exception as rollback_e:
+                        logger.error(f"Critical: Rollback failed for {new_p}: {rollback_e}")
+                raise e
         
         return results
 
     @staticmethod
     def rename_file(old_path_str, new_name):
         old_path = pathlib.Path(old_path_str)
-        if not old_path.exists(): raise FileNotFoundError("Target path does not exist.")
+        if not old_path.exists():
+            raise FileNotFoundError("Target path does not exist.")
         new_path = old_path.parent / new_name
-        if new_path.exists(): raise FileExistsError("A file with new name already exists.")
+        if new_path.exists():
+            raise FileExistsError("A file with new name already exists.")
         old_path.rename(new_path)
         return str(new_path)
 
     @staticmethod
     def delete_file(path_str):
         path = pathlib.Path(path_str)
-        if not path.exists(): raise FileNotFoundError("Target path does not exist.")
+        if not path.exists():
+            raise FileNotFoundError("Target path does not exist.")
         if path.is_file():
             path.unlink()
         elif path.is_dir():
@@ -129,7 +136,8 @@ class FileOps:
                 f.write(content)
             os.replace(temp_path, path)
         except Exception as e:
-            if temp_path.exists(): temp_path.unlink()
+            if temp_path.exists():
+                temp_path.unlink()
             raise e
         return True
 
