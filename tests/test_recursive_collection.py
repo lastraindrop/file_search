@@ -4,7 +4,8 @@ import os
 import shutil
 from file_cortex_core import FileUtils, ContextFormatter
 
-TEST_DIR = pathlib.Path("test_recursive_temp")
+# CR-22 Fix: Use project-local test sandbox
+TEST_DIR = pathlib.Path("tests/tmp_tests/recursive_temp")
 
 @pytest.fixture(autouse=True)
 def setup_teardown():

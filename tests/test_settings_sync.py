@@ -3,8 +3,8 @@ import os
 from file_cortex_core.config import DataManager
 from file_cortex_core.security import PathValidator
 
-def test_project_settings_persistence():
-    dm = DataManager()
+def test_project_settings_persistence(clean_config):
+    dm = clean_config
     project_path = PathValidator.norm_path(".")
     
     # 1. Update settings
@@ -25,8 +25,8 @@ def test_project_settings_persistence():
     assert refreshed_data["search_settings"]["mode"] == "regex"
     assert refreshed_data["search_settings"]["case_sensitive"] is True
 
-def test_default_schema_alignment():
-    dm = DataManager()
+def test_default_schema_alignment(clean_config):
+    dm = clean_config
     # Create a project entry with missing fields to simulate old config version
     path = PathValidator.norm_path("legacy_project")
     dm.data["projects"][path] = {"excludes": "old_style"} 

@@ -8,9 +8,15 @@ venv/
 .env
 
 # Build / Distribution
-build/
+buildvenv/
 dist/
+build/
 *.spec
+tests/tmp_tests/
+tests/tmp_test_res/
+test_recursive_temp/
+*.log
+.filecortex_test/exe
 *.exe
 
 # IDEs

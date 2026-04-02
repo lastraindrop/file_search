@@ -103,10 +103,23 @@ class FileOps:
         path = pathlib.Path(path_str)
         if not path.exists():
             raise FileNotFoundError("Target path does not exist.")
+            
+        def _handle_readonly(func, path, exc_info):
+            # Clear the read-only bit and retry
+            import stat
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+
         if path.is_file():
-            path.unlink()
+            try:
+                path.unlink()
+            except PermissionError:
+                # CR-24 Fix: Try clearing read-only bit
+                import stat
+                os.chmod(path, stat.S_IWRITE)
+                path.unlink()
         elif path.is_dir():
-            shutil.rmtree(path)
+            shutil.rmtree(path, onerror=_handle_readonly)
         return True
 
     @staticmethod
@@ -206,68 +219,14 @@ class FileOps:
 
 class ActionBridge:
     @staticmethod
-    def execute_tool(template, path_str, project_root):
+    def _prepare_execution(template, path_str, project_root, force_shell=False):
+        """
+        Internal helper to prepare command arguments and shell status.
+        Returns: (exec_args, is_shell, context)
+        """
         p = pathlib.Path(path_str)
-        if not p.exists(): return {"error": "Path does not exist"}
-        
-        context = {
-            "path": str(p),
-            "name": p.name,
-            "ext": p.suffix,
-            "root": str(project_root),
-            "parent": str(p.parent),
-            "parent_name": p.parent.name
-        }
-        
-        try:
-            if os.name == 'nt':
-                # Security Hardening for Windows
-                # If there are no shell metacharacters, we use shell=False for maximum safety
-                shell_metas = set("&|<>^%")
-                has_meta = any(c in template for c in shell_metas)
-                
-                def win_quote(s):
-                    # Windows CMD shell metacharacters that require escaping or quoting
-                    # " is handled by replacing with \" and wrapping in " "
-                    # Other characters like ^, &, |, <, >, %, ( ) are handled by wrapping in " "
-                    # Our current strategy: wrap the whole string in double quotes and escape internal double quotes.
-                    # This is generally safe for Windows paths in CMD.
-                    return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
-                
-                if not has_meta:
-                    cmd_str = template.format(**context)
-                    try:
-                        args = shlex.split(cmd_str, posix=False)
-                        logger.info(f"AUDIT - Executing external tool (Win/No-Shell): {args}")
-                        res = subprocess.run(args, shell=False, capture_output=True, text=True, check=False)
-                    except Exception:
-                        logger.warning("shlex failed on Windows, falling back to shell=True")
-                        safe_context = {k: win_quote(v) for k, v in context.items()}
-                        # Re-format with quoted values
-                        cmd_str = template.format(**safe_context)
-                        res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
-                else:
-                    # Template has metacharacters, we MUST use shell=True and be safe
-                    safe_context = {k: win_quote(v) for k, v in context.items()}
-                    cmd_str = template.format(**safe_context)
-                    logger.info(f"AUDIT - Executing external tool (Win/Shell-Required): {cmd_str}")
-                    res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, check=False)
-            else:
-                tokens = shlex.split(template, posix=True)
-                final_cmd = [t.format(**context) for t in tokens]
-                logger.info(f"AUDIT - Executing external tool (Unix/List): {' '.join(final_cmd)}")
-                res = subprocess.run(final_cmd, shell=False, capture_output=True, text=True, check=False)
-                
-            return {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.returncode}
-        except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
-            return {"error": str(e)}
-
-    @staticmethod
-    def create_process(template, path_str, project_root):
-        """Creates a subprocess Popen object based on template and context."""
-        p = pathlib.Path(path_str)
-        if not p.exists(): raise FileNotFoundError("Path does not exist")
+        if not p.exists():
+            raise FileNotFoundError(f"Path does not exist: {path_str}")
         
         context = {
             "path": str(p),
@@ -279,49 +238,86 @@ class ActionBridge:
         }
         
         if os.name == 'nt':
+            # Security Hardening for Windows
             shell_metas = set("&|<>^%")
-            has_meta = any(c in template for c in shell_metas)
+            has_meta = any(c in template for c in shell_metas) or force_shell
             
             def win_quote(s):
+                # Basic quoting for Windows CMD
                 return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
             
             if not has_meta:
+                # Use raw context for list-mode (shell=False)
                 cmd_str = template.format(**context)
                 try:
-                    args = shlex.split(cmd_str, posix=False)
-                    logger.info(f"AUDIT - Creating process (Win/No-Shell): {args}")
-                    return subprocess.Popen(
-                        args, shell=False,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1, encoding='utf-8', errors='replace'
-                    )
+                    # CR-04 Fix: On Windows, posix=True breaks backslashes. 
+                    # posix=False keeps quotes. We must manually strip outer quotes 
+                    # because subprocess (shell=False) adds them back if needed.
+                    raw_args = shlex.split(cmd_str, posix=False)
+                    args = [t.strip('"') for t in raw_args]
+                    return args, False, context
                 except Exception:
+                    # Fallback to shell if shlex fails
                     safe_context = {k: win_quote(v) for k, v in context.items()}
-                    cmd_str = template.format(**safe_context)
-                    return subprocess.Popen(
-                        cmd_str, shell=True,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1, encoding='utf-8', errors='replace'
-                    )
+                    return template.format(**safe_context), True, context
             else:
+                # Template has metacharacters, use shell=True with quoted values
                 safe_context = {k: win_quote(v) for k, v in context.items()}
-                cmd_str = template.format(**safe_context)
-                logger.info(f"AUDIT - Creating process (Win/Shell-Required): {cmd_str}")
-                return subprocess.Popen(
-                    cmd_str, shell=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, encoding='utf-8', errors='replace'
-                )
+                return template.format(**safe_context), True, context
         else:
+            # Unix-like: Always use list mode (shell=False) with shlex
             tokens = shlex.split(template, posix=True)
             final_cmd = [t.format(**context) for t in tokens]
-            logger.info(f"AUDIT - Creating process (Unix/List): {' '.join(final_cmd)}")
-            return subprocess.Popen(
-                final_cmd, shell=False,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, encoding='utf-8', errors='replace',
-                start_new_session=True
-            )
+            return final_cmd, False, context
+
+    @staticmethod
+    def execute_tool(template, path_str, project_root):
+        try:
+            cmd, is_shell, _ = ActionBridge._prepare_execution(template, path_str, project_root)
+            
+            # Windows Builtin Fallback: if shell=False but command not found, try shell=True
+            if os.name == 'nt' and not is_shell and isinstance(cmd, list) and len(cmd) > 0:
+                import shutil
+                if not shutil.which(cmd[0]):
+                    is_shell = True
+                    cmd, _, _ = ActionBridge._prepare_execution(template, path_str, project_root, force_shell=True)
+
+            logger.info(f"AUDIT - Executing external tool (Shell={is_shell}): {cmd}")
+            res = subprocess.run(cmd, shell=is_shell, capture_output=True, text=True, check=False)
+            return {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.returncode}
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            return {"error": str(e)}
+
+    @staticmethod
+    def create_process(template, path_str, project_root):
+        """Creates a subprocess Popen object based on template and context."""
+        cmd, is_shell, _ = ActionBridge._prepare_execution(template, path_str, project_root)
+        
+        # Windows Builtin Fallback
+        if os.name == 'nt' and not is_shell and isinstance(cmd, list) and len(cmd) > 0:
+            import shutil
+            if not shutil.which(cmd[0]):
+                is_shell = True
+                cmd, _, _ = ActionBridge._prepare_execution(template, path_str, project_root, force_shell=True)
+
+        logger.info(f"AUDIT - Creating process (Shell={is_shell}): {cmd}")
+        
+        popen_kwargs = {
+            "shell": is_shell,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+            "encoding": 'utf-8',
+            "errors": 'replace'
+        }
+        
+        # Enable process group leadership on Unix for clean cleanup
+        if os.name != 'nt':
+            popen_kwargs["start_new_session"] = True
+            
+        return subprocess.Popen(cmd, **popen_kwargs)
 
     @staticmethod
     def stream_tool(template, path_str, project_root):
@@ -339,15 +335,24 @@ class ActionBridge:
             "parent_name": p.parent.name
         }
         
+        process = None
         try:
             process = ActionBridge.create_process(template, path_str, project_root)
+            if process.stdout:
+                for line in process.stdout:
+                    yield {"out": line}
             
-            for line in process.stdout:
-                yield {"out": line}
-            
-            process.wait()
-            yield {"exit_code": process.returncode}
+            exit_code = process.wait()
+            yield {"exit_code": exit_code}
             
         except Exception as e:
             logger.error(f"Tool streaming failed: {e}")
             yield {"error": str(e)}
+        finally:
+            if process and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=1)
+                except Exception:
+                    try: process.kill()
+                    except: pass

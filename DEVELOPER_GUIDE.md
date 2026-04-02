@@ -7,7 +7,7 @@
 ### 1. 权限与安全校验
 为了防止路径越权 (Path Traversal) 和 命令注入 (Command Injection)，本项目采用了严格的校验机制：
 *   **路径权限注册制**: 只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
-*   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env`, `.ssh` 等系统及敏感目录的访问。
+*   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env` 等系统及敏感目录的访问。
 *   **ActionBridge 安全执行 (v5.3+)**: 
     *   **Windows**: 默认对不含 Shell 元字符 (`&|<>^%`) 的模板采用 `shell=False` 列表模式执行，彻底杜绝注入。若模板包含元字符，则回退至 `shell=True` 并强制执行 `win_quote` 转义审计。
     *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
@@ -19,6 +19,7 @@
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
+# FileCortex v5.7.1 - 工业级大规模文件分析与 Kontext 搜集工具
 FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_core/` 包，实现了高内聚低耦合：
 *   **config.py**: 线程安全的 `DataManager` 单例，管理全局配置与项目 Schema。
 *   **security.py**: `PathValidator` 负责所有路径的安全性校验。
@@ -63,15 +64,19 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **文件操作**: 实现了安全的文件移动、删除和归档功能。
 *   **快速分类**: `batch_categorize` 模块允许基于规则对文件进行批量排序和分类。
 
-### 7. 动作桥接 (ActionBridge)
+### 8. 动作桥接 (ActionBridge)
 *   **模板引擎**: ActionBridge 是一个模板引擎，用于在暂存文件上执行外部命令行工具 (CLI)。
 *   **上下文注入**: 支持将文件路径、项目根目录、文件扩展名等上下文信息注入到 CLI 命令中，实现高度灵活的自动化操作。
 
-### 8. UI 层 (UI Layer)
+### 9. UI 层 (UI Layer)
 *   **解耦设计**: Tkinter 和 FastAPI 接口是解耦的，允许独立开发和部署。
 
 ## 🧪 测试方法论
-本项目坚持 **100% 核心路径覆盖** 且遵循 **“零硬编码”原则**。
+本项目包含 124 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
+*   **动态参数对齐 (Dynamic Parameter Alignment)**: 
+    *   **原则**: 所有跨端 (UI/Web/CLI) 调用的路径解析必须经过 `PathValidator.norm_path` 处理。
+    *   **原则**: 所有的命令执行必须通过 `ActionBridge._prepare_execution` 枢纽，严禁在业务逻辑中直接拼凑 shell 命令。
+    *   **测试要求**: 新增的功能必须在 Windows 和 Unix 逻辑路径上分别通过 `test_audit_fixes.py` 类型的覆盖率验证。
 *   **测试隔离与自修复 (v5.3)**: `conftest.py` 引入了 `autouse` fixture，在每个测试运行前后强制重置 `DataManager` 单例和缓存，彻底消除测试间的交叉污染。
 *   **测试隔离规范**: **严禁在单项测试中重写 `TestClient` 或 `DataManager` 实例。** 所有的测试必须共享 `conftest.py` 提供的隔离配置文件 `api_test_config.json`，以防止泄露至用户的真实配置目录。
 *   **参数矩阵覆盖 (Matrix Testing)**: 在 `test_search.py` 中覆盖了搜索模式、正反向、大小写、排除规则的组合。

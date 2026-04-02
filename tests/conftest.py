@@ -14,7 +14,6 @@ def _reset_singleton():
     from web_app import ACTIVE_PROCESSES
     yield
     DataManager._instance = None
-    DataManager._initialized = False  
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
 
@@ -140,7 +139,7 @@ def api_client():
     with patch('file_cortex_core.config._CONFIG_FILE', config_path):
         # Reset singleton to pick up the new config path
         DataManager._instance = None
-        DataManager._initialized = False
+    # DataManager._initialized = False (Removed CR-01)
         FileUtils.clear_cache()
         
         client = TestClient(app)
@@ -148,7 +147,7 @@ def api_client():
         
         # Cleanup
         DataManager._instance = None
-        DataManager._initialized = False
+    # DataManager._initialized = False (Removed CR-01)
         FileUtils.clear_cache()
         
     shutil.rmtree(temp_dir, ignore_errors=True)

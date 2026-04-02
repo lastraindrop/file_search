@@ -144,7 +144,7 @@ class FileUtils:
         if gitignore_path.exists():
             try:
                 mtime = gitignore_path.stat().st_mtime
-            except: pass
+            except Exception: pass
         return FileUtils._get_cached_gitignore_spec(str(root_dir), mtime)
 
     @staticmethod
@@ -224,9 +224,11 @@ class FileUtils:
                     valid_dirs = []
                     for d in dirs:
                         d_path = curr_root_path / d
-                        rel = d_path.relative_to(root) if (root and root in d_path.parents) else d_path
-                        if not FileUtils.should_ignore(d, rel, excludes, git_spec, True):
-                            valid_dirs.append(d)
+                        # CR-07 Fix: Handle root == d_path
+                        if root == d_path or root in d_path.parents:
+                            rel = d_path.relative_to(root) if (root and root in d_path.parents) else d_path
+                            if not FileUtils.should_ignore(d, rel, excludes, git_spec, True):
+                                valid_dirs.append(d)
                     dirs[:] = valid_dirs
                     
                     for f in files:
@@ -372,7 +374,9 @@ class ContextFormatter:
                 continue
             
             try:
-                rel_path = p.relative_to(root) if root and root in p.resolve().parents else p.name
+                p_res = p.resolve()
+                # CR-06 Fix: Handle root == p_res
+                rel_path = p_res.relative_to(root) if root and (root == p_res or root in p_res.parents) else p.name
                 lang = FileUtils.get_language_tag(p.suffix)
                 stat = p.stat()
                 size_kb = stat.st_size / 1024

@@ -53,6 +53,13 @@
 - [x] **[DONE] 局部化测试沙箱 (Localized Test Sandbox)**: 将 pytest 临时文件夹由系统 Temp 迁移至项目本地 `tests/tmp_tests`，规避 Windows `PermissionError` 并提升大文件 I/O 稳定性。
 - [x] **[DONE] 增强编码感知识别 (Smart Encoding Detection)**: 强化了 `read_text_smart` 在 CJK (GBK) 环境下的内容识别率，并增加了二进制文件的防御性回退。
 
+## 📍 阶段 2.7：生产架构加固与参数一致性 (v5.7.1 - 已完成)
+- [x] **[DONE] ActionBridge 双模执行审计**: 实现了 Windows/Unix 差异化安全执行策略，默认采用列表模式绕过 Shell 注入，并支持 Windows Builtin (echo/dir) 自动回退。
+- [x] **[DONE] 搜索逻辑闭环**: 修复了 Regex 模式下的结果重叠 Bug，并确保特别查询 (`.`, `..`) 不再短路标签匹配逻辑。
+- [x] **[DONE] 工业级文件 I/O**: `delete_file` 增加了对 Windows 只读文件的权限接管；`read_text_smart` 升级了 OOM 保护与混合编码识别。
+- [x] **[DONE] 动态对齐架构 (Dynamic Alignment)**: 定义并实现了“参数一致性校验”，确保跨端 (Web/CLI) 调用、配置读取及路径解析在所有平台下的逻辑镜像对称。
+- [x] **[DONE] 100% 审计闭环**: 修复了 38 项安全及健壮性审计缺陷，测试用例增加至 124 项，实现全路径覆盖。
+
 ## 📍 阶段 3：RAG 适配与多端协作 (2026 Q3 目标)
 - [ ] **结构化导出 (RAG-Ready)**: 支持将搜集内容一键打包为 JSONL 或专为 RAG 模型优化的 Embedding 数据包。
 - [ ] **本地智能摘要 (Ollama)**: 集成本地模型对搜集到的代码/文档进行自动化分片与语义摘要。

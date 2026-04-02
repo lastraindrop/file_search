@@ -9,9 +9,10 @@ from file_cortex_core.search import search_generator, SHARED_SEARCH_POOL
 
 class TestResourceCleanup(unittest.TestCase):
     def setUp(self):
-        self.test_dir = pathlib.Path("tmp_test_res")
-        if self.test_dir.exists(): shutil.rmtree(self.test_dir)
-        self.test_dir.mkdir()
+        # CR-21 Fix: Use project-local test sandbox
+        self.test_dir = pathlib.Path("tests/tmp_tests/res_cleanup")
+        if self.test_dir.exists(): shutil.rmtree(self.test_dir, ignore_errors=True)
+        self.test_dir.mkdir(parents=True, exist_ok=True)
         # Create many files to slow down search
         for i in range(100):
             (self.test_dir / f"test_{i}.py").write_text("print('hello world')")

@@ -21,6 +21,11 @@ def build():
         '--onefile',
         '--noconsole',
         '--clean',
+        '--hidden-import=uvicorn.protocols.http.httptools_impl',
+        '--hidden-import=uvicorn.protocols.websockets.wsproto_impl',
+        '--hidden-import=uvicorn.lifespan.on',
+        '--hidden-import=pathspec',
+        '--hidden-import=charset_normalizer',
         '--name=FileCortex',
         '--collect-all=file_cortex_core',
         # If you have an icon, uncomment below

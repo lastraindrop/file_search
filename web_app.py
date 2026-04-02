@@ -14,7 +14,7 @@ import signal
 import threading
 import subprocess
 
-app = FastAPI(title="FileCortex v5.4 API")
+app = FastAPI(title="FileCortex v5.7.1 API")
 
 # --- Global State ---
 ACTIVE_PROCESSES = {} # { pid: process_obj }
@@ -144,14 +144,14 @@ def is_path_safe(target_path: str, project_root: str) -> bool:
 
 def get_valid_project_root(path_str: str) -> str | None:
     """Delegates to DataManager for authorized project root discovery."""
-    return DataManager().resolve_project_root(path_str)
+    return _get_dm().resolve_project_root(path_str)
 
 def get_project_config_for_path(path_str: str):
     """Retrieves project config if path is within a registered project."""
     root = get_valid_project_root(path_str)
     if not root:
         return None, None
-    return root, DataManager().get_project_data(root)
+    return root, _get_dm().get_project_data(root)
 
 # --- Helpers ---
 def _has_children(path_obj):
@@ -439,7 +439,7 @@ def api_archive(req: FileArchiveRequest):
 def get_proj_config(path: str):
     if not get_valid_project_root(path):
          raise HTTPException(status_code=403, detail="Access denied")
-    return DataManager().get_project_data(path)
+    return _get_dm().get_project_data(path)
 
 @app.get("/api/project/prompt_templates")
 def get_prompt_templates(path: str):
@@ -467,7 +467,7 @@ async def get_recent_projects_legacy():
 def api_add_note(req: NoteRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
-    DataManager().add_note(req.project_path, req.file_path, req.note)
+    _get_dm().add_note(req.project_path, req.file_path, req.note)
     return {"status": "ok"}
 
 @app.post("/api/project/tag")
@@ -475,16 +475,16 @@ def api_manage_tag(req: TagRequest):
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     if req.action == "add":
-        DataManager().add_tag(req.project_path, req.file_path, req.tag)
+        _get_dm().add_tag(req.project_path, req.file_path, req.tag)
     else:
-        DataManager().remove_tag(req.project_path, req.file_path, req.tag)
+        _get_dm().remove_tag(req.project_path, req.file_path, req.tag)
     return {"status": "ok"}
 
 @app.post("/api/project/session")
 def api_save_session(req: SessionRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
-    DataManager().save_session(req.project_path, req.data)
+    _get_dm().save_session(req.project_path, req.data)
     return {"status": "ok"}
 
 @app.post("/api/project/favorites")
@@ -492,16 +492,16 @@ def api_manage_favorites(req: FavoriteRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     if req.action == "add":
-        DataManager().add_to_group(req.project_path, req.group_name, req.file_paths)
+        _get_dm().add_to_group(req.project_path, req.group_name, req.file_paths)
     else:
-        DataManager().remove_from_group(req.project_path, req.group_name, req.file_paths)
+        _get_dm().remove_from_group(req.project_path, req.group_name, req.file_paths)
     return {"status": "ok"}
 
 @app.post("/api/project/settings")
 def update_settings(req: ProjectSettingsRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
-    DataManager().update_project_settings(req.project_path, req.settings)
+    _get_dm().update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
 @app.post("/api/project/tools")
@@ -510,7 +510,7 @@ def update_tools(req: ToolsUpdateRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     try:
-        DataManager().update_custom_tools(req.project_path, req.tools)
+        _get_dm().update_custom_tools(req.project_path, req.tools)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -524,7 +524,7 @@ def get_staging_stats(req: StatsRequest):
     manual_excludes = []
     use_git = True
     if root:
-        proj_data = DataManager().get_project_data(root)
+        proj_data = _get_dm().get_project_data(root)
         ex_str = proj_data.get("excludes", "")
         manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
 
@@ -553,7 +553,7 @@ def update_categories(req: CategoriesUpdateRequest):
     if not get_valid_project_root(req.project_path):
         raise HTTPException(status_code=403, detail="Access denied")
     try:
-        DataManager().update_quick_categories(req.project_path, req.categories)
+        _get_dm().update_quick_categories(req.project_path, req.categories)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -570,7 +570,7 @@ def api_stage_all(req: StageAllRequest):
     
     try:
         items = FileUtils.get_project_items(root, manual_excludes, use_gitignore=True, mode=req.mode)
-        added = DataManager().batch_stage(root, items)
+        added = _get_dm().batch_stage(root, items)
         return {"status": "ok", "added_count": added}
     except Exception as e:
         logger.error(f"Stage All failed: {e}")
@@ -594,7 +594,7 @@ def api_execute_tool(req: ToolExecuteRequest):
         if not project_root:
             raise HTTPException(status_code=403, detail="Access denied")
         
-        proj_config = DataManager().get_project_data(req.project_path)
+        proj_config = _get_dm().get_project_data(req.project_path)
         template = proj_config["custom_tools"].get(req.tool_name)
         if not template:
             raise HTTPException(status_code=404, detail="Tool template not found")
@@ -638,9 +638,10 @@ def collect_paths_api(req: PathCollectionRequest):
     """
     try:
         # Valid Project Root Check for safety
+        # CR-08 Fix: Implement real project validation if root is provided
         if req.project_root:
-            if not PathValidator.is_safe(req.project_root, req.project_root): # Self-safety check
-                 pass # Still allowed for formatting purposes, but might be restricted later
+            if not get_valid_project_root(req.project_root):
+                 raise HTTPException(status_code=403, detail="Unauthorized project root")
         
         res = FormatUtils.collect_paths(req.paths, req.project_root, req.mode, req.separator)
         return {"result": res}

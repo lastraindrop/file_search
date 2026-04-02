@@ -68,7 +68,7 @@ class FileCortexApp:
             else:
                 self.style.theme_use('clam')
         except Exception:
-            pass
+            pass # Standard fallback if themes aren't available
 
         self.style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"))
         self.style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
@@ -659,10 +659,11 @@ class FileCortexApp:
                 self.btn_edit_save.config(state=tk.DISABLED)
             else:
                 try:
-                    with open(full_path, 'r', encoding='utf-8', errors='replace') as f: self.preview_text.insert(tk.END, f.read(PREVIEW_LIMIT))
-                    self.btn_edit_save.config(state=tk.NORMAL)
-                except Exception as e: 
-                    self.preview_text.insert(tk.END, f"错误: {e}")
+                    # CR-14 Fix: Use read_text_smart for consistent encoding detection
+                    content = FileUtils.read_text_smart(full_path, max_bytes=PREVIEW_LIMIT)
+                    self.preview_text.insert(tk.END, content)
+                except Exception as e:
+                    self.preview_text.insert(tk.END, f"--- Error reading file: {e} ---")
                     self.btn_edit_save.config(state=tk.DISABLED)
         else:
              self.preview_text.insert(tk.END, f"目录: {full_path}")
@@ -742,7 +743,9 @@ class FileCortexApp:
         self._add_paths_to_staging([str(self.current_dir / self.tree_search.item(i)['values'][1]) for i in self.tree_search.selection()])
 
     def on_tree_double_click(self, event):
-        p = self.get_tree_path(self.tree_proj.selection()[0])
+        sel = self.tree_proj.selection()
+        if not sel: return
+        p = self.get_tree_path(sel[0])
         if p: self._add_paths_to_staging([str(p)])
 
     def clear_staging(self):
@@ -978,7 +981,12 @@ class FileCortexApp:
         msg = f"确定要永久删除这 {len(paths)} 个项目吗？" if len(paths) > 1 else f"确定要永久删除:\n{paths[0].name} ?"
         if messagebox.askyesno("确认批量删除", msg):
             try:
-                for p in paths: FileOps.delete_file(str(p))
+                for p in paths:
+                    # CR-09 Fix: Security validation
+                    if not PathValidator.is_safe(str(p), str(self.current_dir)):
+                        logger.warning(f"Blocking unsafe desktop delete: {p}")
+                        continue
+                    FileOps.delete_file(str(p))
                 self.load_project(str(self.current_dir))
             except Exception as e: messagebox.showerror("错误", f"删除中断: {str(e)}")
 
@@ -990,6 +998,13 @@ class FileCortexApp:
         if dst_dir:
             try:
                 for p in paths: 
+                    # CR-09 Fix: Security validation for src and dst
+                    if not PathValidator.is_safe(str(p), str(self.current_dir)):
+                        continue
+                    if not PathValidator.is_safe(dst_dir, str(self.current_dir)):
+                        messagebox.showerror("错误", "目标路径不在项目根目录下，禁止跨项目移动。")
+                        return
+                    
                     if str(p.parent) != dst_dir: FileOps.move_file(str(p), dst_dir)
                 self.load_project(str(self.current_dir))
             except Exception as e: messagebox.showerror("错误", f"移动中断: {str(e)}")
@@ -1311,4 +1326,4 @@ class DuplicateFinderWindow(tk.Toplevel):
         self.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk(); ttk.Style().theme_use('clam'); app = FileCortexApp(root); root.mainloop()
+    root = tk.Tk(); app = FileCortexApp(root); root.mainloop()

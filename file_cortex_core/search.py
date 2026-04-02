@@ -25,7 +25,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
     search_text_processed = search_text.strip() if case_sensitive else search_text.lower().strip()
     # Merge raw search_text (split into keywords) and positive_tags
     all_pos = positive_tags.copy() if positive_tags else []
-    if search_text_processed:
+    if search_text_processed and search_text_processed not in ('.', '..'):
         for kw in search_text_processed.split():
             if kw not in all_pos:
                 all_pos.append(kw)
@@ -56,7 +56,10 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
 
     def match_name(name, rel_path=None):
         # Allow empty search_text if tags are present
-        if not (search_text_processed or plain_pos or regex_pos or all_neg) or search_text_processed in ('.', '..'): 
+        # CR-05 Fix: Restore empty query check while allowing tags to proceed
+        if not (search_text_processed or plain_pos or regex_pos or all_neg):
+            found = False
+        elif search_text_processed in ('.', '..') and not (plain_pos or regex_pos or all_neg):
             found = False
         else:
             target_name = name if case_sensitive else name.lower()
@@ -89,23 +92,20 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             limit = max_size_mb * 1024 * 1024
             if path.stat().st_size > limit:
                 return False
-            if FileUtils.is_binary(path):
-                return False
+            # CR-13 Fix: Use read_text_smart for consistent encoding handling and OOM safety
+            content = FileUtils.read_text_smart(path)
+            found = False
+            for line in content.splitlines():
+                if search_mode == 'regex' and re_obj:
+                    if re_obj.search(line):
+                        found = True
+                        break
+                elif search_mode == 'content':
+                    if search_text_processed in (line if case_sensitive else line.lower()):
+                        found = True
+                        break
             
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    found = False
-                    if search_mode == 'regex' and re_obj:
-                        found = re_obj.search(line) is not None
-                    elif search_mode == 'content':
-                        line_to_check = line if case_sensitive else line.lower()
-                        found = search_text_processed in line_to_check
-                    
-                    if found:
-                        return True != is_inverse
-            return False != is_inverse
-        except PermissionError:
-            return False
+            return found != is_inverse
         except Exception as e:
             logger.error(f"Error reading file {path}: {e}")
             return False
@@ -156,7 +156,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                             break
                     continue # Skip content check for path-focused modes
                 
-                if search_mode in ('content', 'regex') and search_text:
+                # CR-02 Fix: Only run content search for 'content' mode. 
+                # 'regex' mode handles filename matches at L145 and we should not double-count.
+                if search_mode == 'content' and search_text:
                     if stop_event and stop_event.is_set():
                         break
                     

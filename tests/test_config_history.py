@@ -1,8 +1,8 @@
 from file_cortex_core.config import DataManager
 from file_cortex_core.security import PathValidator
 
-def test_workspace_history_logic():
-    dm = DataManager()
+def test_workspace_history_logic(clean_config):
+    dm = clean_config
     # Reset for test
     dm.data["recent_projects"] = []
     dm.data["pinned_projects"] = []
@@ -29,8 +29,8 @@ def test_workspace_history_logic():
     dm.toggle_pinned(path1)
     assert path1 not in dm.data["pinned_projects"]
 
-def test_workspaces_summary():
-    dm = DataManager()
+def test_workspaces_summary(clean_config):
+    dm = clean_config
     # Mock some existing paths
     cur_dir = PathValidator.norm_path(".")
     dm.data["pinned_projects"] = [cur_dir]

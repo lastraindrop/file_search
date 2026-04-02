@@ -144,7 +144,7 @@ class DataManager:
         from .security import PathValidator
         try:
             p = PathValidator.norm_path(path)
-        except:
+        except Exception:
             p = path
             
         if p in self.data["pinned_projects"]:

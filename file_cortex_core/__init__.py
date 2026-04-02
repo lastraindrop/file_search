@@ -6,9 +6,7 @@ from .search import search_generator, SearchWorker
 from .duplicate import DuplicateWorker
 
 __all__ = [
-    "DataManager", "logger", "get_app_dir",
-    "PathValidator",
-    "FileUtils", "FormatUtils", "ContextFormatter", "NoiseReducer",
-    "FileOps", "ActionBridge",
-    "search_generator", "SearchWorker"
+    "DataManager", "FileUtils", "SearchWorker", "FileOps", 
+    "ActionBridge", "PathValidator", "ContextFormatter", "FormatUtils", "DuplicateWorker",
+    "logger"
 ]

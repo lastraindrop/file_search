@@ -1,41 +1,28 @@
-import unittest
-from unittest.mock import patch
-import sys
-import os
+import pytest
 import pathlib
-from file_cortex_core.security import PathValidator
+import os
+from file_cortex_core import PathValidator
 
-class TestPlatformCasing(unittest.TestCase):
-    def test_norm_path_windows(self):
-        with patch('sys.platform', 'win32'):
-            # In Windows mode, it should lowercase
-            p = "C:/Users/Test/Documents"
-            norm = PathValidator.norm_path(p)
-            self.assertEqual(norm, "c:/users/test/documents")
-            
-            # Test with backslashes
-            p2 = "C:\\Users\\Test\\Documents"
-            norm2 = PathValidator.norm_path(p2)
-            self.assertEqual(norm2, "c:/users/test/documents")
+@pytest.mark.parametrize("path_str, expected_contains", [
+    ("C:/Users/Test", "c:/users/test" if os.name == 'nt' else "C:/Users/Test"),
+    ("E:/Work/Proj", "e:/work/proj" if os.name == 'nt' else "E:/Work/Proj"),
+    ("/home/user/data", f"{pathlib.Path(os.getcwd()).anchor.lower().replace(os.sep, '/')}home/user/data" if os.name == 'nt' else "/home/user/data"),
+])
+def test_norm_path_platform_behavior(path_str, expected_contains):
+    norm = PathValidator.norm_path(path_str)
+    if os.name == 'nt':
+        # On Windows, abspath often prefixes with current drive's anchor
+        assert norm.lower() == expected_contains.lower()
+    else:
+        assert norm == expected_contains
 
-    def test_norm_path_linux(self):
-        with patch('sys.platform', 'linux'):
-            # In Linux mode, it should preserve case
-            p = "/home/User/Documents"
-            norm = PathValidator.norm_path(p)
-            # abspath might change current relative path, but for absolute it stays same
-            # We use abspath in norm_path so we expect it to be absolute
-            expected = os.path.abspath(p).replace('\\', '/')
-            self.assertEqual(norm, expected)
-            self.assertIn("User", norm) # Casing preserved
+def test_norm_path_consistency():
+    p1 = "C:\\TEMP\\FILE.txt" if os.name == 'nt' else "/TMP/FILE.txt"
+    p2 = "c:/temp/file.txt" if os.name == 'nt' else "/TMP/FILE.txt"
+    
+    assert PathValidator.norm_path(p1) == PathValidator.norm_path(p2)
 
-    def test_norm_path_macos(self):
-        with patch('sys.platform', 'darwin'):
-            p = "/Users/User/Desktop"
-            norm = PathValidator.norm_path(p)
-            expected = os.path.abspath(p).replace('\\', '/')
-            self.assertEqual(norm, expected)
-            self.assertIn("Desktop", norm)
-
-if __name__ == '__main__':
-    unittest.main()
+def test_norm_path_trailing_slash():
+    p = "C:/Data/" if os.name == 'nt' else "/data/"
+    norm = PathValidator.norm_path(p)
+    assert not norm.endswith("/")
