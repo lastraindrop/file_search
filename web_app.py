@@ -660,9 +660,15 @@ def api_terminate_process(req: ProcessTerminateRequest):
                     import subprocess
                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(req.pid)], capture_output=True)
                 else:
-                    os.kill(req.pid, signal.SIGTERM)
+                    # Kill entire process group on Unix
+                    os.killpg(os.getpgid(req.pid), signal.SIGTERM)
                 return {"status": "ok"}
             except Exception as e:
+                # Fallback to single PID signal if killpg fails (unlikely if created correctly)
+                try: 
+                    os.kill(req.pid, signal.SIGTERM)
+                    return {"status": "ok", "msg": f"killpg failed, used fallback kill: {e}"}
+                except: pass
                 return {"status": "error", "msg": str(e)}
         else:
             return {"status": "error", "msg": "Process not found or already finished"}

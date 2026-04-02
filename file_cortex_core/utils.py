@@ -11,6 +11,14 @@ from .config import logger
 
 class FormatUtils:
     @staticmethod
+    def format_number(val):
+        """Format number with thousands separator."""
+        try:
+            return f"{int(val):,}"
+        except (ValueError, TypeError):
+            return str(val)
+
+    @staticmethod
     def format_size(size_bytes):
         if size_bytes < 1024:
             return f"{size_bytes} B"

@@ -28,3 +28,6 @@ mypy_cache/
 # App Data
 .ai_context_workbench/
 config.json
+
+# Other
+code_review.txt

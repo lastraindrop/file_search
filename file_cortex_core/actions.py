@@ -136,8 +136,11 @@ class FileOps:
                 f.write(content)
             os.replace(temp_path, path)
         except Exception as e:
-            if temp_path.exists():
-                temp_path.unlink()
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception: # Block double failure
+                pass
             raise e
         return True
 
@@ -316,7 +319,8 @@ class ActionBridge:
             return subprocess.Popen(
                 final_cmd, shell=False,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, encoding='utf-8', errors='replace'
+                text=True, bufsize=1, encoding='utf-8', errors='replace',
+                start_new_session=True
             )
 
     @staticmethod

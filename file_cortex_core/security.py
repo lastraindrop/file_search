@@ -25,28 +25,31 @@ class PathValidator:
 
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
-        """Canonicalize path: absolute, lowercase, posix-style, and trail-slash standardized."""
+        """Canonicalize path: absolute, platform-aware casing, posix-style, and trail-slash standardized."""
         if not p:
             return ""
         try:
-            # Use os.path.abspath for industrial-strength determinism on Windows
-            p_str = os.path.abspath(str(p)).replace('\\', '/').lower()
+            # os.path.abspath for industrial-strength determinism
+            p_str = os.path.abspath(str(p)).replace('\\', '/')
             
-            # Protection for UNC/Long paths on Windows
-            if p_str.startswith('//?/'):
-                return p_str.rstrip('/')
-            
-            # Unix root: '/'
-            if p_str == '/':
-                return '/'
-            # Windows drive root: 'c:/'
-            if len(p_str) == 3 and p_str[1:3] == ':/':
-                return p_str
+            if sys.platform == 'win32':
+                p_str = p_str.lower()
+                # Protection for UNC/Long paths on Windows
+                if p_str.startswith('//?/'):
+                    return p_str.rstrip('/')
+                # Windows drive root: 'c:/'
+                if len(p_str) == 3 and p_str[1:3] == ':/':
+                    return p_str
+            else:
+                # Unix root: '/'
+                if p_str == '/':
+                    return '/'
             
             # Standard paths: remove trailing slash
             return p_str.rstrip('/')
         except Exception:
-            s = str(p).lower().replace('\\', '/')
+            s = str(p).replace('\\', '/')
+            if sys.platform == 'win32': s = s.lower()
             if s == '/': return '/'
             if len(s) == 3 and s[1:3] == ':/': return s
             return s.rstrip('/')

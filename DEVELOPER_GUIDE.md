@@ -38,9 +38,14 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **参数动态对齐协议 (Parameter Alignment Protocol - v5.7)**: 
     - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。这是为了在调用 `FileUtils.flatten_paths` 时能够动态定位 `.gitignore` 过滤器，确保前端统计与后端处理的过滤逻辑达到 100% 同步。
     - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。该方法限制了编码采样的最大字节数，并在读取前进行二进制检测，防止因读取 GB 级日志而发生 OOM 崩溃。
+    - **UI 回调防御 (Audit Fix - v5.7.1)**: 为了防止 Tkinter 回调中的 `AttributeError` 导致界面静默失效，所有 UI 渲染回调（如 `_update_stats_ui`）必须包含 `try...except` 保护，且依赖的工具类方法必须由核心库 `FormatUtils` 统一维护，严禁在 UI 层自行拼接复杂的数值格式。
 
-### 5. 并发控制模型 (Concurrency Control Model - v5.7)
+### 5. 并发控制与资源生命周期 (Concurrency & Lifecycle - v5.7.1)
 *   **单例原子锁 (Atomic Singleton Lock)**: `DataManager` 在 `__new__` 阶段实现了双重检查锁定，且所有写操作均由 `self._lock` (RLock) 保护，严禁在高并发循环中直接读写私有成员。
+*   **资源强制回收原则**: 所有的搜索生成器 (`search_generator`) 必须在 `finally` 块中对挂起的 `content_futures` 执行 `f.cancel()`，确保在生成器关闭或异常退出时，线程池任务能够被立即回收。
+*   **Unix 进程树清理机制**:
+    - **隔离执行**: 外部工具必须通过 `ActionBridge.create_process` 启动，且非 Windows 环境下强制启用 `start_new_session=True` 以启用进程组治理。
+    - **分级终止**: 优先使用 `os.killpg(os.getpgid(pid), signal.SIGTERM)` 杀掉整个进程组，仅在失败时回退至单 PID 或单信号模式。
 *   **Web 路由线程策略**:
     - **同步 `def` 路由**: 适用于所有 I/O 密集型操作（如文件读取、重命名、归档）。FastAPI 会在独立线程池中执行这些路由，避免阻塞主事件循环。
     - **异步 `async def` 路由**: 仅适用于纯 CPU 逻辑、单纯的数据库查询或 Websocket 握手，严禁在其中执行阻塞式 `os` 或 `pathlib` 调用。

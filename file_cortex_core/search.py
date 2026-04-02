@@ -223,7 +223,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 pass
     finally:
         # Shutdown search quickly if generator is closed
-        # We ensure all remaining tasks in content_futures are cleared from our tracking
+        for f in content_futures:
+            if not f.done():
+                f.cancel()
         content_futures.clear()
 
 class SearchWorker(threading.Thread):

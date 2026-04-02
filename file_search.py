@@ -50,13 +50,33 @@ class FileCortexApp:
                 from file_cortex_core import logger
                 logger.error(f"Failed to auto-load last project {last_dir}: {e}")
             
-        self.root.after(SEARCH_POLL_MS, self.process_queue)
+        # self.root.after(SEARCH_POLL_MS, self.process_queue) -> Moved to trigger_search for efficiency
 
     def _init_ui(self):
+        self._setup_styles()
         self._init_menu()
         self._init_top_bar()
         self._init_main_body()
         self._init_status_bar()
+
+    def _setup_styles(self):
+        self.style = ttk.Style()
+        # Ensure we use a modern base if available, but keep it robust
+        try:
+            if sys.platform == 'win32':
+                self.style.theme_use('vista')
+            else:
+                self.style.theme_use('clam')
+        except Exception:
+            pass
+
+        self.style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"))
+        self.style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
+        self.style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
+        
+        # Consistent fonts for scrolledtext
+        self.mono_font = ("Consolas", 10)
+        self.ui_font = ("Segoe UI", 9)
 
     def _init_top_bar(self):
         top_bar = ttk.Frame(self.root, padding=5)
@@ -157,8 +177,7 @@ class FileCortexApp:
         tree_container.pack(fill=tk.BOTH, expand=True)
         
         self.tree_search = ttk.Treeview(tree_container, columns=("file", "path", "size", "mtime", "ext"), show="headings", selectmode="extended")
-        # Using tk.Scrollbar for maximum cross-platform visibility (older style but reliable)
-        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_search.yview, width=16)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree_search.yview)
         self.tree_search.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree_search.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -181,7 +200,7 @@ class FileCortexApp:
         tree_container = ttk.Frame(self.tab_tree_frame)
         tree_container.pack(fill=tk.BOTH, expand=True)
         self.tree_proj = ttk.Treeview(tree_container, show="tree", selectmode="extended")
-        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_proj.yview, width=16)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree_proj.yview)
         self.tree_proj.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree_proj.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -198,7 +217,7 @@ class FileCortexApp:
         tree_container = ttk.Frame(self.tab_fav)
         tree_container.pack(fill=tk.BOTH, expand=True)
         self.tree_fav = ttk.Treeview(tree_container, columns=("path",), show="tree", selectmode="extended")
-        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_fav.yview, width=16)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree_fav.yview)
         self.tree_fav.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree_fav.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -209,7 +228,7 @@ class FileCortexApp:
         tree_container.pack(fill=tk.BOTH, expand=True)
         
         self.tree_staging = ttk.Treeview(tree_container, columns=("path", "size"), show="tree headings", selectmode="extended")
-        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree_staging.yview, width=16)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree_staging.yview)
         self.tree_staging.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree_staging.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -429,11 +448,17 @@ class FileCortexApp:
         self.populate_tree(root_node, self.current_dir)
 
     def update_stats(self):
-        """Recursively calculate staging stats in a background thread."""
+        """Recursively calculate staging stats in a background thread with debouncing."""
         if not self.current_dir:
             return
         
+        if hasattr(self, '_stats_timer') and self._stats_timer:
+            self.root.after_cancel(self._stats_timer)
+        
         self.lbl_stats.config(text="清单: 正在计算...")
+        self._stats_timer = self.root.after(300, self._run_stats_calc_thread)
+
+    def _run_stats_calc_thread(self):
         def run_calc():
             try:
                 ex_str = self.exclude_var.get()
@@ -462,7 +487,10 @@ class FileCortexApp:
         threading.Thread(target=run_calc, daemon=True).start()
 
     def _update_stats_ui(self, item_count, file_count, token_count):
-        self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens")
+        try:
+            self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens")
+        except Exception as e:
+            logger.error(f"UI Stats update error: {e}")
 
     def add_search_tag(self, *args):
         txt = self.search_var.get().strip()
@@ -550,6 +578,7 @@ class FileCortexApp:
                                          positive_tags=list(self.positive_tags),
                                          negative_tags=list(self.negative_tags))
         self.search_thread.start()
+        self.process_queue() # Trigger queue processing
 
     def process_queue(self):
         try:
@@ -558,7 +587,7 @@ class FileCortexApp:
                 res = self.result_queue.get_nowait()
                 if isinstance(res, tuple) and res[0] == "DONE":
                     self.lbl_status.config(text=f"就绪 ({len(self.tree_search.get_children())}项)")
-                    break
+                    return # Stop polling cycle
                 
                 path_str = res["path"]
                 p = pathlib.Path(path_str)
@@ -575,8 +604,13 @@ class FileCortexApp:
                     res["ext"]
                 ))
                 processed_in_this_tick += 1
-        except queue.Empty: pass
-        self.root.after(SEARCH_POLL_MS, self.process_queue)
+            
+            # Re-register if not done and queue not explicitly stalled (optional safety)
+            self.root.after(SEARCH_POLL_MS, self.process_queue)
+        except queue.Empty: 
+            # If search is still running, keep polling
+            if self.search_thread and self.search_thread.is_alive():
+                self.root.after(SEARCH_POLL_MS, self.process_queue)
 
     def sort_tree_column(self, tree, col, reverse):
         l = [(tree.set(k, col), k) for k in tree.get_children('')]
@@ -1091,7 +1125,7 @@ class BatchRenameWindow(tk.Toplevel):
         self.tree.column("new", width=250)
         self.tree.column("status", width=120)
         
-        vsb = tk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1215,27 +1249,34 @@ class DuplicateFinderWindow(tk.Toplevel):
     def poll_results(self):
         try:
             while True:
-                res = self.result_queue.get_nowait()
-                if isinstance(res, tuple):
-                    if res[0] == "DONE":
-                        self.lbl_head.config(text=f"✅ 扫描完成: 发现 {len(self.duplicate_groups)} 组重复文件")
-                        self.btn_delete.config(state=tk.NORMAL)
-                    elif res[0] == "ERROR":
-                        messagebox.showerror("错误", f"扫描失败: {res[1]}")
-                        self.destroy()
-                    return
-                
-                h = res["hash"]
-                sz_fmt = FormatUtils.format_size(res["size"])
-                group_id = self.tree.insert("", "end", text=f"📦 Group {h[:8]} ({sz_fmt})", open=True)
-                self.duplicate_groups[h] = res["paths"]
-                
-                for p_str in res["paths"]:
-                    p = pathlib.Path(p_str)
-                    rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
-                    self.tree.insert(group_id, "end", text=f"📄 {rel}", values=(p_str, sz_fmt))
-        except queue.Empty:
-            pass
+                try:
+                    res = self.result_queue.get_nowait()
+                    if isinstance(res, tuple):
+                        if res[0] == "DONE":
+                            self.lbl_head.config(text=f"✅ 扫描完成: 发现 {len(self.duplicate_groups)} 组重复文件")
+                            self.btn_delete.config(state=tk.NORMAL)
+                        elif res[0] == "ERROR":
+                            messagebox.showerror("错误", f"扫描失败: {res[1]}")
+                            self.destroy()
+                        return
+                    
+                    h = res["hash"]
+                    sz_fmt = FormatUtils.format_size(res["size"])
+                    group_id = self.tree.insert("", "end", text=f"📦 Group {h[:8]} ({sz_fmt})", open=True)
+                    self.duplicate_groups[h] = res["paths"]
+                    
+                    for p_str in res["paths"]:
+                        p = pathlib.Path(p_str)
+                        rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
+                        self.tree.insert(group_id, "end", text=f"📄 {rel}", values=(p_str, sz_fmt))
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    logger.error(f"Duplicate result processing error: {e}")
+                    continue
+        except Exception as e:
+            logger.error(f"Poll results loop failure: {e}")
+            
         self.after(200, self.poll_results)
 
     def delete_selected(self):
