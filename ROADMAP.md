@@ -50,6 +50,8 @@
 - [x] **[DONE] 智能轮询关闭 (Idle Stop)**: 消息队列实时监控搜索状态，任务结束立即切断轮询，降低系统空闲功耗。
 - [x] **[DONE] Unix 进程组治理**: 外部工具启动采用 `start_new_session`，并配合 `killpg` 实现子进程树的彻底清理。
 - [x] **[DONE] 二级 UI 加固**: 全面修补 `AttributeError` 类回调风险，统一升级为 `ttk.Scrollbar` 体系。
+- [x] **[DONE] 局部化测试沙箱 (Localized Test Sandbox)**: 将 pytest 临时文件夹由系统 Temp 迁移至项目本地 `tests/tmp_tests`，规避 Windows `PermissionError` 并提升大文件 I/O 稳定性。
+- [x] **[DONE] 增强编码感知识别 (Smart Encoding Detection)**: 强化了 `read_text_smart` 在 CJK (GBK) 环境下的内容识别率，并增加了二进制文件的防御性回退。
 
 ## 📍 阶段 3：RAG 适配与多端协作 (2026 Q3 目标)
 - [ ] **结构化导出 (RAG-Ready)**: 支持将搜集内容一键打包为 JSONL 或专为 RAG 模型优化的 Embedding 数据包。

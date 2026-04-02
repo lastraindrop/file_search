@@ -244,11 +244,19 @@ class FileUtils:
             from charset_normalizer import from_bytes
             # Only read header for encoding detection to prevent OOM
             with open(file_path, 'rb') as f:
-                header = f.read(32768)
-            results = from_bytes(header).best()
-            encoding = results.encoding if results else 'utf-8'
+                header = f.read(65536) # Increased header size for better detection
+            
+            best_match = from_bytes(header).best()
+            # charset-normalizer might return None if no high-confidence match
+            if best_match and best_match.encoding:
+                encoding = best_match.encoding
+            else:
+                # Fallback heuristic for common CJK/Legacy encodings if utf-8 fails
+                encoding = 'utf-8'
+            
             return file_path.read_text(encoding=encoding, errors='ignore')
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Smart read failed for {file_path}: {e}")
             pass
         # Fallback to utf-8 ignore
         return file_path.read_text('utf-8', 'ignore')
