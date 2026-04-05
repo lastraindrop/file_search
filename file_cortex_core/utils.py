@@ -39,12 +39,16 @@ class FormatUtils:
     @staticmethod
     def estimate_tokens(text: str) -> int:
         """
-        Refined token estimation (approx 4 chars/token for code).
-        Can be improved in future with BPE or professional libraries.
+        Weighted token estimation:
+        - ASCII/Latin (code): ~4 chars per token
+        - Non-ASCII (CJK/Unicode): ~1.5 chars per token for modern models
         """
         if not text:
             return 0
-        return len(text) // 4
+        # Calculate non-ascii count (approximate CJK/symbols)
+        non_ascii = len([c for c in text if ord(c) > 127])
+        ascii_count = len(text) - non_ascii
+        return int((ascii_count / 4) + (non_ascii / 1.5))
 
     @staticmethod
     def collect_paths(paths, root_dir=None, mode='relative', separator='\n', file_prefix='', dir_suffix=''):

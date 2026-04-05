@@ -8,9 +8,11 @@
 为了防止路径越权 (Path Traversal) 和 命令注入 (Command Injection)，本项目采用了严格的校验机制：
 *   **路径权限注册制**: 只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
 *   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env` 等系统及敏感目录的访问。
-*   **ActionBridge 安全执行 (v5.8)**: 
-    *   **Windows**: 默认对不含 Shell 元字符 (`&|<>^%`) 的模板采用 `shell=False` 列表模式执行，彻底杜绝注入。若模板包含元字符或由 `execute_tool` 触发 Fallback，则切换至 `shell=True`。**v5.8 引入了环境变量注入拦截**：若在 `shell=True` 模式下检测到参数包含 `%` 符号，系统将强制报错以防 RCE。
-    *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发，符合 POSIX 安全标准。
+*   **ActionBridge 安全执行 (v5.8.1)**: 
+    *   **Windows**: 默认对不含 Shell 元字符 (`&|<>^%`) 的模板采用 `shell=False` 列表模式。**v5.8.1 引入了智能内置命令识别**：系统会自动检测第一个单词（如 `echo`, `dir`），并先剥离其可能的引号，再调用 `shutil.which`。若未找见可执行文件，则标记为内置命令并 fallback 到 `shell=True`。
+    *   **注入防御 (v5.8.1)**：在启用 `shell=True` 时，ActionBridge 会自动将参数中的 `%` 符号转义为 `%%`。这确保了用户文件名中的特殊字符会被原文传递至外部工具，而不会被 CMD 环境变量扩展。
+    *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发。
+*   **API 前端通信 (App._fetch)**: 前端 `app.js` 现已强制要求所有异步请求通过 `App._fetch` 枢纽，实现自动的 4xx/5xx 状态码拦截、JSON 响应解构及全局加载状态一致性。
 *   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
 *   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
 *   **专用配置 API (v5.3)**: `custom_tools` 与 `quick_categories` 已移至专用端点 (`/api/project/tools`, `/api/project/categories`)，并增加了格式校验与路径穿越防护，彻底切断了通过 settings 注入实现 RCE 的可能性。

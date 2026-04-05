@@ -97,10 +97,13 @@ const App = {
 
     loadWorkspaces: async () => {
         try {
-            const res = await fetch('/api/workspaces');
+            const res = await App._fetch('/api/workspaces');
             const data = await res.json();
             App.renderWorkspaces(data);
-        } catch (e) { console.error("Failed to load workspaces", e); }
+        } catch (e) { 
+            console.error("Failed to load workspaces", e);
+            App.showToast("Connection failed: " + e.message, 'danger');
+        }
     },
 
     renderWorkspaces: (data) => {
@@ -266,7 +269,7 @@ const App = {
                 const isHidden = childrenContainer.style.display === 'none';
                 if (isHidden && !loaded) {
                     try {
-                        const res = await fetch('/api/fs/children', {
+                        const res = await App._fetch('/api/fs/children', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ path: node.path })
@@ -275,7 +278,9 @@ const App = {
                         childrenContainer.innerHTML = '';
                         data.children.forEach(child => childrenContainer.appendChild(App.renderTree(child)));
                         loaded = true;
-                    } catch (err) { console.error(err); }
+                    } catch (err) { 
+                        App.showToast("Failed to expand directory: " + err.message, 'danger');
+                    }
                 }
                 childrenContainer.style.display = isHidden ? 'block' : 'none';
             };

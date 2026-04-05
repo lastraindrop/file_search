@@ -1,6 +1,6 @@
-# FileCortex v5.8.0 Production (工作区编排助手)
+# FileCortex v5.8.2 Production (工作区编排助手)
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、执行自动化脚本、进行快速分类，并能一键导出结构化的上下文以供 AI 辅助编程使用。v5.8.0 版本引入了环境变量注入防御、非侵入式反馈流及工业级并发加固。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、执行自动化脚本、进行快速分类，并能一键导出结构化的上下文以供 AI 辅助编程使用。v5.8.2 版本引入了 CJK 加权 Token 预估、后端全局异常监控及前端网络层标准化改进。
 
 ## 🌟 核心理念
 *   **Orchestration over Collection**: 从简单的“收集”进化为对工作区的“编排”。
@@ -8,19 +8,20 @@
 ## 🌟 主要功能
 - **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**通过 Path Casing 适配实现 100% 跨平台一致性**。
 - **微内核架构 (v5.2)**：核心逻辑已完全迁移至 `file_cortex_core/` 包，支持作为库被第三方调用。
-- **AI 上下文增强**：集成 **Token 实时估算 (FormatUtils)**、**Token 预算预警** 与 **Prompt 自动化模板**。
-- **路径搜集预设 (v5.9)**：支持自定义文件前缀 (Prefix) 与 目录后缀 (Suffix)，内置 GPT/RAG 多套搜集预设。
-- **路径搜集预设 (v5.8.0)**：支持自定义文件前缀 (Prefix) 与 目录后缀 (Suffix)，内置 GPT/RAG 多套搜集预设。
+- **AI 上下文增强 (v5.8.2)**：集成 **中日韩加权 Token 估算 (FormatUtils)**、**Token 预算预警** 与 **Prompt 自动化模板**。
+- **路径搜集预设 (v5.8.2)**：支持自定义文件前缀 (Prefix) 与 目录后缀 (Suffix)，内置 GPT/RAG 多套搜集预设。
 - **高性能加载**：网页版支持目录懒加载、**自适应并发多线程搜索** 及 **二进制检测 Fast-path**。
-- **ActionBridge 注入拦截 (v5.8.0)**：针对 Windows 环境下的环境变量注入 (`%`) 实施强制审计，提升 RCE 抵御能力。
-- **智能化清单过滤 (v5.8.0)**：支持清单内容的实时搜索过滤与批量按类移除。
+- **ActionBridge 指令加固 (v5.8.2)**：自动识别 Windows 内置指令 (Echo/Dir)，支持环境变量转义 (`%%`)，彻底杜绝注入扩展风险。
+- **智能化清单过滤器 (v5.8.0)**：支持清单内容的实时搜索过滤与批量按类移除。
 - **预览区内容检索 (v5.8.0)**：桌面端预览支持 `Ctrl+F` 高亮关键词查找。
 - **ActionBridge 异步流 (Real-time Streaming)**：支持外部编排工具的 `stdout` 实时推送。
 - **原子化持久化与自愈**：内核级项目配置 Schema 自动对齐、**线程安全单例模型 (RLock)** 及 原子化写入。
 - [x] **[DONE] Windows 测试沙箱化**: 彻底解决了 Windows `PermissionError`，实现了残留进程递归杀伤与基准目录 `.pytest_temp_safe` 隔离。
-- [x] **[DONE] 增量生产加固 (v5.8.0)**: 
-    - 修复了 DataManager 方法级原子锁缺失。
-    - 修复了 Web API `KeyError` 分崩。
+- [x] **[DONE] 增量生产加固 (v5.8.2)**: 
+    - 引入了 CJK 权重补偿，Token 计数更精准。
+    - 统一了前端 Fetch 网络层 (`App._fetch`) 错误处理。
+    - 实现了 FastAPI 全局异常 JSON 响应劫持。
+    - 优化了 Windows 内置指令执行 fallback 逻辑。
     - 强化了 Context 导出 OOM 保护 (1MB 限制)。
     - 增加了敏感目录 (.git, .env) 注册拦截。
     - 提升了搜索生成器资源回收效率与 atexit 线程池清理。

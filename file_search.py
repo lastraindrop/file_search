@@ -16,7 +16,7 @@ SEARCH_POLL_MS = 100    # Queue polling interval
 class FileCortexApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("FileCortex v5.8.0 Production | 工业级分析助手")
+        self.root.title("FileCortex v5.8.2 Production | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()

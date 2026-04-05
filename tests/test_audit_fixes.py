@@ -48,10 +48,15 @@ def test_cr04_action_bridge_refactor():
         cmd, is_shell, ctx = ActionBridge._prepare_execution(template, path, root)
         
         if os.name == 'nt':
-            # On Windows, shlex.split with posix=False used in _prepare_execution should preserve casing 
-            assert [c.lower() for c in cmd] == ["echo", "file.txt", "in", "test"]
-            assert is_shell is False
+            # On Windows, 'echo' is a builtin, so is_shell should be True 
+            # and cmd should be a quoted string
+            assert is_shell is True
+            assert "echo" in cmd.lower()
+            assert "file.txt" in cmd.lower()
+            assert "test" in cmd.lower()
+            assert '%%' not in cmd # No percent to escape here
         else:
+            # Unix behaves as before (list mode)
             assert cmd == ["echo", "file.txt", "in", "test"]
             assert is_shell is False
 

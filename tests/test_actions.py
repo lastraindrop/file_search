@@ -26,9 +26,12 @@ def test_action_bridge_win_quote_injection(mock_project):
     
     import os
     if os.name == 'nt':
-        # On Windows CMD, if % is present, we now strictly block it to prevent injection
-        assert "error" in res["status"]
-        assert "Command injection risk" in res["error"]
+        # On Windows CMD, % is escaped as %% to prevent injection expansion
+        assert res["status"] == "success"
+        # Since we use echo, it will output the escaped string which CMD then handles.
+        # CMD should output a literal %WHOAMI% when it sees %%WHOAMI%%
+        assert "WHOAMI" in res["stdout"]
+        assert "%" in res["stdout"]
     else:
         assert special_name in res["stdout"]
 

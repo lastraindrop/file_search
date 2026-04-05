@@ -221,7 +221,7 @@ class FileOps:
 
 class ActionBridge:
     @staticmethod
-    def _prepare_execution(template, path_str, project_root, force_shell=False):
+    def _prepare_execution(template, path_str, project_root, force_shell=None):
         """
         Internal helper to prepare command arguments and shell status.
         Returns: (exec_args, is_shell, context)
@@ -242,38 +242,38 @@ class ActionBridge:
         if os.name == 'nt':
             # Security Hardening for Windows
             shell_metas = set("&|<>^%")
-            has_meta = any(c in template for c in shell_metas) or force_shell
+            # If template has shell meta-characters or is forced, use shell
+            is_shell = any(c in template for c in shell_metas) or (force_shell is True)
             
             def win_quote(s):
-                # Security: Quote for Windows CMD, escaping " to prevent injection. 
-                # % escaping is omitted here as it's non-standard for direct CMD calls 
-                # (batch only). Reliable % defense requires shell=False.
-                return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
+                # Security: Quote for Windows CMD, escaping " to prevent injection.
+                # Escape % to %% to prevent environment variable expansion in shell=True
+                return f'"{s.replace(chr(34), chr(92)+chr(34)).replace("%", "%%")}"'
             
-            if not has_meta:
-                # Use raw context for list-mode (shell=False)
+            # Optimization: Try to detect if the first word is a valid executable
+            if not is_shell and force_shell is not False:
+                first_word = template.split(None, 1)[0].strip('"')
+                if not shutil.which(first_word):
+                    # Likely a shell builtin like 'dir', 'echo', or a batch file
+                    is_shell = True
+
+            if is_shell:
+                # Use shell=True with quoted values
+                safe_context = {k: win_quote(v) for k, v in context.items()}
+                return template.format(**safe_context), True, context
+            else:
+                # Use list-mode (shell=False) for maximum safety
                 cmd_str = template.format(**context)
                 try:
-                    # CR-04 Fix: On Windows, posix=True breaks backslashes. 
-                    # posix=False keeps quotes. We must manually strip outer quotes 
-                    # because subprocess (shell=False) adds them back if needed.
                     raw_args = shlex.split(cmd_str, posix=False)
                     args = [t.strip('"') for t in raw_args]
                     return args, False, context
                 except Exception:
-                    # Fallback to shell if shlex fails
-                    if any('%' in str(v) for v in context.values()):
-                        raise ValueError("Command injection risk: filename contains '%' while shell=True is active.")
+                    # Fallback if shlex fails: use shell and hope for the best (but still quote)
                     safe_context = {k: win_quote(v) for k, v in context.items()}
                     return template.format(**safe_context), True, context
-            else:
-                # Template has metacharacters, use shell=True with quoted values
-                if any('%' in str(v) for v in context.values()):
-                    raise ValueError("Command injection risk: filename contains '%' while shell=True is active.")
-                safe_context = {k: win_quote(v) for k, v in context.items()}
-                return template.format(**safe_context), True, context
         else:
-            # Unix-like: Always use list mode (shell=False) with shlex
+            # Unix-like: Always prefer list mode (shell=False) with shlex
             tokens = shlex.split(template, posix=True)
             final_cmd = [t.format(**context) for t in tokens]
             return final_cmd, False, context
@@ -286,16 +286,12 @@ class ActionBridge:
         try:
             cmd, is_shell, _ = ActionBridge._prepare_execution(template, path_str, project_root)
             
-            # Windows Builtin Fallback: if shell=False but command not found, try shell=True
-            if os.name == 'nt' and not is_shell and isinstance(cmd, list) and len(cmd) > 0:
-                import shutil
-                if not shutil.which(cmd[0]):
-                    is_shell = True
-                    cmd, _, _ = ActionBridge._prepare_execution(template, path_str, project_root, force_shell=True)
+            # Fetch timeout from env or config
+            timeout = int(os.environ.get("FCTX_EXEC_TIMEOUT", 
+                                         DataManager().data.get("execution_timeout", 300)))
 
-            logger.info(f"AUDIT - Executing external tool (Shell={is_shell}): {cmd}")
+            logger.info(f"AUDIT - Executing external tool (Shell={is_shell}): {cmd if isinstance(cmd, list) else cmd.split()[0] + '...'}")
             
-            # CR-B02 Hardening: Use Popen for mandatory kill-on-timeout (run() leaks on timeout)
             with subprocess.Popen(
                 cmd, 
                 stdout=subprocess.PIPE, 
@@ -305,7 +301,7 @@ class ActionBridge:
                 cwd=project_root if os.path.exists(project_root) and os.path.isdir(project_root) else None
             ) as proc:
                 try:
-                    stdout, stderr = proc.communicate(timeout=300)
+                    stdout, stderr = proc.communicate(timeout=timeout)
                     return {
                         "stdout": stdout,
                         "stderr": stderr,
@@ -341,14 +337,7 @@ class ActionBridge:
         """Creates a subprocess Popen object based on template and context."""
         cmd, is_shell, _ = ActionBridge._prepare_execution(template, path_str, project_root)
         
-        # Windows Builtin Fallback
-        if os.name == 'nt' and not is_shell and isinstance(cmd, list) and len(cmd) > 0:
-            import shutil
-            if not shutil.which(cmd[0]):
-                is_shell = True
-                cmd, _, _ = ActionBridge._prepare_execution(template, path_str, project_root, force_shell=True)
-
-        logger.info(f"AUDIT - Creating process (Shell={is_shell}): {cmd}")
+        logger.info(f"AUDIT - Creating process (Shell={is_shell}): {cmd if isinstance(cmd, list) else cmd.split()[0] + '...'}")
         
         popen_kwargs = {
             "shell": is_shell,

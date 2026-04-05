@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.requests import Request
 from pydantic import BaseModel
 import uvicorn
@@ -14,7 +14,16 @@ import signal
 import threading
 import subprocess
 
-app = FastAPI(title="FileCortex v5.7.1 API")
+app = FastAPI(title="FileCortex v5.8.2 API")
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Fallback handler for unhandled server-side exceptions."""
+    logger.error(f"Global Unhandled Exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "detail": f"Internal Server Error: {str(exc)}"}
+    )
 
 # --- Global State ---
 ACTIVE_PROCESSES = {} # { pid: process_obj }

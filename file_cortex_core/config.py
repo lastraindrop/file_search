@@ -4,6 +4,7 @@ import json
 import threading
 import logging
 import copy
+from .security import PathValidator
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -147,7 +148,6 @@ class DataManager:
 
     def add_to_recent(self, path: str):
         """Adds a project path to the top of recent projects list."""
-        from .security import PathValidator
         try:
             p = PathValidator.norm_path(path)
         except:
@@ -163,7 +163,6 @@ class DataManager:
 
     def toggle_pinned(self, path: str):
         """Toggles the pinned status of a project."""
-        from .security import PathValidator
         try:
             p = PathValidator.norm_path(path)
         except Exception:
@@ -187,7 +186,6 @@ class DataManager:
 
     def get_project_data(self, path_str: str) -> dict:
         """Returns (and initializes if needed) the configuration for a given project."""
-        from .security import PathValidator
         try:
             path_key = PathValidator.norm_path(path_str)
             logger.debug(f"Config Access: Request='{path_str}' -> Key='{path_key}'")
@@ -207,7 +205,6 @@ class DataManager:
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
         """Adds multiple paths to the staging list atomically."""
         with self._lock:
-            from .security import PathValidator
             proj = self.get_project_data(project_path)
             added_count = 0
             for raw_p in paths:
@@ -220,7 +217,6 @@ class DataManager:
 
     def resolve_project_root(self, target_path_str: str) -> str | None:
         """Determines if a given path belongs to any registered project root."""
-        from .security import PathValidator
         try:
             target = PathValidator.norm_path(target_path_str)
             for p_root in self.data["projects"]:
@@ -270,7 +266,6 @@ class DataManager:
 
     def update_project_settings(self, project_path, settings: dict):
         with self._lock:
-            from .security import PathValidator
             proj = self.get_project_data(project_path)
             for k, v in settings.items():
                 if k in self.MUTABLE_SETTINGS:
@@ -311,7 +306,6 @@ class DataManager:
             self.save()
 
     def add_to_group(self, project_path, group_name, file_paths):
-        from .security import PathValidator
         with self._lock:
             proj = self.get_project_data(project_path)
             if group_name not in proj["groups"]:

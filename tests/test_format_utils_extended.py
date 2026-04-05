@@ -44,8 +44,10 @@ def test_estimate_tokens_unicode():
 
 
 def test_estimate_tokens_mixed():
-    """Verify token estimation with mixed content."""
+    """Verify token estimation with mixed content (weighted for CJK)."""
     text = "Hello 你好 World 世界"
     tokens = FormatUtils.estimate_tokens(text)
     assert tokens > 0
-    assert tokens == len(text) // 4
+    # New weighted formula gives 5 for this string: int((13/4) + (4/1.5)) = 5
+    assert tokens > len(text) // 4 
+    assert tokens == 5

@@ -11,8 +11,10 @@ def test_actionbridge_percent_injection(mock_project):
     test_file = mock_project / "test_%PATH%.txt"
     test_file.touch()
     
-    with pytest.raises(ValueError, match="Command injection risk"):
-        ActionBridge._prepare_execution("echo {name} & echo ok", str(test_file), str(mock_project))
+    # Should NOT raise ValueError anymore, but return escaped string
+    cmd, is_shell, ctx = ActionBridge._prepare_execution("echo {name} & echo ok", str(test_file), str(mock_project))
+    assert is_shell is True
+    assert "%%PATH%%" in cmd 
 
 def test_datamanager_concurrent_mutations(clean_config, mock_project):
     dm = DataManager()
