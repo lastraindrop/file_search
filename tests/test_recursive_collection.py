@@ -4,23 +4,11 @@ import os
 import shutil
 from file_cortex_core import FileUtils, ContextFormatter
 
-# CR-22 Fix: Use project-local test sandbox
-TEST_DIR = pathlib.Path("tests/tmp_tests/recursive_temp")
-
-@pytest.fixture(autouse=True)
-def setup_teardown():
-    if TEST_DIR.exists():
-        shutil.rmtree(TEST_DIR)
-    TEST_DIR.mkdir()
-    yield
-    if TEST_DIR.exists():
-        shutil.rmtree(TEST_DIR)
-
-def test_flatten_paths_recursion_and_dedup():
+def test_flatten_paths_recursion_and_dedup(tmp_path):
     """
     Test that flatten_paths correctly expands directories and removes duplicates.
     """
-    root = TEST_DIR / "project"
+    root = tmp_path / "project"
     root.mkdir()
     
     sub = root / "sub"
@@ -43,11 +31,11 @@ def test_flatten_paths_recursion_and_dedup():
     assert any(str(f1.resolve()) in f for f in flattened)
     assert any(str(f2.resolve()) in f for f in flattened)
 
-def test_flatten_paths_with_ignore():
+def test_flatten_paths_with_ignore(tmp_path):
     """
     Test that flatten_paths respects exclusion patterns during expansion.
     """
-    root = TEST_DIR / "project"
+    root = tmp_path / "project"
     root.mkdir()
     
     f_ok = root / "keep.txt"
@@ -66,11 +54,11 @@ def test_flatten_paths_with_ignore():
     assert str(f_ok.resolve()) in flattened[0]
     assert not any(".log" in f for f in flattened)
 
-def test_context_formatter_recursive():
+def test_context_formatter_recursive(tmp_path):
     """
     Test that ContextFormatter.to_markdown recursive expansion works.
     """
-    root = TEST_DIR / "project"
+    root = tmp_path / "project"
     root.mkdir()
     f1 = root / "f1.txt"; f1.write_text("data1")
     
@@ -79,6 +67,3 @@ def test_context_formatter_recursive():
     
     assert "File: f1.txt" in result
     assert "data1" in result
-
-if __name__ == "__main__":
-    pytest.main([__file__])

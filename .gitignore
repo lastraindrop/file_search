@@ -26,6 +26,7 @@ test_recursive_temp/
 
 # Test / Coverage
 .pytest_cache/
+.pytest_tmp/
 .coverage
 htmlcov/
 tests/.pytest_cache/

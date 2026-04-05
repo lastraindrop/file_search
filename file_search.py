@@ -131,20 +131,73 @@ class FileCortexApp:
         
         self.preview_ctrl = ttk.Frame(self.preview_frame)
         self.preview_ctrl.pack(fill=tk.X, pady=(0, 2))
+        
+        # New Search Bar for Preview (Hidden by default)
+        self.search_frame = ttk.Frame(self.preview_ctrl)
+        ttk.Label(self.search_frame, text="🔍 查找:").pack(side=tk.LEFT)
+        self.preview_search_var = tk.StringVar()
+        self.preview_search_entry = ttk.Entry(self.search_frame, textvariable=self.preview_search_var, width=20)
+        self.preview_search_entry.pack(side=tk.LEFT, padx=5)
+        self.preview_search_entry.bind("<Return>", lambda e: self.find_in_preview())
+        self.preview_search_entry.bind("<Escape>", lambda e: self.toggle_preview_search(False))
+        ttk.Button(self.search_frame, text="下一个", command=self.find_in_preview).pack(side=tk.LEFT)
+        ttk.Button(self.search_frame, text="×", width=2, command=lambda: self.toggle_preview_search(False)).pack(side=tk.LEFT, padx=2)
+        
         self.btn_edit_save = ttk.Button(self.preview_ctrl, text="✏️ 开启编辑", command=self.toggle_preview_edit, state=tk.DISABLED)
         self.btn_edit_save.pack(side=tk.RIGHT)
         
         self.preview_text = scrolledtext.ScrolledText(self.preview_frame, font=("Consolas", 10), undo=True)
         self.preview_text.pack(fill=tk.BOTH, expand=True)
         self.preview_text.config(state=tk.DISABLED)
+        
+        self.preview_text.bind("<Control-f>", lambda e: self.toggle_preview_search(True))
+        self.preview_text.tag_config("match", background="yellow", foreground="black")
+
+    def toggle_preview_search(self, show=True):
+        if show:
+            self.search_frame.pack(side=tk.LEFT, padx=5)
+            self.preview_search_entry.focus_set()
+        else:
+            self.search_frame.pack_forget()
+            self.preview_text.tag_remove("match", "1.0", tk.END)
+
+    def find_in_preview(self):
+        query = self.preview_search_var.get()
+        if not query: return
+        
+        # Start searching from the current insert position
+        start_pos = self.preview_text.index(tk.INSERT)
+        pos = self.preview_text.search(query, start_pos, stopindex=tk.END, nocase=True)
+        
+        if not pos:
+            # Wrap around
+            pos = self.preview_text.search(query, "1.0", stopindex=tk.END, nocase=True)
+            
+        if pos:
+            # Highlight and scroll
+            self.preview_text.tag_remove("match", "1.0", tk.END)
+            end_pos = f"{pos}+{len(query)}c"
+            self.preview_text.tag_add("match", pos, end_pos)
+            self.preview_text.mark_set(tk.INSERT, end_pos)
+            self.preview_text.see(pos)
+        else:
+            self.show_status("未找到匹配项", is_error=True)
 
     def _init_status_bar(self):
         self.status_frame = ttk.Frame(self.root, relief=tk.SUNKEN, padding=2)
         self.status_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        self.lbl_status = ttk.Label(self.status_frame, text="就绪")
-        self.lbl_status.pack(side=tk.LEFT)
+        self.lbl_status = ttk.Label(self.status_frame, text="就绪", foreground="#555")
+        self.lbl_status.pack(side=tk.LEFT, padx=5)
+        
         self.lbl_stats = ttk.Label(self.status_frame, text="清单: 0 文件 | 0 Tokens")
-        self.lbl_stats.pack(side=tk.RIGHT)
+        self.lbl_stats.pack(side=tk.RIGHT, padx=5)
+
+    def show_status(self, message, is_error=False):
+        """Displays a non-intrusive status message."""
+        color = "#ef4444" if is_error else "#10b981"
+        self.lbl_status.config(text=message, foreground=color)
+        # Revert color after 3 seconds
+        self.root.after(3000, lambda: self.lbl_status.config(foreground="#555"))
 
     def _init_search_tab(self):
         f = self.tab_search_frame
@@ -224,6 +277,14 @@ class FileCortexApp:
         ttk.Button(self.tab_fav, text="⬇ 载入到清单", command=self.load_group_to_staging).pack(fill=tk.X)
 
     def _init_staging_tab(self):
+        # Filter Entry
+        f_box = ttk.Frame(self.tab_staging, padding=5)
+        f_box.pack(fill=tk.X)
+        ttk.Label(f_box, text="🔍 过滤:").pack(side=tk.LEFT)
+        self.staging_filter_var = tk.StringVar()
+        self.staging_filter_var.trace_add("write", lambda *a: self.refresh_staging_ui(apply_filter=True))
+        ttk.Entry(f_box, textvariable=self.staging_filter_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        
         tree_container = ttk.Frame(self.tab_staging)
         tree_container.pack(fill=tk.BOTH, expand=True)
         
@@ -237,6 +298,14 @@ class FileCortexApp:
         self.tree_staging.column("path", width=0, stretch=False)
         self.tree_staging.heading("size", text="大小"); self.tree_staging.column("size", width=80)
         
+        # Staging Context Menu
+        self.staging_menu = tk.Menu(self.root, tearoff=0)
+        self.staging_menu.add_command(label="移除选中", command=self.remove_staging_selection)
+        self.staging_menu.add_command(label="移除当前过滤出的所有文件", command=self.remove_filtered_from_staging)
+        self.staging_menu.add_separator()
+        self.staging_menu.add_command(label="清空清单", command=self.clear_staging)
+        self.tree_staging.bind("<Button-3>", lambda e: self.staging_menu.post(e.x_root, e.y_root))
+
         act = ttk.Frame(self.tab_staging, padding=5); act.pack(fill=tk.X)
         
         tpl_row = ttk.Frame(act)
@@ -316,7 +385,7 @@ class FileCortexApp:
             self.save_project_settings()
             self.load_project(str(self.current_dir))
         else:
-            messagebox.showinfo("刷新", "请先浏览一个项目。")
+            self.show_status("请先浏览一个项目", is_error=True)
 
     def save_project_settings(self):
         if self.current_proj_config:
@@ -381,7 +450,7 @@ class FileCortexApp:
         try:
             items = FileUtils.get_project_items(str(self.current_dir), manual_excludes, use_gitignore=self.use_gitignore_var.get(), mode=stage_mode)
             added = self.data_mgr.batch_stage(str(self.current_dir), items)
-            messagebox.showinfo("成功", f"已成功添加 {added} 个项目到清单。")
+            self.show_status(f"已成功添加 {added} 个项目到清单")
             self.load_project(str(self.current_dir)) # Refresh UI
         except Exception as e:
             messagebox.showerror("错误", f"全选添加失败: {e}")
@@ -411,7 +480,7 @@ class FileCortexApp:
         if not self.staging_files: return
         try:
             moved = FileOps.batch_categorize(str(self.current_dir), self.staging_files, cat_name)
-            messagebox.showinfo("成功", f"已将 {len(moved)} 个文件移动至 {cat_name}")
+            self.show_status(f"已将 {len(moved)} 个文件移动至 {cat_name}")
             self.clear_staging()
             self.on_refresh()
         except Exception as e:
@@ -486,7 +555,9 @@ class FileCortexApp:
 
     def _update_stats_ui(self, item_count, file_count, token_count):
         try:
-            self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens")
+            threshold = self.current_proj_config.get("token_threshold", 100000)
+            color = "#ef4444" if token_count > threshold else "#555"
+            self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens", foreground=color)
         except Exception as e:
             logger.error(f"UI Stats update error: {e}")
 
@@ -587,22 +658,24 @@ class FileCortexApp:
                     self.lbl_status.config(text=f"就绪 ({len(self.tree_search.get_children())}项)")
                     return # Stop polling cycle
                 
-                path_str = res["path"]
-                p = pathlib.Path(path_str)
-                rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
-                
-                sz_str = FormatUtils.format_size(res['size'])
-                dt = FormatUtils.format_datetime(res['mtime'])
-                
-                self.tree_search.insert("", "end", values=(
-                    ("📁 " if p.is_dir() else "📄 ") + p.name, 
-                    str(rel), 
-                    sz_str,
-                    dt,
-                    res["ext"]
-                ))
-                processed_in_this_tick += 1
-            
+                try:
+                    path_str = res["path"]
+                    p = pathlib.Path(path_str)
+                    rel = p.relative_to(self.current_dir) if self.current_dir in p.parents else p.name
+
+                    sz_str = FormatUtils.format_size(res['size'])
+                    dt = FormatUtils.format_datetime(res['mtime'])
+
+                    self.tree_search.insert("", "end", values=(
+                        ("📁 " if p.is_dir() else "📄 ") + p.name,
+                        str(rel),
+                        sz_str,
+                        dt,
+                        res["ext"]
+                    ))
+                except Exception as e:
+                    logger.error(f"Error processing search result: {e}")
+                processed_in_this_tick += 1            
             # Re-register if not done and queue not explicitly stalled (optional safety)
             self.root.after(SEARCH_POLL_MS, self.process_queue)
         except queue.Empty: 
@@ -693,27 +766,71 @@ class FileCortexApp:
             # Update: Use get_gitignore_spec
             git_spec = FileUtils.get_gitignore_spec(self.current_dir) if self.use_gitignore_var.get() else None
             
-            for entry in sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower())):
-                # Update: pass git_spec
-                rel_path = pathlib.Path(entry.path).relative_to(self.current_dir)
-                if FileUtils.should_ignore(entry.name, rel_path, ex, git_spec): continue
-                
-                node = self.tree_proj.insert(parent_node, "end", text=("📁 " if entry.is_dir() else "📄 ") + entry.name, open=False)
-                if entry.is_dir(): self.tree_proj.insert(node, "end", text="加载中...")
+            with os.scandir(path) as it:
+                for entry in sorted(it, key=lambda e: (not e.is_dir(), e.name.lower())):
+                    # Update: pass git_spec
+                    rel_path = pathlib.Path(entry.path).relative_to(self.current_dir)
+                    if FileUtils.should_ignore(entry.name, rel_path, ex, git_spec): continue
+                    
+                    node = self.tree_proj.insert(parent_node, "end", text=("📁 " if entry.is_dir() else "📄 ") + entry.name, open=False)
+                    if entry.is_dir(): self.tree_proj.insert(node, "end", text="加载中...")
         except Exception: pass
 
     def copy_project_tree(self):
         tree_text = FileUtils.generate_ascii_tree(self.current_dir, self.exclude_var.get(), self.use_gitignore_var.get())
-        self.root.clipboard_clear(); self.root.clipboard_append(tree_text); messagebox.showinfo("成功", "结构已复制")
+        self.root.clipboard_clear(); self.root.clipboard_append(tree_text); self.show_status("结构已复制")
 
-    def refresh_staging_ui(self):
-        self.staging_files.clear()
+    def refresh_staging_ui(self, apply_filter=False):
+        # We don't clear self.staging_files here, only the UI
         for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
+        
         if self.current_proj_config:
             # Data Isolation: pass a COPY of the config list to the UI 
-            # so UI clearing doesn't wipe the config.
             staging_data = list(self.current_proj_config.get("staging_list", []))
-            self._add_paths_to_staging(staging_data, save_to_disk=False)
+            filter_text = self.staging_filter_var.get().lower() if apply_filter else ""
+            
+            # Reset UI cache if not filtering
+            if not apply_filter: self.staging_files.clear()
+
+            for p_raw in staging_data:
+                p_str = PathValidator.norm_path(p_raw)
+                p = pathlib.Path(p_str)
+                
+                if apply_filter and filter_text:
+                    if filter_text not in p.name.lower() and filter_text not in p_str.lower():
+                        continue
+                
+                if not p.exists(): continue
+                
+                if p_str not in self.staging_files:
+                    self.staging_files.append(p_str)
+                
+                sz = p.stat().st_size if p.is_file() else 0
+                sz_str = FormatUtils.format_size(sz)
+                self.tree_staging.insert("", "end", text=("📁 " if p.is_dir() else "📄 ") + p.name, values=(p_str, sz_str))
+        
+        self.update_stats()
+
+    def remove_filtered_from_staging(self):
+        filter_text = self.staging_filter_var.get().lower()
+        if not filter_text: return
+        
+        to_remove = []
+        for p_str in self.staging_files:
+            p = pathlib.Path(p_str)
+            if filter_text in p.name.lower() or filter_text in p_str.lower():
+                to_remove.append(p_str)
+        
+        if to_remove:
+            for p in to_remove:
+                if p in self.staging_files: self.staging_files.remove(p)
+            
+            if self.current_proj_config:
+                self.current_proj_config["staging_list"] = list(self.staging_files)
+                self.data_mgr.save()
+            
+            self.show_status(f"已从清单移除 {len(to_remove)} 个匹配项")
+            self.refresh_staging_ui(apply_filter=True)
 
     def _add_paths_to_staging(self, paths, save_to_disk=True):
         for p_raw in paths:
@@ -787,7 +904,7 @@ class FileCortexApp:
         if final_text:
             self.root.clipboard_clear()
             self.root.clipboard_append(final_text)
-            messagebox.showinfo("完成", "内容已复制")
+            self.show_status("内容已复制")
 
     def update_group_combo(self): self.combo_groups['values'] = list(self.current_proj_config["groups"].keys())
     def on_group_changed(self, e): self.refresh_fav_tree()
@@ -819,7 +936,7 @@ class FileCortexApp:
                 self.preview_text.config(state=tk.DISABLED)
                 self.btn_edit_save.config(text="✏️ 开启编辑")
                 self.preview_frame.config(text="📄 内容预览 (只读)")
-                messagebox.showinfo("成功", "文件保存成功！")
+                self.show_status("文件保存成功")
             except Exception as e:
                 messagebox.showerror("错误", f"保存失败: {e}")
 
@@ -902,7 +1019,7 @@ class FileCortexApp:
     def _show_path_collection_dialog(self, paths):
         dialog = tk.Toplevel(self.root)
         dialog.title("路径搜集与格式化")
-        dialog.geometry("360x280")
+        dialog.geometry("380x420")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -921,26 +1038,64 @@ class FileCortexApp:
         ttk.Radiobutton(main_f, text="项目相对路径 (Relative)", variable=mode_var, value="relative").pack(anchor=tk.W, padx=10)
         ttk.Radiobutton(main_f, text="系统绝对路径 (Absolute)", variable=mode_var, value="absolute").pack(anchor=tk.W, padx=10)
         
-        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+        
+        # Presets
+        p_f = ttk.Frame(main_f)
+        p_f.pack(fill=tk.X, pady=5)
+        ttk.Label(p_f, text="快速预设:").pack(side=tk.LEFT)
+        profiles = self.current_proj_config.get("collection_profiles", {})
+        profile_names = list(profiles.keys())
+        preset_combo = ttk.Combobox(p_f, values=profile_names, state="readonly")
+        preset_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Prefixes & Suffixes
+        sym_f = ttk.Frame(main_f)
+        sym_f.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(sym_f, text="文件前缀 (Prefix):").grid(row=0, column=0, sticky=tk.W)
+        file_prefix_var = tk.StringVar(value="")
+        file_prefix_entry = ttk.Entry(sym_f, textvariable=file_prefix_var, width=15)
+        file_prefix_entry.grid(row=0, column=1, padx=5, pady=2)
+        
+        ttk.Label(sym_f, text="目录后缀 (Suffix):").grid(row=1, column=0, sticky=tk.W)
+        dir_suffix_var = tk.StringVar(value="/")
+        dir_suffix_entry = ttk.Entry(sym_f, textvariable=dir_suffix_var, width=15)
+        dir_suffix_entry.grid(row=1, column=1, padx=5, pady=2)
+
+        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
         
         # Separator
         sep_var = tk.StringVar(value="\\n")
-        ttk.Label(main_f, text="自定义分隔符 (支持 \\n, \\t):", font=("Bold", 9)).pack(anchor=tk.W)
+        ttk.Label(main_f, text="自定义分隔符:", font=("Bold", 9)).pack(anchor=tk.W)
         
         presets = ttk.Frame(main_f)
         presets.pack(fill=tk.X, pady=5)
         ttk.Button(presets, text="换行(\\n)", width=8, command=lambda: sep_var.set("\\n")).pack(side=tk.LEFT, padx=2)
         ttk.Button(presets, text="空格", width=8, command=lambda: sep_var.set(" ")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(presets, text="空格+@", width=8, command=lambda: sep_var.set(" @")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(presets, text="空格+#", width=8, command=lambda: sep_var.set(" #")).pack(side=tk.LEFT, padx=2)
         
         entry_sep = ttk.Entry(main_f, textvariable=sep_var)
         entry_sep.pack(fill=tk.X, pady=5)
+
+        def on_preset_select(e):
+            p_name = preset_combo.get()
+            prof = profiles.get(p_name)
+            if prof:
+                file_prefix_var.set(prof.get("prefix", ""))
+                dir_suffix_var.set(prof.get("suffix", ""))
+                sep_var.set(prof.get("sep", "\\n"))
+        
+        preset_combo.bind("<<ComboboxSelected>>", on_preset_select)
+        if profile_names:
+            preset_combo.set(profile_names[0])
+            on_preset_select(None)
         
         def do_copy():
             mode = mode_var.get()
             sep = sep_var.get()
-            formatted = FormatUtils.collect_paths([str(p) for p in paths], str(self.current_dir), mode, sep)
+            f_pref = file_prefix_var.get()
+            d_suff = dir_suffix_var.get()
+            formatted = FormatUtils.collect_paths([str(p) for p in paths], str(self.current_dir), mode, sep, f_pref, d_suff)
             self.root.clipboard_clear()
             self.root.clipboard_append(formatted)
             self.lbl_status.config(text=f"已成功搜集 {len(paths)} 条路径")

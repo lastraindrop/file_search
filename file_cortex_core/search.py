@@ -261,7 +261,10 @@ class SearchWorker(threading.Thread):
         if gen is None:
             self.result_queue.put(("DONE", "DONE"))
             return
-        for result in gen:
-            if self.stop_event.is_set(): break
-            self.result_queue.put(result)
+        try:
+            for result in gen:
+                if self.stop_event.is_set(): break
+                self.result_queue.put(result)
+        finally:
+            gen.close()
         self.result_queue.put(("DONE", "DONE"))

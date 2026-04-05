@@ -197,6 +197,12 @@
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-4">
+            <div class="mb-3">
+                <label class="form-label small text-muted uppercase tracking-wider mb-1">Quick Presets</label>
+                <select id="pathProfileSelect" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="App.applyProfile()">
+                    <option value="">Custom...</option>
+                </select>
+            </div>
             <div class="mb-4">
                 <label class="form-label small text-muted uppercase tracking-wider mb-2">Path Mode</label>
                 <div class="d-flex gap-4">
@@ -207,6 +213,19 @@
                     <div class="form-check custom-radio">
                         <input class="form-check-input" type="radio" name="pathMode" id="pathModeAbs" value="absolute">
                         <label class="form-check-label small" for="pathModeAbs">Full Absolute</label>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="form-label small text-muted uppercase tracking-wider mb-2">Symbols & Extensions</label>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="x-small text-muted">File Prefix</label>
+                        <input type="text" id="pathFilePrefix" class="form-control form-control-sm bg-dark text-white border-secondary" value="" placeholder="e.g. @">
+                    </div>
+                    <div class="col-6">
+                        <label class="x-small text-muted">Folder Suffix</label>
+                        <input type="text" id="pathDirSuffix" class="form-control form-control-sm bg-dark text-white border-secondary" value="/" placeholder="e.g. /">
                     </div>
                 </div>
             </div>

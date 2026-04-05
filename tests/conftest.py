@@ -1,8 +1,9 @@
 import pytest
 import pathlib
-import tempfile
 import shutil
 import os
+import gc
+import time
 from fastapi.testclient import TestClient
 from web_app import app
 from file_cortex_core import DataManager
@@ -13,15 +14,30 @@ def _reset_singleton():
     from file_cortex_core import FileUtils
     from web_app import ACTIVE_PROCESSES
     yield
+    # Cleanup lingering processes to release file locks on Windows
+    for pid in list(ACTIVE_PROCESSES.keys()):
+        proc = ACTIVE_PROCESSES.get(pid)
+        if proc and proc.poll() is None:
+            try:
+                if os.name == 'nt':
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                else:
+                    os.killpg(os.getpgid(pid), 15)
+            except Exception:
+                try: proc.kill()
+                except Exception: pass
+    
     DataManager._instance = None
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
+    gc.collect()
+    time.sleep(0.1)  # Increased sleep for Windows handle release
 
 @pytest.fixture
-def mock_project():
+def mock_project(tmp_path):
     """Creates a temporary project directory with various files."""
-    temp_dir = tempfile.mkdtemp(prefix="fctx_mock_")
-    base = pathlib.Path(temp_dir)
+    base = tmp_path / "mock_project"
+    base.mkdir()
     
     # Standard files
     (base / "src").mkdir()
@@ -44,18 +60,16 @@ def mock_project():
     (base / "node_modules").mkdir()
     (base / "node_modules" / "package.json").write_text("{}", encoding="utf-8")
     
-    yield base
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    return base
 
 @pytest.fixture
-def noisy_project():
+def noisy_project(tmp_path):
     """Creates a project with complex encoding, minified code, and noise."""
-    temp_dir = tempfile.mkdtemp(prefix="fctx_noisy_")
-    base = pathlib.Path(temp_dir)
+    base = tmp_path / "noisy_project"
+    base.mkdir()
     
     # 1. GBK Encoded File (Common in some Chinese heritage codebases)
     gbk_file = base / "legacy_zh.py"
-    # "测试内容" in GBK
     gbk_file.write_bytes(b"\xb2\xe2\xca\xd4\xc4\xda\xc8\xdd")
     
     # 2. Minified File (Noise)
@@ -67,8 +81,7 @@ def noisy_project():
     clean_file = base / "app.py"
     clean_file.write_text("print('Hello World')", encoding="utf-8")
     
-    yield base
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    return base
 
 @pytest.fixture
 def mock_popen(monkeypatch):
@@ -91,10 +104,10 @@ def mock_popen(monkeypatch):
     return mock_proc
 
 @pytest.fixture
-def stress_project():
+def stress_project(tmp_path):
     """Creates a temporary project with multiple directories and 100+ files."""
-    temp_dir = tempfile.mkdtemp(prefix="fctx_stress_")
-    base = pathlib.Path(temp_dir)
+    base = tmp_path / "stress_project"
+    base.mkdir()
     
     for i in range(10):
         d = base / f"dir_{i}"
@@ -103,14 +116,12 @@ def stress_project():
             f = d / f"file_{j}.txt"
             f.write_text(f"Content in file {i}-{j} with keyword_target_{j}", encoding="utf-8")
             
-    yield base
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    return base
 
 @pytest.fixture
-def clean_config():
+def clean_config(tmp_path):
     """Provides a fresh DataManager with a temporary config file."""
-    temp_dir = tempfile.mkdtemp()
-    config_path = pathlib.Path(temp_dir) / "test_config.json"
+    config_path = tmp_path / "test_config.json"
     
     from unittest.mock import patch
     from file_cortex_core import FileUtils
@@ -124,33 +135,24 @@ def clean_config():
         # Cleanup
         DataManager._instance = None
         FileUtils.clear_cache()
-        
-    shutil.rmtree(temp_dir, ignore_errors=True)
 
 @pytest.fixture
-def api_client():
+def api_client(tmp_path):
     """FastAPI TestClient instance with isolated config."""
-    temp_dir = tempfile.mkdtemp()
-    config_path = pathlib.Path(temp_dir) / "api_test_config.json"
+    config_path = tmp_path / "api_test_config.json"
     
     from unittest.mock import patch
     from file_cortex_core import FileUtils
     
     with patch('file_cortex_core.config._CONFIG_FILE', config_path):
-        # Reset singleton to pick up the new config path
         DataManager._instance = None
-    # DataManager._initialized = False (Removed CR-01)
         FileUtils.clear_cache()
         
         client = TestClient(app)
         yield client
         
-        # Cleanup
         DataManager._instance = None
-    # DataManager._initialized = False (Removed CR-01)
         FileUtils.clear_cache()
-        
-    shutil.rmtree(temp_dir, ignore_errors=True)
 
 @pytest.fixture
 def project_client(api_client, mock_project):

@@ -262,10 +262,14 @@ class ActionBridge:
                     return args, False, context
                 except Exception:
                     # Fallback to shell if shlex fails
+                    if any('%' in str(v) for v in context.values()):
+                        raise ValueError("Command injection risk: filename contains '%' while shell=True is active.")
                     safe_context = {k: win_quote(v) for k, v in context.items()}
                     return template.format(**safe_context), True, context
             else:
                 # Template has metacharacters, use shell=True with quoted values
+                if any('%' in str(v) for v in context.values()):
+                    raise ValueError("Command injection risk: filename contains '%' while shell=True is active.")
                 safe_context = {k: win_quote(v) for k, v in context.items()}
                 return template.format(**safe_context), True, context
         else:
@@ -310,7 +314,16 @@ class ActionBridge:
                         "status": "success"
                     }
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    if os.name == 'nt':
+                        # Use taskkill to ensure child processes are also handled on Windows
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)], capture_output=True)
+                    else:
+                        # Kill entire process group on Unix
+                        import signal
+                        try:
+                            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                        except:
+                            proc.kill()
                     stdout, stderr = proc.communicate() # Drain pipes
                     return {
                         "stdout": stdout, 

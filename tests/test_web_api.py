@@ -78,22 +78,21 @@ def test_settings_whitelist_allows_safe_keys(project_client, mock_project):
     assert config["excludes"] == "*.bak"
     assert config["max_search_size_mb"] == 10
 
-def test_api_move_cross_project_blocked(project_client, mock_project):
+def test_api_move_cross_project_blocked(project_client, mock_project, tmp_path):
     """Verify cross-project move is rejected."""
-    import tempfile
-    other_dir = tempfile.mkdtemp(prefix="fctx_other_")
+    other_dir = tmp_path / "other_project"
+    other_dir.mkdir()
     try:
-        project_client.post("/api/open", json={"path": other_dir})
+        project_client.post("/api/open", json={"path": str(other_dir)})
         src = str(mock_project / "src" / "main.py")
         res = project_client.post("/api/fs/move", json={
-            "src_paths": [src], "dst_dir": other_dir
+            "src_paths": [src], "dst_dir": str(other_dir)
         })
         # My hardening now returns 403 for cross-project move
         assert res.status_code == 403
         assert "cross-project" in res.json()["detail"]
     finally:
-        import shutil
-        shutil.rmtree(other_dir, ignore_errors=True)
+        pass # tmp_path cleaned by pytest
 
 def test_api_move_returns_skipped_info(project_client, mock_project, system_dir):
     """Verify move to unsafe path returns skipped paths."""

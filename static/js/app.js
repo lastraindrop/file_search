@@ -9,6 +9,7 @@ const App = {
         selectedFiles: new Set(),
         searchResults: [],
         projConfig: {},
+        collectionProfiles: {},
         isSidebarExpanded: false,
         activePid: null
     },
@@ -168,6 +169,7 @@ const App = {
             
             const configRes = await App._fetch(`/api/project/config?path=${encodeURIComponent(p)}`);
             App.state.projConfig = await configRes.json();
+            App.state.collectionProfiles = App.state.projConfig.collection_profiles || {};
             
             // Restore UI Settings from Config
             if (App.state.projConfig.excludes) {
@@ -178,6 +180,7 @@ const App = {
             }
             
             App.updateTemplateList();
+            App.updateProfileList();
             if (App.state.projConfig.staging_list) {
                 App.state.staging = new Set(App.state.projConfig.staging_list);
                 App.renderStaging();
@@ -412,6 +415,29 @@ const App = {
             opt.value = name; opt.innerText = name;
             select.appendChild(opt);
         });
+    },
+
+    updateProfileList: () => {
+        const select = document.getElementById('pathProfileSelect');
+        if (!select) return;
+        const profiles = App.state.collectionProfiles;
+        select.innerHTML = '<option value="">Custom...</option>';
+        Object.keys(profiles).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.innerText = name;
+            select.appendChild(opt);
+        });
+    },
+
+    applyProfile: () => {
+        const name = document.getElementById('pathProfileSelect').value;
+        if (!name) return;
+        const prof = App.state.collectionProfiles[name];
+        if (prof) {
+            document.getElementById('pathFilePrefix').value = prof.prefix || "";
+            document.getElementById('pathDirSuffix').value = prof.suffix || "";
+            document.getElementById('pathSep').value = prof.sep || "\\n";
+        }
     },
 
     renameFile: async () => {
@@ -1029,6 +1055,8 @@ const App = {
         const paths = App._currentCollectionPaths;
         const mode = document.querySelector('input[name="pathMode"]:checked').value;
         const separator = document.getElementById('pathSep').value;
+        const file_prefix = document.getElementById('pathFilePrefix').value;
+        const dir_suffix = document.getElementById('pathDirSuffix').value;
         const project_root = App.state.projectPath;
 
         try {
@@ -1039,7 +1067,9 @@ const App = {
                     paths: paths,
                     project_root: project_root,
                     mode: mode,
-                    separator: separator
+                    separator: separator,
+                    file_prefix: file_prefix,
+                    dir_suffix: dir_suffix
                 })
             });
             const data = await res.json();

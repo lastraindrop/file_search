@@ -110,6 +110,8 @@ class PathCollectionRequest(BaseModel):
     project_root: str | None = None
     mode: str = "relative" # "relative" or "absolute"
     separator: str = "\n"
+    file_prefix: str = ""
+    dir_suffix: str = ""
 
 class WorkspacePinRequest(BaseModel):
     path: str
@@ -197,7 +199,8 @@ def get_children(path_str):
 
     children = []
     try:
-        entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower()))
+        with os.scandir(path) as it:
+            entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
         norm_root = PathValidator.norm_path(project_root)
         for entry in entries:
             # Use pathlib's own logic for relative paths where possible, but normalize first
@@ -624,7 +627,11 @@ def api_execute_tool(req: ToolExecuteRequest):
                     })
                 except subprocess.TimeoutExpired:
                     # CR-B02 Fix: Assassinate zombie process on timeout to release file handles
-                    proc.kill()
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)], capture_output=True)
+                    else:
+                        import signal
+                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     stdout, stderr = proc.communicate() # Drain pipes
                     results.append({"path": p, "error": f"Command timed out after {exec_timeout} seconds"})
                 except Exception as e:
@@ -655,7 +662,7 @@ def collect_paths_api(req: PathCollectionRequest):
             if not get_valid_project_root(req.project_root):
                  raise HTTPException(status_code=403, detail="Unauthorized project root")
         
-        res = FormatUtils.collect_paths(req.paths, req.project_root, req.mode, req.separator)
+        res = FormatUtils.collect_paths(req.paths, req.project_root, req.mode, req.separator, req.file_prefix, req.dir_suffix)
         return {"result": res}
     except Exception as e:
         logger.error(f"Path collection error: {e}")

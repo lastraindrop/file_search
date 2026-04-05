@@ -4,20 +4,9 @@ import os
 import shutil
 from file_cortex_core import FileUtils
 
-@pytest.fixture(scope="session")
-def local_tmp_root():
-    """Provides a stable, project-local temporary directory for all tests."""
-    root = pathlib.Path(__file__).parent / "tmp_tests"
-    if root.exists():
-        shutil.rmtree(root)
-    root.mkdir(parents=True, exist_ok=True)
-    yield root
-    # Optional: cleanup after all tests
-    # shutil.rmtree(root)
-
-def test_read_text_smart_memory_safety(local_tmp_root):
+def test_read_text_smart_memory_safety(tmp_path):
     """Verify read_text_smart handles large files and multiple encodings safely."""
-    test_dir = local_tmp_root / "encoding_tests"
+    test_dir = tmp_path / "encoding_tests"
     test_dir.mkdir(exist_ok=True)
     
     # 1. UTF-8 (Large / Streaming)

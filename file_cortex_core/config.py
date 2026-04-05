@@ -136,7 +136,13 @@ class DataManager:
             "case_sensitive": False,
             "inverse": False,
             "include_dirs": False
-        }
+        },
+        "collection_profiles": {
+            "Default (@, /)": {"prefix": "@", "suffix": "/", "sep": "\\n"},
+            "RAG Style": {"prefix": "file:", "suffix": "[dir]", "sep": " "},
+            "Simple List": {"prefix": "", "suffix": "", "sep": "\\n"}
+        },
+        "token_threshold": 100000
     }
 
     def add_to_recent(self, path: str):
@@ -200,16 +206,17 @@ class DataManager:
 
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
         """Adds multiple paths to the staging list atomically."""
-        from .security import PathValidator
-        proj = self.get_project_data(project_path)
-        added_count = 0
-        for raw_p in paths:
-            p = PathValidator.norm_path(raw_p)
-            if p not in proj["staging_list"]:
-                proj["staging_list"].append(p)
-                added_count += 1
-        self.save()
-        return added_count
+        with self._lock:
+            from .security import PathValidator
+            proj = self.get_project_data(project_path)
+            added_count = 0
+            for raw_p in paths:
+                p = PathValidator.norm_path(raw_p)
+                if p not in proj["staging_list"]:
+                    proj["staging_list"].append(p)
+                    added_count += 1
+            self.save()
+            return added_count
 
     def resolve_project_root(self, target_path_str: str) -> str | None:
         """Determines if a given path belongs to any registered project root."""
@@ -225,29 +232,33 @@ class DataManager:
         return None
 
     def add_note(self, project_path, file_path, note):
-        proj = self.get_project_data(project_path)
-        proj["notes"][file_path] = note
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            proj["notes"][file_path] = note
+            self.save()
 
     def add_tag(self, project_path, file_path, tag):
-        proj = self.get_project_data(project_path)
-        if file_path not in proj["tags"]:
-            proj["tags"][file_path] = []
-        if tag not in proj["tags"][file_path]:
-            proj["tags"][file_path].append(tag)
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            if file_path not in proj["tags"]:
+                proj["tags"][file_path] = []
+            if tag not in proj["tags"][file_path]:
+                proj["tags"][file_path].append(tag)
+            self.save()
 
     def remove_tag(self, project_path, file_path, tag):
-        proj = self.get_project_data(project_path)
-        if file_path in proj["tags"] and tag in proj["tags"][file_path]:
-            proj["tags"][file_path].remove(tag)
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            if file_path in proj["tags"] and tag in proj["tags"][file_path]:
+                proj["tags"][file_path].remove(tag)
+            self.save()
 
     def save_session(self, project_path, session_data):
-        proj = self.get_project_data(project_path)
-        proj["sessions"].insert(0, session_data)
-        proj["sessions"] = proj["sessions"][:5]
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            proj["sessions"].insert(0, session_data)
+            proj["sessions"] = proj["sessions"][:5]
+            self.save()
 
     # Whitelist of fields that can be updated via the general settings API.
     # custom_tools and quick_categories are NOT here — they have dedicated APIs
@@ -272,15 +283,16 @@ class DataManager:
 
     def update_custom_tools(self, project_path: str, tools: dict):
         """Dedicated API for updating custom_tools. Validates template format."""
-        proj = self.get_project_data(project_path)
-        # Basic validation: tools must be a dict of str->str
-        if not isinstance(tools, dict):
-            raise ValueError("Tools must be a dict of name -> command template")
-        for name, template in tools.items():
-            if not isinstance(name, str) or not isinstance(template, str):
-                raise ValueError(f"Invalid tool entry: {name}")
-        proj["custom_tools"] = tools
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            # Basic validation: tools must be a dict of str->str
+            if not isinstance(tools, dict):
+                raise ValueError("Tools must be a dict of name -> command template")
+            for name, template in tools.items():
+                if not isinstance(name, str) or not isinstance(template, str):
+                    raise ValueError(f"Invalid tool entry: {name}")
+            proj["custom_tools"] = tools
+            self.save()
 
     def update_quick_categories(self, project_path: str, categories: dict):
         """Dedicated API for updating quick_categories. Validates relative paths."""
@@ -298,22 +310,24 @@ class DataManager:
 
     def add_to_group(self, project_path, group_name, file_paths):
         from .security import PathValidator
-        proj = self.get_project_data(project_path)
-        if group_name not in proj["groups"]:
-            proj["groups"][group_name] = []
-        for raw_p in file_paths:
-            p = PathValidator.norm_path(raw_p)
-            if p not in proj["groups"][group_name]:
-                proj["groups"][group_name].append(p)
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            if group_name not in proj["groups"]:
+                proj["groups"][group_name] = []
+            for raw_p in file_paths:
+                p = PathValidator.norm_path(raw_p)
+                if p not in proj["groups"][group_name]:
+                    proj["groups"][group_name].append(p)
+            self.save()
 
     def remove_from_group(self, project_path, group_name, file_paths):
         from .security import PathValidator
-        proj = self.get_project_data(project_path)
-        if group_name in proj["groups"]:
-            for raw_path in file_paths:
-                # CR-C04 Fix: Normalize path for symmetric add/remove behavior
-                norm_p = PathValidator.norm_path(raw_path)
-                if norm_p in proj["groups"][group_name]:
-                    proj["groups"][group_name].remove(norm_p)
-            self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            if group_name in proj["groups"]:
+                for raw_path in file_paths:
+                    # CR-C04 Fix: Normalize path for symmetric add/remove behavior
+                    norm_p = PathValidator.norm_path(raw_path)
+                    if norm_p in proj["groups"][group_name]:
+                        proj["groups"][group_name].remove(norm_p)
+                self.save()

@@ -47,7 +47,7 @@ class FormatUtils:
         return len(text) // 4
 
     @staticmethod
-    def collect_paths(paths, root_dir=None, mode='relative', separator='\n'):
+    def collect_paths(paths, root_dir=None, mode='relative', separator='\n', file_prefix='', dir_suffix=''):
         """
         Formats a list of paths into a single string with a custom separator.
         """
@@ -61,17 +61,27 @@ class FormatUtils:
             try:
                 # We use resolve() to handle '..' and normalize paths first
                 p = pathlib.Path(p_str).resolve()
+                is_dir = p.is_dir()
                 
+                final_p_str = ""
                 if mode == 'relative' and root:
                     # Check if p is under root
                     if root in p.parents or root == p:
-                        # Use as_posix() or str()? 
-                        # User's request implies cross-tool usage, str() is usually fine on the host OS.
-                        formatted.append(str(p.relative_to(root)))
+                        final_p_str = str(p.relative_to(root))
                     else:
-                        formatted.append(str(p))
+                        final_p_str = str(p)
                 else:
-                    formatted.append(str(p))
+                    final_p_str = str(p)
+                
+                # Apply symbols
+                if is_dir:
+                    if dir_suffix and not final_p_str.endswith(dir_suffix):
+                        final_p_str += dir_suffix
+                
+                # Apply common prefix to both files and dirs
+                final_p_str = file_prefix + final_p_str
+                
+                formatted.append(final_p_str)
             except Exception:
                 formatted.append(p_str)
                 
@@ -316,7 +326,8 @@ class FileUtils:
                 lines.append(f"{prefix}└── [Max Depth Reached ({max_depth}) ...]")
                 return
             try:
-                entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower()))
+                with os.scandir(path) as it:
+                    entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
                 valid_entries = []
                 for entry in entries:
                     rel_path = pathlib.Path(entry.path).relative_to(root_dir)

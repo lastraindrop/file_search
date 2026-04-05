@@ -42,19 +42,14 @@ def test_path_validator_blocked_prefixes(system_dir):
         PathValidator.validate_project(system_dir)
     assert "Access to system directory" in str(exc.value)
 
-def test_path_validator_allows_user_dirs_with_system_keywords(mock_project):
+def test_path_validator_allows_user_dirs_with_system_keywords(tmp_path):
     """Verify that user dirs named 'windows-app' or 'etc-notes' are NOT blocked."""
-    import tempfile
-    import shutil
     # Create a dir whose name contains a keyword but is NOT a system dir
-    user_dir_path = tempfile.mkdtemp(prefix="windows_")
-    user_dir = pathlib.Path(user_dir_path)
-    try:
-        # Should NOT raise PermissionError
-        p = PathValidator.validate_project(str(user_dir))
-        assert p.exists()
-    finally:
-        shutil.rmtree(user_dir_path, ignore_errors=True)
+    user_dir = tmp_path / "windows_test"
+    user_dir.mkdir()
+    # Should NOT raise PermissionError
+    p = PathValidator.validate_project(str(user_dir))
+    assert p.exists()
 
 def test_path_validator_root_drive_blocked():
     """Verify that root drives ('C:/' or '/') are blocked."""

@@ -6,6 +6,8 @@ class PathValidator:
     @staticmethod
     def is_safe(target_path, root_path):
         """Strict check to prevent path traversal outside project root."""
+        if not root_path:
+            return False
         try:
             # resolve() handles '..' and case-normalization
             target = pathlib.Path(target_path).resolve()
