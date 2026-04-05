@@ -31,6 +31,8 @@ test_recursive_temp/
 htmlcov/
 tests/.pytest_cache/
 mypy_cache/
+.pytest_temp_safe/
+..run_tests_temp/
 
 # App Data
 .ai_context_workbench/

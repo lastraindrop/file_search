@@ -1,4 +1,9 @@
-import PyInstaller.__main__
+try:
+    import PyInstaller.__main__
+except ImportError:
+    print("Error: PyInstaller is not installed. Please run 'pip install pyinstaller' to use this build script.")
+    import sys
+    sys.exit(1)
 import os
 import shutil
 

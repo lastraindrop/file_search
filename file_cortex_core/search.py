@@ -2,9 +2,11 @@ import pathlib
 import os
 import re
 import threading
+import atexit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SHARED_SEARCH_POOL = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+atexit.register(SHARED_SEARCH_POOL.shutdown, wait=False)
 
 from .config import logger
 from .utils import FileUtils, FormatUtils
@@ -121,6 +123,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             if include_dirs:
                 for d in dirs:
                     if match_name(d, rel_root / d):
+                        count += 1
                         full_d = pathlib.Path(root) / d
                         meta = FileUtils.get_metadata(full_d)
                         yield {
@@ -129,6 +132,9 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                             "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
+                        if count >= max_results:
+                            dirs[:] = []
+                            break
 
             for file in files:
                 full_path = pathlib.Path(root) / file
@@ -175,7 +181,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                             try:
                                 next(as_completed(content_futures, timeout=0.01))
                                 batch = [f for f in content_futures if f.done()]
-                            except: pass
+                            except Exception: pass
                         for f in batch:
                             try:
                                 is_match = f.result()

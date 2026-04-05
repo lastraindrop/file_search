@@ -372,8 +372,14 @@ class NoiseReducer:
                 cleaned_lines.append(f"[... Line of {len(line)} chars skipped by NoiseReducer ...]")
                 continue
             
-            # 2. Simple Heuristic: skip blocks that look like large base64 or hex
-            # (Stub for future more complex regex)
+            # 2. Heuristic: skip blocks that look like large base64 (e.g. embedded assets)
+            if len(line) > 200 and not any(c.isspace() for c in line):
+                # Check if it's mostly base64 chars
+                total = len(line)
+                alnum = sum(1 for c in line if c.isalnum() or c in '+/=')
+                if (alnum / total) > 0.95:
+                    cleaned_lines.append(f"[... Base64-like block of {total} chars skipped ...]")
+                    continue
             
             cleaned_lines.append(line)
             
@@ -409,7 +415,8 @@ class ContextFormatter:
                 stat = p.stat()
                 size_kb = stat.st_size / 1024
                 
-                content = FileUtils.read_text_smart(p)
+                # Use 1MB limit for context files to prevent OOM
+                content = FileUtils.read_text_smart(p, max_bytes=1024*1024)
                 content = NoiseReducer.clean(content)
                 
                 header = f"File: {rel_path} ({size_kb:.1f} KB)\n"

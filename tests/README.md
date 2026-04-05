@@ -1,6 +1,6 @@
 # FileCortex - 自动化测试套件说明 (Test Suite)
 
-本项目包含 **177** 项全自动化的 `pytest` 测试，采用 **微内核一对一镜像测试** 架构，实现了对核心逻辑、API 安全、及 AI 编排工作流的全方位覆盖。
+本项目包含 **183** 项全自动化的 `pytest` 测试，采用 **微内核一对一镜像测试** 架构，实现了对核心逻辑、API 安全、及 AI 编排工作流的全方位覆盖。
 
 ## 🧪 测试分类 (Modular Architecture)
 
@@ -18,9 +18,10 @@
 ### 3. 桌面端特化测试 (`test_desktop_security.py`)
 - **命令注入防护**: 针对 Windows PowerShell `Set-Clipboard` 的参数化调用防御测试。
 
-### 4. 生产稳定性测试 (v5.8 Hardening)
+### 4. 生产稳定性测试 (v5.8.0 Hardening)
 - **并发压力测试 (`test_stress_concurrency.py`)**: 验证高负载下的配置原子性。
 - **环境安全测试 (`test_audit_fixes_v58.py`)**: 专项验证符号注入拦截。
+- **增量加固验证 (`test_v571_improvements.py`)**: 专项验证 v5.8.0 版本的 OOM 保护、Base64 降噪及敏感目录拦截逻辑。
 - **沙箱隔离验证**: 确保在 Windows 环境下残留进程被递归杀伤 (`conftest.py`)。
 
 ## 🚀 运行测试

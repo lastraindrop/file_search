@@ -38,13 +38,12 @@ def main():
             print(f"ERROR: Project '{args.project}' is not registered or is unsafe.")
             return
             
-        file_path = pathlib.Path(args.path).resolve()
-        if not PathValidator.is_safe(file_path, proj_root):
+        file_path_str = PathValidator.norm_path(args.path)
+        if not PathValidator.is_safe(file_path_str, proj_root):
             print(f"ERROR: Path '{args.path}' is outside project root or unsafe.")
             return
 
         proj_data = data_mgr.get_project_data(proj_root)
-        file_path_str = str(file_path)
         if file_path_str not in proj_data["staging_list"]:
             proj_data["staging_list"].append(file_path_str)
             data_mgr.save()

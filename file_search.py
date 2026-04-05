@@ -16,7 +16,7 @@ SEARCH_POLL_MS = 100    # Queue polling interval
 class FileCortexApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("FileCortex v5.7 Production | 工业级分析助手")
+        self.root.title("FileCortex v5.8.0 Production | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -1213,7 +1213,7 @@ class FileCortexApp:
         if not self.current_dir:
             self.btn_pin.config(text="☆")
             return
-        is_pinned = str(self.current_dir) in self.data_mgr.data.get("pinned_projects", [])
+        is_pinned = PathValidator.norm_path(str(self.current_dir)) in self.data_mgr.data.get("pinned_projects", [])
         self.btn_pin.config(text="⭐" if is_pinned else "☆")
 
     def open_duplicate_finder(self):
@@ -1468,7 +1468,7 @@ class DuplicateFinderWindow(tk.Toplevel):
                 try:
                     FileOps.delete_file(p_str)
                     # We need to find the specific item in the tree to delete it visually
-                    for item in self.tree.selection():
+                    for item in list(self.tree.selection()):
                          if self.tree.item(item)["values"] and self.tree.item(item)["values"][0] == p_str:
                              self.tree.delete(item)
                 except Exception as e:

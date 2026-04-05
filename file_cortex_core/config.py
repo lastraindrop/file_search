@@ -269,17 +269,18 @@ class DataManager:
     })
 
     def update_project_settings(self, project_path, settings: dict):
-        from .security import PathValidator
-        proj = self.get_project_data(project_path)
-        for k, v in settings.items():
-            if k in self.MUTABLE_SETTINGS:
-                if k == "staging_list" and isinstance(v, list):
-                    proj[k] = [PathValidator.norm_path(p) for p in v]
+        with self._lock:
+            from .security import PathValidator
+            proj = self.get_project_data(project_path)
+            for k, v in settings.items():
+                if k in self.MUTABLE_SETTINGS:
+                    if k == "staging_list" and isinstance(v, list):
+                        proj[k] = [PathValidator.norm_path(p) for p in v]
+                    else:
+                        proj[k] = v
                 else:
-                    proj[k] = v
-            else:
-                logger.warning(f"Blocked attempt to modify protected key via settings API: {k}")
-        self.save()
+                    logger.warning(f"Blocked attempt to modify protected key via settings API: {k}")
+            self.save()
 
     def update_custom_tools(self, project_path: str, tools: dict):
         """Dedicated API for updating custom_tools. Validates template format."""
@@ -296,17 +297,18 @@ class DataManager:
 
     def update_quick_categories(self, project_path: str, categories: dict):
         """Dedicated API for updating quick_categories. Validates relative paths."""
-        proj = self.get_project_data(project_path)
-        if not isinstance(categories, dict):
-            raise ValueError("Categories must be a dict of name -> relative_dir")
-        for name, rel_dir in categories.items():
-            if not isinstance(name, str) or not isinstance(rel_dir, str):
-                raise ValueError(f"Invalid category entry: {name}")
-            # Block path traversal in category targets
-            if '..' in rel_dir:
-                raise ValueError(f"Category target must not contain '..': {rel_dir}")
-        proj["quick_categories"] = categories
-        self.save()
+        with self._lock:
+            proj = self.get_project_data(project_path)
+            if not isinstance(categories, dict):
+                raise ValueError("Categories must be a dict of name -> relative_dir")
+            for name, rel_dir in categories.items():
+                if not isinstance(name, str) or not isinstance(rel_dir, str):
+                    raise ValueError(f"Invalid category entry: {name}")
+                # Block path traversal in category targets
+                if '..' in rel_dir:
+                    raise ValueError(f"Category target must not contain '..': {rel_dir}")
+            proj["quick_categories"] = categories
+            self.save()
 
     def add_to_group(self, project_path, group_name, file_paths):
         from .security import PathValidator

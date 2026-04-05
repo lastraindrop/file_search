@@ -461,7 +461,7 @@ def toggle_pin(req: WorkspacePinRequest):
     return {"is_pinned": status}
 
 @app.get("/api/recent_projects")
-async def get_recent_projects_legacy():
+def get_recent_projects_legacy():
     # Keep for old UI compatibility during migration if needed, but we'll update UI soon
     return [{"name": pathlib.Path(p).name, "path": p} for p in _get_dm().data["projects"].keys() if os.path.exists(p)]
 
@@ -598,7 +598,7 @@ def api_execute_tool(req: ToolExecuteRequest):
             raise HTTPException(status_code=403, detail="Access denied")
         
         proj_config = _get_dm().get_project_data(req.project_path)
-        template = proj_config["custom_tools"].get(req.tool_name)
+        template = proj_config.get("custom_tools", {}).get(req.tool_name)
         if not template:
             raise HTTPException(status_code=404, detail="Tool template not found")
         
@@ -630,7 +630,6 @@ def api_execute_tool(req: ToolExecuteRequest):
                     if os.name == 'nt':
                         subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)], capture_output=True)
                     else:
-                        import signal
                         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     stdout, stderr = proc.communicate() # Drain pipes
                     results.append({"path": p, "error": f"Command timed out after {exec_timeout} seconds"})

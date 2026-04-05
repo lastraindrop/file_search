@@ -4,6 +4,7 @@ import shutil
 import os
 import gc
 import time
+import subprocess
 from fastapi.testclient import TestClient
 from web_app import app
 from file_cortex_core import DataManager
@@ -20,7 +21,9 @@ def _reset_singleton():
         if proc and proc.poll() is None:
             try:
                 if os.name == 'nt':
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                    # Use taskkill /F /T to ensure subtree is killed
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], 
+                                 capture_output=True, timeout=2)
                 else:
                     os.killpg(os.getpgid(pid), 15)
             except Exception:
@@ -31,7 +34,7 @@ def _reset_singleton():
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
     gc.collect()
-    time.sleep(0.1)  # Increased sleep for Windows handle release
+    time.sleep(0.3)  # Increased sleep for reliable Windows handle release
 
 @pytest.fixture
 def mock_project(tmp_path):

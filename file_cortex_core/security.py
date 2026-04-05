@@ -64,6 +64,11 @@ class PathValidator:
         if not p.is_dir():
             raise NotADirectoryError(f"Not a directory: {path_str}")
         
+        # Block sensitive names (RCE prevention)
+        sensitive_names = {'.git', '.env', '__pycache__', 'node_modules', '.idea', '.vscode'}
+        if p.name.lower() in sensitive_names:
+            raise PermissionError(f"Cannot register sensitive directory as project root: {p.name}")
+            
         # Block root drives first
         if len(p.parts) <= 1:
             raise PermissionError("Cannot register root drive as a project.")
