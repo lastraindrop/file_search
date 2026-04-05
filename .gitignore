@@ -30,7 +30,6 @@ test_recursive_temp/
 htmlcov/
 tests/.pytest_cache/
 mypy_cache/
-tests/tmp_tests/
 
 # App Data
 .ai_context_workbench/

@@ -271,9 +271,9 @@ def get_content(path: str):
     if FileUtils.is_binary(p):
         return {"content": "--- Binary File (Preview Unavailable) ---"}
     try:
-        # Read max 100KB for preview
-        with open(p, 'r', encoding='utf-8', errors='replace') as f:
-            return {"content": f.read(100000)}
+        # CR-A01 Fix: Use read_text_smart for consistent encoding detection
+        content = FileUtils.read_text_smart(p, max_bytes=100000)
+        return {"content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
 
@@ -610,20 +610,32 @@ def api_execute_tool(req: ToolExecuteRequest):
                 with PROCESS_LOCK:
                     ACTIVE_PROCESSES[proc.pid] = proc
                 
-                stdout, stderr = proc.communicate() # Blocking for standard API
-                
-                with PROCESS_LOCK:
-                    ACTIVE_PROCESSES.pop(proc.pid, None)
+                try:
+                    # CR-B02 Fix: Use configurable timeout to avoid test hangs
+                    exec_timeout = int(os.getenv("FCTX_EXEC_TIMEOUT", "300"))
+                    stdout, stderr = proc.communicate(timeout=exec_timeout)
                     
-                results.append({
-                    "path": p, 
-                    "stdout": stdout, 
-                    "stderr": stderr, 
-                    "exit_code": proc.returncode,
-                    "pid": proc.pid
-                })
+                    results.append({
+                        "path": p, 
+                        "stdout": stdout, 
+                        "stderr": stderr, 
+                        "exit_code": proc.returncode,
+                        "pid": proc.pid
+                    })
+                except subprocess.TimeoutExpired:
+                    # CR-B02 Fix: Assassinate zombie process on timeout to release file handles
+                    proc.kill()
+                    stdout, stderr = proc.communicate() # Drain pipes
+                    results.append({"path": p, "error": f"Command timed out after {exec_timeout} seconds"})
+                except Exception as e:
+                    proc.kill()
+                    results.append({"path": p, "error": f"Process error: {e}"})
+                finally:
+                    with PROCESS_LOCK:
+                        ACTIVE_PROCESSES.pop(proc.pid, None)
             except Exception as e:
-                 results.append({"path": p, "error": str(e)})
+                # Execution start failed (e.g. shlex split error)
+                results.append({"path": p, "error": f"Execution failed to start: {e}"})
             
         return {"status": "ok", "results": results}
     except HTTPException: raise
@@ -753,7 +765,7 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
         await websocket.close()
         return
 
-    proj_config = DataManager().get_project_data(project_path)
+    proj_config = _get_dm().get_project_data(project_path)
     template = proj_config["custom_tools"].get(tool_name)
     if not template:
         await websocket.send_json({"status": "ERROR", "msg": "Tool template not found"})

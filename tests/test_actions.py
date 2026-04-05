@@ -23,10 +23,19 @@ def test_action_bridge_win_quote_injection(mock_project):
     special_path.touch()
     
     # We use a template that would be dangerous if {name} wasn't quoted
-    # On Windows, & is a command separator.
+    # On Windows, & is a command separator and %VAR% triggers env var expansion.
     res = ActionBridge.execute_tool("echo {name}", str(special_path), mock_project)
     
-    assert special_name in res["stdout"]
+    # CR-A04: After security hardening, % is escaped to %% in CMD context.
+    # This prevents environment variable expansion (e.g., %WHOAMI% -> username).
+    # The echo output will contain %% (escaped) rather than expanded env var values.
+    import os
+    if os.name == 'nt':
+        # On Windows CMD, echo shows the literal % sign as provided in win_quote (no Batch escaping)
+        assert "WHOAMI" in res["stdout"]
+        assert "%WHOAMI%" in res["stdout"] 
+    else:
+        assert special_name in res["stdout"]
 
 def test_file_ops_crud_lifecycle(mock_project):
     """Verify full CRUD lifecycle for FileOps."""

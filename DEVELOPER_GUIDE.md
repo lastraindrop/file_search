@@ -50,7 +50,8 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **Web 路由线程策略**:
     - **同步 `def` 路由**: 适用于所有 I/O 密集型操作（如文件读取、重命名、归档）。FastAPI 会在独立线程池中执行这些路由，避免阻塞主事件循环。
     - **异步 `async def` 路由**: 仅适用于纯 CPU 逻辑、单纯的数据库查询或 Websocket 握手，严禁在其中执行阻塞式 `os` 或 `pathlib` 调用。
-*   **原子写入策略**: 使用 `.tmp` 临时文件 + `os.replace` 确保文件写入的完整性。
+    - **原子写入策略 (v5.7.1 Hardening)**: 关键配置写入强制采用 `tempfile.NamedTemporaryFile(delete=False)` 模式。这确保了在 Windows 下文件句柄能够在移动 (`os.replace`) 前被物理关闭，彻底解决了以往因并发句柄占用导致的持久化失败（Atomic Traceability）。
+    - **强制超时暗杀 (Executive Assassination)**: 所有外部工具执行均内置 300s 强制超时。一旦超时，核心逻辑将通过 `proc.kill()` 结合 `proc.communicate()` 强制回收僵尸进程与文件句柄。
 
 ### 6. 防错检查清单 (Post-Audit Anti-Patterns)
 在开发新功能时，必须避开以下 v5.3 审计发现的常见陷阱：
@@ -89,7 +90,14 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
     ```bash
     python -m pytest
     ```
-    v5.7 版本共包含 **107** 项全自动化测试用例，涵盖安全、并发与同步加固。
+    v5.7.1 版本共包含 **173** 项全自动化测试用例，涵盖安全、并发与同步加固。
+
+*   **Windows 环境下的 PermissionError 处理 (v5.7.1 最佳实践)**:
+    在 Windows 下频繁运行全量测试时，若遇到 `PermissionError: [WinError 5] 拒绝访问` 指向 `pytest-of-xxxx` 目录，通常是由于先前的测试残留了未释放的目录句柄。
+    **解决方案**: 使用 `--basetemp` 标志手动重定向临时目录以绕过逻辑锁定：
+    ```bash
+    python -m pytest --basetemp=C:\Users\YourUser\AppData\Local\Temp\fctx_fresh
+    ```
 
 ## 🛠️ 打包与分发
 *   **桌面版**: 使用 `build_exe.py` (封装了 PyInstaller) 进行单文件打包。

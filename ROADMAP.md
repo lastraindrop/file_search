@@ -54,21 +54,23 @@
 - [x] **[DONE] 增强编码感知识别 (Smart Encoding Detection)**: 强化了 `read_text_smart` 在 CJK (GBK) 环境下的内容识别率，并增加了二进制文件的防御性回退。
 
 ## 📍 阶段 2.7：生产架构加固与参数一致性 (v5.7.1 - 已完成)
-- [x] **[DONE] ActionBridge 双模执行审计**: 实现了 Windows/Unix 差异化安全执行策略，默认采用列表模式绕过 Shell 注入，并支持 Windows Builtin (echo/dir) 自动回退。
-- [x] **[DONE] 搜索逻辑闭环**: 修复了 Regex 模式下的结果重叠 Bug，并确保特别查询 (`.`, `..`) 不再短路标签匹配逻辑。
+- [x] **[DONE] ActionBridge 双模执行审计**: 实现了 Windows/Unix 差异化安全执行策略，默认采用列表模式绕过 Shell 注入，并支持 Windows Builtin (echo/dir) 自动回显与 `%` 符号转义审计。
+- [x] **[DONE] 搜索逻辑闭环**: 修复了 Regex 模式下的结果重叠 Bug，并确保特殊查询 (`.`, `..`) 不再短路标签匹配逻辑。
 - [x] **[DONE] 工业级文件 I/O**: `delete_file` 增加了对 Windows 只读文件的权限接管；`read_text_smart` 升级了 OOM 保护与混合编码识别。
 - [x] **[DONE] 动态对齐架构 (Dynamic Alignment)**: 定义并实现了“参数一致性校验”，确保跨端 (Web/CLI) 调用、配置读取及路径解析在所有平台下的逻辑镜像对称。
-- [x] **[DONE] 100% 审计闭环**: 修复了 38 项安全及健壮性审计缺陷，测试用例增加至 124 项，实现全路径覆盖。
+- [x] **[DONE] 100% 审计闭环**: 修复了 49 项安全及健壮性审计缺陷，全量单元测试增加至 **173** 项，实现全路径代码覆盖。
+- [x] **[DONE] 零泄露进程与文件治理**: 引入强制超时杀伤 (Kill-on-timeout) 与 `NamedTemporaryFile` 原子替换策略，彻底根治 Windows 下的句柄残留风暴。
 
-## 📍 阶段 3：RAG 适配与多端协作 (2026 Q3 目标)
+## 📍 阶段 3：多端协作与 RAG 准备 (2026 Q3+ 目标)
+- [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel/Word 语义碎片化抓取，为 LLM 提供更纯净的结构化上下文。
 - [ ] **结构化导出 (RAG-Ready)**: 支持将搜集内容一键打包为 JSONL 或专为 RAG 模型优化的 Embedding 数据包。
-- [ ] **本地智能摘要 (Ollama)**: 集成本地模型对搜集到的代码/文档进行自动化分片与语义摘要。
-- [ ] **多端编排扩展**: 支持通过 SSH/SFTP 实现在本地 FileCortex 中编排远程容器内容。
+- [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型 (Ollama) 对长代码/长日志进行摘要压榨，突破 Token 上限约束。
+- [ ] **多端编排扩展**: 支持通过 SSH/SFTP 实现在本地 FileCortex 中编排远程容器/云端服务器内容。
 
 ## 🚀 长期愿景 (v6.0+ Agentic Era)
-- [ ] **MCP 协议标准化**: 将 FileCortex 核心封装为 MCP (Model Context Protocol) 插件，使 AI Agent (如 Claude Desktop) 能原生调用物理操作。
-- [ ] **自动化工作流 (Agents)**: 定义“搜集-编排-分发”的端到端自动化管道，实现 Agent 驱动的本地工程维护。
-- [ ] **多模态全文档解析**: 深度支持 PDF、Word 及表格数据的语义提取与 AI 辅助分析。
+- [ ] **MCP 协议标准化**: 将 FileCortex 核心封装为 MCP (Model Context Protocol) 插件，使 AI Agent (如 Claude Desktop) 能原生调用物理编排操作。
+- [ ] **自愈型工作流 (Autonomous Cycles)**: 定义“感知-编排-分发-验证”的端到端自动化管道，实现 Agent 驱动的本地工程自动化维护（修复 Bug、生成文档、重构逻辑）。
+- [ ] **跨平台语义文件系统 (Semantic FS Layer)**: 建立索引层，支持基于含义而非路径的文件检索与编排逻辑对齐。
 
 ## 🛡️ 架构一致性原则 (Maintenance Principles)
 *   **SSOT (Single Source of Truth)**: 所有的路径权限及配置读取必须统一经过 `DataManager` 和 `get_valid_project_root`。

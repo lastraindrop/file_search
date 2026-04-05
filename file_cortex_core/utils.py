@@ -24,8 +24,10 @@ class FormatUtils:
             return f"{size_bytes} B"
         elif size_bytes < 1024 * 1024:
             return f"{size_bytes / 1024:.1f} KB"
-        else:
+        elif size_bytes < 1024 * 1024 * 1024:
             return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
     @staticmethod
     def format_datetime(mtime):
@@ -240,8 +242,14 @@ class FileUtils:
         return sorted(list(unique_files))
 
     @staticmethod
-    def read_text_smart(file_path: pathlib.Path) -> str:
-        """Reads file content with smart encoding detection (safe for large files)."""
+    def read_text_smart(file_path: pathlib.Path, max_bytes: int = None) -> str:
+        """Reads file content with smart encoding detection (safe for large files).
+        
+        Args:
+            file_path: Path to the file to read.
+            max_bytes: Optional. If set, truncates the returned content to approximately
+                       this many bytes. Used for preview to prevent OOM.
+        """
         try:
             from charset_normalizer import from_bytes
             # Only read header for encoding detection to prevent OOM
@@ -256,11 +264,17 @@ class FileUtils:
                 # Fallback heuristic for common CJK/Legacy encodings if utf-8 fails
                 encoding = 'utf-8'
             
+            if max_bytes:
+                with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                    return f.read(max_bytes)
             return file_path.read_text(encoding=encoding, errors='ignore')
         except Exception as e:
             logger.debug(f"Smart read failed for {file_path}: {e}")
             pass
         # Fallback to utf-8 ignore
+        if max_bytes:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read(max_bytes)
         return file_path.read_text('utf-8', 'ignore')
 
     @staticmethod
@@ -334,6 +348,9 @@ class NoiseReducer:
     """
     @staticmethod
     def clean(content: str, max_line_length: int = 500) -> str:
+        if content is None:
+            return ""
+        
         lines = content.splitlines()
         cleaned_lines = []
         is_skipping = False

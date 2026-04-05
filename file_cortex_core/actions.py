@@ -176,18 +176,20 @@ class FileOps:
     @staticmethod
     def archive_selection(paths, output_path_str, root_dir=None):
         output_path = pathlib.Path(output_path_str)
+        # CR-C06 Fix: Normalize root_dir to pathlib.Path for correct relative_to comparison
+        root_dir_p = pathlib.Path(root_dir).resolve() if root_dir else None
         with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for p_str in paths:
-                p = pathlib.Path(p_str)
+                p = pathlib.Path(p_str).resolve()
                 if not p.exists(): continue
-                arcname = p.relative_to(root_dir) if root_dir and root_dir in p.parents else p.name
+                arcname = p.relative_to(root_dir_p) if root_dir_p and (root_dir_p == p or root_dir_p in p.parents) else p.name
                 if p.is_file():
                     zipf.write(p, arcname)
                 elif p.is_dir():
                     for root, _, files in os.walk(p):
                         for file in files:
                             full_f = pathlib.Path(root) / file
-                            rel_base = root_dir if root_dir else p.parent
+                            rel_base = root_dir_p if root_dir_p else p.parent
                             zipf.write(full_f, full_f.relative_to(rel_base))
         return str(output_path)
     
@@ -243,7 +245,9 @@ class ActionBridge:
             has_meta = any(c in template for c in shell_metas) or force_shell
             
             def win_quote(s):
-                # Basic quoting for Windows CMD
+                # Security: Quote for Windows CMD, escaping " to prevent injection. 
+                # % escaping is omitted here as it's non-standard for direct CMD calls 
+                # (batch only). Reliable % defense requires shell=False.
                 return f'"{s.replace(chr(34), chr(92)+chr(34))}"'
             
             if not has_meta:
@@ -272,6 +276,9 @@ class ActionBridge:
 
     @staticmethod
     def execute_tool(template, path_str, project_root):
+        """
+        Execute a tool on a file path. Returns {stdout, stderr, exit_code, status}.
+        """
         try:
             cmd, is_shell, _ = ActionBridge._prepare_execution(template, path_str, project_root)
             
@@ -283,11 +290,38 @@ class ActionBridge:
                     cmd, _, _ = ActionBridge._prepare_execution(template, path_str, project_root, force_shell=True)
 
             logger.info(f"AUDIT - Executing external tool (Shell={is_shell}): {cmd}")
-            res = subprocess.run(cmd, shell=is_shell, capture_output=True, text=True, check=False)
-            return {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.returncode}
+            
+            # CR-B02 Hardening: Use Popen for mandatory kill-on-timeout (run() leaks on timeout)
+            with subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                text=True, 
+                shell=is_shell,
+                cwd=project_root if os.path.exists(project_root) and os.path.isdir(project_root) else None
+            ) as proc:
+                try:
+                    stdout, stderr = proc.communicate(timeout=300)
+                    return {
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "exit_code": proc.returncode,
+                        "pid": proc.pid,
+                        "status": "success"
+                    }
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = proc.communicate() # Drain pipes
+                    return {
+                        "stdout": stdout, 
+                        "stderr": stderr, 
+                        "exit_code": -1, 
+                        "error": "command timed out",
+                        "status": "timeout"
+                    }
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
-            return {"error": str(e)}
+            return {"stdout": "", "stderr": str(e), "exit_code": -1, "error": str(e), "status": "error"}
 
     @staticmethod
     def create_process(template, path_str, project_root):

@@ -8,5 +8,6 @@ from .duplicate import DuplicateWorker
 __all__ = [
     "DataManager", "FileUtils", "SearchWorker", "FileOps", 
     "ActionBridge", "PathValidator", "ContextFormatter", "FormatUtils", "DuplicateWorker",
+    "search_generator", "NoiseReducer",
     "logger"
 ]

@@ -47,7 +47,7 @@ class FileCortexApp:
             try:
                 self.load_project(last_dir)
             except Exception as e:
-                from file_cortex_core import logger
+                
                 logger.error(f"Failed to auto-load last project {last_dir}: {e}")
             
         # self.root.after(SEARCH_POLL_MS, self.process_queue) -> Moved to trigger_search for efficiency
@@ -484,8 +484,6 @@ class FileCortexApp:
             except Exception as e:
                 logger.error(f"Stats calculation failed: {e}")
 
-        threading.Thread(target=run_calc, daemon=True).start()
-
     def _update_stats_ui(self, item_count, file_count, token_count):
         try:
             self.lbl_stats.config(text=f"清单: {item_count} 项 ({file_count} 文件) | 估算 {FormatUtils.format_number(token_count)} Tokens")
@@ -662,6 +660,8 @@ class FileCortexApp:
                     # CR-14 Fix: Use read_text_smart for consistent encoding detection
                     content = FileUtils.read_text_smart(full_path, max_bytes=PREVIEW_LIMIT)
                     self.preview_text.insert(tk.END, content)
+                    # CR-C08 Fix: Re-enable edit button for text files
+                    self.btn_edit_save.config(state=tk.NORMAL)
                 except Exception as e:
                     self.preview_text.insert(tk.END, f"--- Error reading file: {e} ---")
                     self.btn_edit_save.config(state=tk.DISABLED)
@@ -862,7 +862,6 @@ class FileCortexApp:
         paths = self._get_ctx_paths()
         if not paths: return
         
-        import sys
         try:
             if sys.platform == 'win32':
                 # Secure execution: Use list arguments to avoid shell injection

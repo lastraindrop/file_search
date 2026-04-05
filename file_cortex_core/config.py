@@ -79,19 +79,35 @@ class DataManager:
         with self._lock:
             # Audit: track save state
             logger.debug(f"Config Save: Persisting {len(self.data['projects'])} projects.")
-            # Note: Aggressive re-normalization is removed from save() 
-            # to preserve memory references (v). 
-            # Normalization is now enforced at all entry points (get_project_data, load).
             data_to_save = copy.deepcopy(self.data)
 
-        config_file = _get_config_file()
-        try:
-            temp_file = config_file.with_suffix('.json.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, ensure_ascii=False, indent=4)
-            os.replace(temp_file, config_file)
-        except Exception as e:
-            logger.error(f"Config save error: {e}")
+            config_file = _get_config_file()
+            import tempfile
+            temp_path = None
+            try:
+                # CR-B04 Hardening: Use NamedTemporaryFile to ensure handle closure 
+                # before replacement/unlinking on Windows.
+                with tempfile.NamedTemporaryFile(
+                    'w', 
+                    encoding='utf-8', 
+                    suffix='.json.tmp', 
+                    dir=str(config_file.parent),
+                    delete=False
+                ) as f:
+                    temp_path = f.name
+                    json.dump(data_to_save, f, ensure_ascii=False, indent=4)
+                
+                # File is closed here, safe to replace on Windows
+                os.replace(temp_path, config_file)
+                temp_path = None
+            except Exception as e:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                logger.error(f"Config save error: {e}")
+                raise e
 
     DEFAULT_SCHEMA = {
         "excludes": ".git .idea __pycache__ venv node_modules .vscode dist build .DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache",
@@ -238,7 +254,7 @@ class DataManager:
     # to prevent RCE via config injection.
     MUTABLE_SETTINGS = frozenset({
         "excludes", "max_search_size_mb", "staging_list", "current_group",
-        "prompt_templates"
+        "prompt_templates", "search_settings"
     })
 
     def update_project_settings(self, project_path, settings: dict):
@@ -292,9 +308,12 @@ class DataManager:
         self.save()
 
     def remove_from_group(self, project_path, group_name, file_paths):
+        from .security import PathValidator
         proj = self.get_project_data(project_path)
         if group_name in proj["groups"]:
-            for path in file_paths:
-                if path in proj["groups"][group_name]:
-                    proj["groups"][group_name].remove(path)
+            for raw_path in file_paths:
+                # CR-C04 Fix: Normalize path for symmetric add/remove behavior
+                norm_p = PathValidator.norm_path(raw_path)
+                if norm_p in proj["groups"][group_name]:
+                    proj["groups"][group_name].remove(norm_p)
             self.save()
