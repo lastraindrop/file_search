@@ -40,6 +40,7 @@ def main():
             
         file_path_str = PathValidator.norm_path(args.path)
         if not PathValidator.is_safe(file_path_str, proj_root):
+            logger.error(f"Security: CLI block unsafe path: {args.path}")
             print(f"ERROR: Path '{args.path}' is outside project root or unsafe.")
             return
 

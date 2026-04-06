@@ -58,7 +58,14 @@ class PathValidator:
 
     @staticmethod
     def validate_project(path_str: str) -> pathlib.Path:
+        # Standardize representation before resolution
+        normalized_str = str(path_str).replace('/', '\\') if sys.platform == 'win32' else str(path_str)
+        
+        if sys.platform == 'win32' and normalized_str.startswith('\\\\'):
+             raise PermissionError("UNC/Network paths are blocked for security (Potential SMB credential leak).")
+
         p = pathlib.Path(path_str).resolve()
+        
         if not p.exists():
             raise FileNotFoundError(f"Path does not exist: {path_str}")
         if not p.is_dir():

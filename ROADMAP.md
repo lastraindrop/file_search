@@ -34,16 +34,15 @@
 - [x] **增强文件预览 (v5.7)**: 支持 Markdown、Mermaid 及超大文本编码识别。
 
 ## 📍 阶段 2.8：UX 增强与工业级稳定性 (v5.8.2 - 当前完成)
-- [x] **[DONE] 环境变量注入防御 (v5.8.1)**: ActionBridge 实现了针对 Windows `%` 符号的自动转义 (`%%`)。这既保留了合法文件名（如 `report_%DATE%.txt`）的兼容性，又彻底阻断了隐式环境变量扩展带来的信息泄露风险。
-- [x] **[DONE] 强化并发原子锁**: DataManager 实现了方法级 RLock 全流程保护，杜绝字典变动 RuntimeError。
-- [x] **[DONE] 后端全局异常监控 (v5.8.1)**: FastAPI 引入了全局 `exception_handler`，确保所有未捕获异常均以标准 JSON 格式返回，增强了 Headless 部署下的容错性与审计能力。
-- [x] **[DONE] 中日韩编码增强 (CJK Weighted v5.8.1)**: 重构了 `estimate_tokens` 算法，引入了针对 CJK 字符的加权系数 (Chars / 1.5)，解决了中文项目上下文溢出的预估误差。
-- [x] **[DONE] 前端网络层标准化 (App._fetch)**: `app.js` 统一封装了健壮的 Fetch 枢纽，支持自动 JSON 响应校验与加载状态同步。
-- [x] **[DONE] 路径搜集预设 (Profiles)**: 引入搜集符号预设库（GPT/RAG 模式），支持全端一键切换。
-- [x] **[DONE] 非侵入式状态流**: 桌面端实现 Status Stream 机制，告别干扰工作流的 Messagebox。
-- [x] **[DONE] 清单智能过滤器**: 实现了 Staging List 的实时动态过滤与批量清理。
-- [x] **[DONE] Windows 测试沙箱化**: 彻底解决了 Windows `PermissionError`，实现了残留进程递归杀伤与基准目录 `.pytest_temp_safe` 隔离。
-- [x] **[DONE] 动态参数对齐 (Dynamic Alignment)**: 确保了路径搜集符号、过滤器状态在跨端通信中的镜像对称。
+- [x] **[DONE] 工业级生产加固 (v5.8.2)**: 
+    - **并发原子锁补全**: DataManager 实现了方法级 RLock 锁，解决了 Web 并发访问导致的内存字典异常 (B5-B7)。
+    - **安全路径闭环**: 实现了基于 UNC/网络路径的拦截保护 (S1)，防止 Windows 环境下的凭据泄露与挂死。
+    - **前端 DX 系统**: 实现代码编辑器 Tab 缩进、Ctrl+S 远程保存与文件切换脏数据检查，极大提升操作手感。
+    - **搜索逻辑归一化**: 修复正则搜索路径感知缺陷 (B10)，确保跨端搜索参数的一致性。
+    - **背景任务自愈**: 修复了长期失效的背景统计计算线程 (B1)，恢复了实时资源监控。
+- [x] **[DONE] 环境变量注入防御 (v5.8.1)**: ActionBridge 实现了针对 Windows `%` 符号的自动转义 (`%%`)。
+- [x] **[DONE] 中日韩编码增强 (CJK Weighted)**: 重构了 `estimate_tokens` 算法，解决了中文项目预估误差。
+- [x] **[DONE] 183 项回归测试**: 补齐了针对恶意输入、并发冲突和跨平台边界的全自动化测试套件。
 
 ## 📍 阶段 3：多端协作与 RAG 准备 (2026 Q3+ 目标)
 - [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel/Word 语义碎片化抓取。

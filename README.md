@@ -16,16 +16,14 @@
 - **预览区内容检索 (v5.8.0)**：桌面端预览支持 `Ctrl+F` 高亮关键词查找。
 - **ActionBridge 异步流 (Real-time Streaming)**：支持外部编排工具的 `stdout` 实时推送。
 - **原子化持久化与自愈**：内核级项目配置 Schema 自动对齐、**线程安全单例模型 (RLock)** 及 原子化写入。
-- [x] **[DONE] Windows 测试沙箱化**: 彻底解决了 Windows `PermissionError`，实现了残留进程递归杀伤与基准目录 `.pytest_temp_safe` 隔离。
 - [x] **[DONE] 增量生产加固 (v5.8.2)**: 
-    - 引入了 CJK 权重补偿，Token 计数更精准。
-    - 统一了前端 Fetch 网络层 (`App._fetch`) 错误处理。
-    - 实现了 FastAPI 全局异常 JSON 响应劫持。
-    - 优化了 Windows 内置指令执行 fallback 逻辑。
-    - 强化了 Context 导出 OOM 保护 (1MB 限制)。
-    - 增加了敏感目录 (.git, .env) 注册拦截。
-    - 提升了搜索生成器资源回收效率与 atexit 线程池清理。
-    - 实现了 Base64 大块内容的自动过滤 (NoiseReducer)。
+    - **安全闭锁**: 实现了 UNC/网络路径拦截 (S1) 与 AppleScript 注入拦截 (S6)。
+    - **并发鲁棒性**: DataManager 实现了方法级 RLock 全流程保护 (B5-B7)，修复了 Web 并发下的配置竞态。
+    - **前端 DX 进化**: 引入代码编辑器 Tab 缩进、Ctrl+S 快速保存、及文件切换“脏数据”检查。
+    - **搜索逻辑对齐**: 修复了正则搜索无法匹配全路径的 Bug (B10)，实现动态参数 100% 对齐。
+    - **资源治理**: 修复了背景统计线程 (B1) 与 Staging 列表同步 (B3) 缺陷。
+    - **输入溢出防御**: 增加了 FileSaveRequest 的 10MB 长度限制 (S3) 与生成 Context 的 OOM 熔断保护。
+    - **内核稳定性**: 补齐了 183 项全自动化回归测试 (Pytest)。
 - **极速查重工具 (v5.5)**：引入 `DuplicateWorker`（后台线程），采用“大小预筛 + SHA256 哈希”策略。
 - **非侵入式 UI 反馈 (v5.8.0)**：桌面端引入 Status Stream 机制，减少阻塞式 Messagebox 弹出。
 - **工业级并发加固 (v5.8.0)**：DataManager 方法级原子锁、共享线程池优化，彻底杜绝高并发下的配置损坏。

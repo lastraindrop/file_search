@@ -5,6 +5,11 @@ import threading
 import atexit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# --- Constants ---
+MAX_SEARCH_RESULTS = 5000
+DEFAULT_BATCH_SIZE = 40
+DEFAULT_MAX_SIZE_MB = 5
+
 SHARED_SEARCH_POOL = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
 atexit.register(SHARED_SEARCH_POOL.shutdown, wait=False)
 
@@ -13,8 +18,8 @@ from .utils import FileUtils, FormatUtils
 
 def search_generator(root_dir, search_text, search_mode, manual_excludes, 
                      include_dirs=False, use_gitignore=True, 
-                     is_inverse=False, case_sensitive=False, max_results=5000,
-                     max_size_mb=5, stop_event=None,
+                     is_inverse=False, case_sensitive=False, max_results=MAX_SEARCH_RESULTS,
+                     max_size_mb=DEFAULT_MAX_SIZE_MB, stop_event=None,
                      positive_tags=None, negative_tags=None):
     """
     Multi-mode file search generator.
@@ -39,14 +44,18 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
     regex_pos = []
     flags = 0 if case_sensitive else re.IGNORECASE
     for tag in all_pos:
-        # Check if it's a sub-regex tag like /pattern/
-        if tag.startswith('/') and tag.endswith('/') and len(tag) > 2:
-            try:
-                regex_pos.append(re.compile(tag[1:-1], flags))
-                continue
-            except re.error: pass
-        
-        plain_pos.append(tag if case_sensitive else tag.lower())
+        try:
+            # Check if it's a sub-regex tag like /pattern/
+            if tag.startswith('/') and tag.endswith('/') and len(tag) > 2:
+                try:
+                    regex_pos.append(re.compile(tag[1:-1], flags))
+                    continue
+                except re.error: 
+                    pass
+            
+            plain_pos.append(tag if case_sensitive else tag.lower())
+        except Exception:
+            pass
     
     re_obj = None
     if search_mode == 'regex' and search_text.strip():
@@ -83,7 +92,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 has_neg = any(nk in target_path for nk in neg_keywords)
                 found = has_plain and has_regex and not has_neg
             elif search_mode == 'regex' and re_obj:
-                found = re_obj.search(name) is not None
+                # CR-B10 Fix: Regex mode matches against full relative path
+                found = re_obj.search(target_path) is not None
             
         return found != is_inverse
     
@@ -174,7 +184,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         "is_inverse": is_inverse,
                         **meta
                     }
-                    if len(content_futures) >= 40:
+                    if len(content_futures) >= DEFAULT_BATCH_SIZE:
                         # Adaptive Batching
                         batch = [f for f in content_futures if f.done()]
                         if not batch:
@@ -239,8 +249,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
 class SearchWorker(threading.Thread):
     def __init__(self, root_dir, search_text, search_mode, manual_excludes, 
                  include_dirs, result_queue, stop_event, use_gitignore=True,
-                 is_inverse=False, case_sensitive=False, max_results=5000,
-                 max_size_mb=5, positive_tags=None, negative_tags=None):
+                 is_inverse=False, case_sensitive=False, max_results=MAX_SEARCH_RESULTS,
+                 max_size_mb=DEFAULT_MAX_SIZE_MB, positive_tags=None, negative_tags=None):
         super().__init__()
         self.root_dir = root_dir
         self.search_text = search_text

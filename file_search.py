@@ -552,6 +552,8 @@ class FileCortexApp:
                 self.root.after(0, lambda: self._update_stats_ui(item_count, count, total_tokens))
             except Exception as e:
                 logger.error(f"Stats calculation failed: {e}")
+        
+        threading.Thread(target=run_calc, daemon=True).start()
 
     def _update_stats_ui(self, item_count, file_count, token_count):
         try:
@@ -781,17 +783,15 @@ class FileCortexApp:
         self.root.clipboard_clear(); self.root.clipboard_append(tree_text); self.show_status("结构已复制")
 
     def refresh_staging_ui(self, apply_filter=False):
-        # We don't clear self.staging_files here, only the UI
+        # Clear UI and sync source
         for i in self.tree_staging.get_children(): self.tree_staging.delete(i)
+        self.staging_files.clear()
         
         if self.current_proj_config:
             # Data Isolation: pass a COPY of the config list to the UI 
             staging_data = list(self.current_proj_config.get("staging_list", []))
             filter_text = self.staging_filter_var.get().lower() if apply_filter else ""
             
-            # Reset UI cache if not filtering
-            if not apply_filter: self.staging_files.clear()
-
             for p_raw in staging_data:
                 p_str = PathValidator.norm_path(p_raw)
                 p = pathlib.Path(p_str)
@@ -802,8 +802,7 @@ class FileCortexApp:
                 
                 if not p.exists(): continue
                 
-                if p_str not in self.staging_files:
-                    self.staging_files.append(p_str)
+                self.staging_files.append(p_str)
                 
                 sz = p.stat().st_size if p.is_file() else 0
                 sz_str = FormatUtils.format_size(sz)
@@ -985,8 +984,8 @@ class FileCortexApp:
                 cmd = ["powershell", "-NoProfile", "-Command", "Set-Clipboard -Path $args"]
                 subprocess.run(cmd + [str(p) for p in paths], check=True)
             elif sys.platform == 'darwin':
-                # macOS: Copying files to clipboard requires AppleScript
-                path_list = ",".join([f'POSIX file "{str(p)}"' for p in paths])
+                # macOS: Copying files to clipboard requires AppleScript. Escape quotes to prevent injection.
+                path_list = ",".join([f'POSIX file "{str(p).replace("\"", "\\\"")}"' for p in paths])
                 script = f'tell app "Finder" to set the clipboard to {{{path_list}}}'
                 subprocess.run(["osascript", "-e", script], check=True)
             else:

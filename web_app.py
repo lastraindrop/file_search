@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.requests import Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 import os
 import pathlib
@@ -20,9 +20,15 @@ app = FastAPI(title="FileCortex v5.8.2 API")
 async def global_exception_handler(request: Request, exc: Exception):
     """Fallback handler for unhandled server-side exceptions."""
     logger.error(f"Global Unhandled Exception: {exc}", exc_info=True)
+    
+    # Hide internal details in production
+    detail = f"Internal Server Error: {str(exc)}"
+    if os.getenv("FCTX_PROD") == "1":
+        detail = "Internal Server Error. Please check server logs for details."
+        
     return JSONResponse(
         status_code=500,
-        content={"status": "error", "detail": f"Internal Server Error: {str(exc)}"}
+        content={"status": "error", "detail": detail}
     )
 
 # --- Global State ---
@@ -66,7 +72,7 @@ class FileMoveRequest(BaseModel):
 
 class FileSaveRequest(BaseModel):
     path: str
-    content: str
+    content: str = Field(..., max_length=10_000_000) # Limit to 10MB to prevent OOM
 
 class FileCreateRequest(BaseModel):
     parent_path: str

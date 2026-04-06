@@ -8,12 +8,11 @@
 为了防止路径越权 (Path Traversal) 和 命令注入 (Command Injection)，本项目采用了严格的校验机制：
 *   **路径权限注册制**: 只有通过 `/api/open` 显式注册的目录才能作为 `project_root`。
 *   **黑名单保护**: `PathValidator` 采用路径组件精准匹配，拦截对 `Windows`, `System32`, `.git`, `.env` 等系统及敏感目录的访问。
-*   **ActionBridge 安全执行 (v5.8.1)**: 
-    *   **Windows**: 默认对不含 Shell 元字符 (`&|<>^%`) 的模板采用 `shell=False` 列表模式。**v5.8.1 引入了智能内置命令识别**：系统会自动检测第一个单词（如 `echo`, `dir`），并先剥离其可能的引号，再调用 `shutil.which`。若未找见可执行文件，则标记为内置命令并 fallback 到 `shell=True`。
-    *   **注入防御 (v5.8.1)**：在启用 `shell=True` 时，ActionBridge 会自动将参数中的 `%` 符号转义为 `%%`。这确保了用户文件名中的特殊字符会被原文传递至外部工具，而不会被 CMD 环境变量扩展。
-    *   **Unix/macOS**: 采用 `shell=False` 结合 `shlex.split` 进行列表级参数分发。
-*   **API 前端通信 (App._fetch)**: 前端 `app.js` 现已强制要求所有异步请求通过 `App._fetch` 枢纽，实现自动的 4xx/5xx 状态码拦截、JSON 响应解构及全局加载状态一致性。
-*   **API 权限隔离 (v5.1)**: 所有项目相关 API (Config, Settings, Session, Favorites) 必须强制过 `get_valid_project_root` 校验，防止越权访问。
+*   **UNC 路径拦截 (v5.8.2)**: `PathValidator` 增加了对 Windows UNC 路径 (如 `\\server\share`) 的识别与拦截。此项安全加固防止了恶意路径导致的 SMB 凭据泄露风险，并规避了访问不存在的网络路径时造成的进程阻塞。
+*   **注入防御 (v5.8.2)**：ActionBridge 增加了对 AppleScript 指令的双引号转义防护，彻底堵塞了 macOS 环境下的命令注入途径。
+*   **API 前端通信 (App._fetch)**: 前端 `app.js` 现已强制要求所有异步请求通过 `App._fetch` 枢纽，支持全局快捷键协同（如 Ctrl+S 被 `init()` 捕获并分发至 `toggleEdit`）。
+*   **输入限制与 OOM (v5.8.2)**: `web_app.py` 引入了 `FileSaveRequest` 的 10MB 长度阈值，配合 `FileUtils.read_text_smart` 形成全链路内存溢出防护。
+*   **参数动态对齐 (v5.8.2)**: 修复了后端统计逻辑在处理 Regex 时的相对路径映射误差，确保前端过滤器的渲染与后端计算完全镜像。
 *   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
 *   **专用配置 API (v5.3)**: `custom_tools` 与 `quick_categories` 已移至专用端点 (`/api/project/tools`, `/api/project/categories`)，并增加了格式校验与路径穿越防护，彻底切断了通过 settings 注入实现 RCE 的可能性。
 *   **跨项目移动防护 (v5.3)**: `/api/fs/move` 路由强制执行 `src_root == dst_root` 校验，禁止在不同项目间移动文件。
@@ -76,7 +75,7 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **内容检索**: 预览区支持 `Ctrl+F` 实时检索。
 
 ## 🧪 测试方法论
-本项目包含 177 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
+本项目包含 183 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
 *   **动态参数对齐 (Dynamic Parameter Alignment)**: 
     *   **原则**: 所有跨端 (UI/Web/CLI) 调用的路径解析必须经过 `PathValidator.norm_path` 处理。
     *   **原则**: 所有的命令执行必须通过 `ActionBridge._prepare_execution` 枢纽，严禁在业务逻辑中直接拼凑 shell 命令。
@@ -86,7 +85,7 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
     ```bash
     python -m pytest
     ```
-    v5.8 版本共包含 **177** 项全自动化测试用例。
+    v5.8 版本共包含 **183** 项全自动化测试用例。
 
 ## 🛠️ 打包与分发
 *   **桌面版**: 使用 `build_exe.py` (封装了 PyInstaller) 进行单文件打包。

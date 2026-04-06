@@ -42,6 +42,8 @@ const App = {
 
     showToast: (message, type = 'success') => {
         const container = document.querySelector('.toast-container');
+        if (!container) return; // Silent skip if UI not ready
+        
         const toastEl = document.createElement('div');
         toastEl.className = `toast align-items-center text-bg-${type} border-0 animate-in mb-2`;
         toastEl.setAttribute('role', 'alert');
@@ -68,6 +70,34 @@ const App = {
             }
         });
         
+        // Editor Shortcuts: Tab as indent, Ctrl+S as Save
+        const editor = document.getElementById('codeEditor');
+        if (editor) {
+            editor.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const start = editor.selectionStart;
+                    const end = editor.selectionEnd;
+                    editor.value = editor.value.substring(0, start) + "    " + editor.value.substring(end);
+                    editor.selectionStart = editor.selectionEnd = start + 4;
+                }
+                if (e.ctrlKey && e.key === 's') {
+                    e.preventDefault();
+                    App.toggleEdit();
+                }
+            });
+        }
+        
+        // Global Shortcuts: Ctrl+S save
+        window.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 's') {
+                if (App.state.isEditing) {
+                    e.preventDefault();
+                    App.toggleEdit();
+                }
+            }
+        });
+
         // Restore search settings from localStorage
         const savedExcludes = localStorage.getItem('searchExcludes');
         const excludeIn = document.getElementById('excludeInput');
@@ -297,6 +327,11 @@ const App = {
 
     // --- File Operations ---
     previewFile: async (path) => {
+        // [Safety Check] Dirty Check before switching
+        if (App.state.isEditing && App.state.currentFile !== path) {
+            if (!confirm("Discard unsaved changes and switch file?")) return;
+        }
+        
         App.state.currentFile = path;
         App.state.isEditing = false;
         document.getElementById('fileControls').style.display = 'inline-flex';
@@ -552,22 +587,45 @@ const App = {
             const data = JSON.parse(event.data);
             if (data.status === "DONE") return App.state.socket.close();
             App.renderSearchResultItem(data);
+            
+            // Auto-scroll to keep bottom visible
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
         };
     },
 
     renderSearchResultItem: (data) => {
         const list = document.getElementById('searchResultsList');
         const item = document.createElement('div');
-        item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer';
+        item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer d-flex align-items-center';
         item.setAttribute('data-path', data.path);
         item.style.cursor = 'pointer';
-        item.innerHTML = `
+        
+        // Add Checkbox for batch actions
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input me-3 x-small';
+        cb.style.width = '0.8rem';
+        cb.style.height = '0.8rem';
+        cb.checked = App.state.selectedFiles.has(data.path);
+        cb.onclick = (e) => {
+            e.stopPropagation();
+            if (cb.checked) App.state.selectedFiles.add(data.path);
+            else App.state.selectedFiles.delete(data.path);
+            App.updateBulkUI();
+        };
+        item.appendChild(cb);
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'flex-grow-1 overflow-hidden';
+        contentDiv.innerHTML = `
             <div class="d-flex justify-content-between align-items-center">
                 <div class="fw-bold text-info">${App.escapeHtml(data.name)}</div>
                 <div class="text-muted x-small" style="font-size:0.7rem">${data.mtime_fmt || ''}</div>
             </div>
             <div class="small text-muted text-truncate">${App.escapeHtml(data.path)}</div>
         `;
+        item.appendChild(contentDiv);
+        
         item.onclick = () => App.previewFile(data.path);
         item.oncontextmenu = (e) => {
             e.preventDefault();
@@ -961,16 +1019,16 @@ const App = {
     // --- Bulk Operations (Impl) ---
     toggleSelectAll: (checked) => {
         App.state.selectedFiles.clear();
-        if (checked) {
-            // This would normally select all visible files in the tree or search results
-            // For now, we'll just handle the state and count.
-            // Full implementation would require a recursive tree traversal or search result mapping.
-            const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
-            allItems.forEach(item => {
-                const path = item.getAttribute('data-path');
-                if (path) App.state.selectedFiles.add(path);
-            });
-        }
+        // [Fix Bug 1] Sync memory AND UI checkboxes
+        const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
+        allItems.forEach(item => {
+            const path = item.getAttribute('data-path');
+            if (path) {
+                if (checked) App.state.selectedFiles.add(path);
+                const cb = item.querySelector('.form-check-input');
+                if (cb) cb.checked = checked;
+            }
+        });
         App.updateBulkUI();
     },
 

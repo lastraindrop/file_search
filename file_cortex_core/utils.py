@@ -46,7 +46,8 @@ class FormatUtils:
         if not text:
             return 0
         # Calculate non-ascii count (approximate CJK/symbols)
-        non_ascii = len([c for c in text if ord(c) > 127])
+        # B05 Hardening: Use sum() generator for O(1) space and faster character scan
+        non_ascii = sum(1 for c in text if ord(c) > 127)
         ascii_count = len(text) - non_ascii
         return int((ascii_count / 4) + (non_ascii / 1.5))
 
@@ -249,7 +250,18 @@ class FileUtils:
                     
                     for f in files:
                         f_path = curr_root_path / f
-                        rel = f_path.relative_to(root) if (root and root in f_path.parents) else f_path
+                        
+                        # CR-B09 Fix: Robust relative path calculation
+                        is_rel = False
+                        try:
+                            if root:
+                                if hasattr(f_path, 'is_relative_to'):
+                                    is_rel = f_path.is_relative_to(root)
+                                else:
+                                    is_rel = (root == f_path or root in f_path.parents)
+                        except Exception: pass
+                        
+                        rel = f_path.relative_to(root) if (root and is_rel) else f_path
                         if not FileUtils.should_ignore(f, rel, excludes, git_spec, False):
                             unique_files.add(str(f_path))
                             

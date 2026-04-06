@@ -148,34 +148,36 @@ class DataManager:
 
     def add_to_recent(self, path: str):
         """Adds a project path to the top of recent projects list."""
-        try:
-            p = PathValidator.norm_path(path)
-        except:
-            p = path
-            
-        if p in self.data["recent_projects"]:
-            self.data["recent_projects"].remove(p)
-        self.data["recent_projects"].insert(0, p)
-        # Limit to 15 recent projects
-        self.data["recent_projects"] = self.data["recent_projects"][:15]
-        self.data["last_directory"] = p
-        self.save()
+        with self._lock:
+            try:
+                p = PathValidator.norm_path(path)
+            except Exception:
+                p = path
+                
+            if p in self.data["recent_projects"]:
+                self.data["recent_projects"].remove(p)
+            self.data["recent_projects"].insert(0, p)
+            # Limit to 15 recent projects
+            self.data["recent_projects"] = self.data["recent_projects"][:15]
+            self.data["last_directory"] = p
+            self.save()
 
     def toggle_pinned(self, path: str):
         """Toggles the pinned status of a project."""
-        try:
-            p = PathValidator.norm_path(path)
-        except Exception:
-            p = path
-            
-        if p in self.data["pinned_projects"]:
-            self.data["pinned_projects"].remove(p)
-            status = False
-        else:
-            self.data["pinned_projects"].append(p)
-            status = True
-        self.save()
-        return status
+        with self._lock:
+            try:
+                p = PathValidator.norm_path(path)
+            except Exception:
+                p = path
+                
+            if p in self.data["pinned_projects"]:
+                self.data["pinned_projects"].remove(p)
+                status = False
+            else:
+                self.data["pinned_projects"].append(p)
+                status = True
+            self.save()
+            return status
 
     def get_workspaces_summary(self) -> dict:
         """Returns a categorized summary of workspaces."""
@@ -186,21 +188,22 @@ class DataManager:
 
     def get_project_data(self, path_str: str) -> dict:
         """Returns (and initializes if needed) the configuration for a given project."""
-        try:
-            path_key = PathValidator.norm_path(path_str)
-            logger.debug(f"Config Access: Request='{path_str}' -> Key='{path_key}'")
-        except Exception:
-            path_key = path_str
+        with self._lock:
+            try:
+                path_key = PathValidator.norm_path(path_str)
+                logger.debug(f"Config Access: Request='{path_str}' -> Key='{path_key}'")
+            except Exception:
+                path_key = path_str
+                
+            if path_key not in self.data["projects"]:
+                self.data["projects"][path_key] = copy.deepcopy(self.DEFAULT_SCHEMA)
+            else:
+                proj = self.data["projects"][path_key]
+                for key, val in self.DEFAULT_SCHEMA.items():
+                    if key not in proj:
+                        proj[key] = copy.deepcopy(val)
             
-        if path_key not in self.data["projects"]:
-            self.data["projects"][path_key] = copy.deepcopy(self.DEFAULT_SCHEMA)
-        else:
-            proj = self.data["projects"][path_key]
-            for key, val in self.DEFAULT_SCHEMA.items():
-                if key not in proj:
-                    proj[key] = copy.deepcopy(val)
-        
-        return self.data["projects"][path_key]
+            return self.data["projects"][path_key]
 
     def batch_stage(self, project_path: str, paths: list[str]) -> int:
         """Adds multiple paths to the staging list atomically."""
