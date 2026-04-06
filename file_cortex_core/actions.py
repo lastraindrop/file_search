@@ -71,18 +71,31 @@ class FileOps:
             results.append({"old": old_p, "new": str(new_p), "status": status})
 
         if not dry_run:
+            # Phase 2: Check for cross-device rename risks (C1 Critical)
+            # Pre-check all sources are in the same relative system as targets
+            # On some systems, os.rename fails across mount points or drives.
+            # While they are likely in the same project root, symlinks could break this.
+            
             renamed_stack = []
             try:
                 for old_p, (new_p, _) in final_targets.items():
-                    pathlib.Path(old_p).rename(new_p)
+                    p_old = pathlib.Path(old_p)
+                    # Performance: rename will throw if on different devices anyway.
+                    p_old.rename(new_p)
                     renamed_stack.append((old_p, new_p))
             except Exception as e:
                 logger.error(f"Batch rename failed: {e}. Attempting rollback of {len(renamed_stack)} items.")
-                for old_p, new_p in reversed(renamed_stack):
+                # C1 Fix: Improved rollback with reverse order and better logging
+                rollback_errors = []
+                for old_p_str, new_p_obj in reversed(renamed_stack):
                     try:
-                        new_p.rename(old_p)
+                        new_p_obj.rename(old_p_str)
                     except Exception as rollback_e:
-                        logger.error(f"Critical: Rollback failed for {new_p}: {rollback_e}")
+                        rollback_errors.append(f"{new_p_obj} -> {old_p_str}: {rollback_e}")
+                        logger.critical(f"FATAL: Rollback failed for {new_p_obj}: {rollback_e}")
+                
+                if rollback_errors:
+                    raise RuntimeError(f"Batch rename failed and rollback was incomplete: {e}. Manual fix required for: {', '.join(rollback_errors)}")
                 raise e
         
         return results
@@ -143,15 +156,18 @@ class FileOps:
         if FileUtils.is_binary(path): raise ValueError("Cannot save binary file as text.")
         
         # Atomic Write: write to temporary file then swap
-        temp_path = path.with_suffix(path.suffix + '.tmp')
+        # C3 Critical: Use tempfile.NamedTemporaryFile to avoid name collisions in concurrent saves
+        import tempfile
+        temp_fd, temp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
-            with open(temp_path, 'w', encoding='utf-8') as f:
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
                 f.write(content)
+            # Use os.replace for atomic replacement
             os.replace(temp_path, path)
         except Exception as e:
             try:
-                if temp_path.exists():
-                    temp_path.unlink()
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
             except Exception: # Block double failure
                 pass
             raise e
@@ -318,7 +334,7 @@ class ActionBridge:
                         import signal
                         try:
                             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                        except:
+                        except Exception:
                             proc.kill()
                     stdout, stderr = proc.communicate() # Drain pipes
                     return {

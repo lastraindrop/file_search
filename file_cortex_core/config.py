@@ -320,7 +320,6 @@ class DataManager:
             self.save()
 
     def remove_from_group(self, project_path, group_name, file_paths):
-        from .security import PathValidator
         with self._lock:
             proj = self.get_project_data(project_path)
             if group_name in proj["groups"]:

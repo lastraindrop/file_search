@@ -579,7 +579,8 @@ const App = {
         const resultsDiv = document.getElementById('searchResultsList');
         resultsDiv.innerHTML = '<div class="text-center p-3">Searching...</div>';
 
-        const wsUrl = `ws://${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${mode}`;
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${mode}`;
         App.state.socket = new WebSocket(wsUrl);
         
         App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };

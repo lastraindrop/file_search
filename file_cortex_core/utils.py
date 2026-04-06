@@ -242,9 +242,19 @@ class FileUtils:
                     for d in dirs:
                         d_path = curr_root_path / d
                         # CR-07 Fix: Handle root == d_path
-                        if root == d_path or root in d_path.parents:
-                            rel = d_path.relative_to(root) if (root and root in d_path.parents) else d_path
+                        if root:
+                            if root == d_path:
+                                rel = pathlib.Path(".")
+                            elif root in d_path.parents:
+                                rel = d_path.relative_to(root)
+                            else:
+                                rel = d_path
+                            
                             if not FileUtils.should_ignore(d, rel, excludes, git_spec, True):
+                                valid_dirs.append(d)
+                        else:
+                            # No root, assume d is relative?
+                            if not FileUtils.should_ignore(d, d_path, excludes, git_spec, True):
                                 valid_dirs.append(d)
                     dirs[:] = valid_dirs
                     
@@ -276,31 +286,34 @@ class FileUtils:
             max_bytes: Optional. If set, truncates the returned content to approximately
                        this many bytes. Used for preview to prevent OOM.
         """
+        # C2 Critical: Reduce double I_O by using single handle for detection and reading
         try:
             from charset_normalizer import from_bytes
-            # Only read header for encoding detection to prevent OOM
             with open(file_path, 'rb') as f:
-                header = f.read(65536) # Increased header size for better detection
-            
-            best_match = from_bytes(header).best()
-            # charset-normalizer might return None if no high-confidence match
-            if best_match and best_match.encoding:
-                encoding = best_match.encoding
-            else:
-                # Fallback heuristic for common CJK/Legacy encodings if utf-8 fails
-                encoding = 'utf-8'
-            
-            if max_bytes:
-                with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-                    return f.read(max_bytes)
-            return file_path.read_text(encoding=encoding, errors='ignore')
+                header = f.read(65536) # Read chunk for detection
+                
+                best_match = from_bytes(header).best()
+                encoding = best_match.encoding if (best_match and best_match.encoding) else 'utf-8'
+                
+                # Seek back to start after detection
+                f.seek(0)
+                
+                if max_bytes:
+                    # Optimized read: read only up to max_bytes including overhead
+                    # Note: decoding might fail if we cut in the middle of a multi-byte char
+                    raw = f.read(max_bytes + 10) # Over-read slightly
+                    try:
+                        # Decode and slice to exact character count limit
+                        return raw.decode(encoding, errors='ignore')[:max_bytes]
+                    except Exception:
+                        return raw.decode('utf-8', errors='ignore')[:max_bytes]
+                else:
+                    return f.read().decode(encoding, errors='ignore')
         except Exception as e:
             logger.debug(f"Smart read failed for {file_path}: {e}")
             pass
-        # Fallback to utf-8 ignore
-        if max_bytes:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read(max_bytes)
+        
+        # Super-fallback
         return file_path.read_text('utf-8', 'ignore')
 
     @staticmethod

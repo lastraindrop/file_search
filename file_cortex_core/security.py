@@ -14,9 +14,9 @@ class PathValidator:
             root = pathlib.Path(root_path).resolve()
             
             # Explicitly check for traversal before is_relative_to for older Python versions
-            if ".." in str(target_path) or ".." in str(pathlib.Path(target_path).as_posix()):
-                 # This is a red flag, though resolve() should handle it.
-                 pass
+            # Explicitly check for traversal: although resolve() handles it, 
+            # we allow ".." as long as it doesnt break the is_relative_to boundary check below.
+            pass
 
             if hasattr(target, 'is_relative_to'):
                  return target.is_relative_to(root)

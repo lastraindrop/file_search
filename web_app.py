@@ -462,8 +462,9 @@ def get_proj_config(path: str):
 @app.get("/api/project/prompt_templates")
 def get_prompt_templates(path: str):
     root, proj_config = get_project_config_for_path(path)
-    if not root:
-         raise HTTPException(status_code=403, detail="Access denied")
+    if not root or proj_config is None:
+         # H8 Fix: Graceful handling for missing project configuration
+         return {}
     return proj_config.get("prompt_templates", {})
 
 @app.get("/api/workspaces")
@@ -478,7 +479,8 @@ def toggle_pin(req: WorkspacePinRequest):
 @app.get("/api/recent_projects")
 def get_recent_projects_legacy():
     # Keep for old UI compatibility during migration if needed, but we'll update UI soon
-    return [{"name": pathlib.Path(p).name, "path": p} for p in _get_dm().data["projects"].keys() if os.path.exists(p)]
+    # M14 Fix: Secure path check
+    return [{"name": pathlib.Path(p).name, "path": p} for p in _get_dm().data["projects"].keys() if p and os.path.exists(p)]
 
 
 @app.post("/api/project/note")
@@ -593,6 +595,7 @@ def api_stage_all(req: StageAllRequest):
     except Exception as e:
         logger.error(f"Stage All failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/actions/categorize")
 def api_categorize(req: CategorizeRequest):
     try:
@@ -691,7 +694,7 @@ def api_terminate_process(req: ProcessTerminateRequest):
             try:
                 if os.name == 'nt':
                     # Use taskkill to ensure child processes are also handled on Windows
-                    import subprocess
+                    # M5 Fix: Removed redundant import subprocess
                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(req.pid)], capture_output=True)
                 else:
                     # Kill entire process group on Unix

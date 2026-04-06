@@ -630,7 +630,6 @@ class FileCortexApp:
         self._perform_search()
 
     def _perform_search(self):
-        self._search_timer = None
         if not self.current_dir:
             return
         if self.search_thread and self.search_thread.is_alive():
@@ -714,10 +713,25 @@ class FileCortexApp:
         tree = event.widget; sel = tree.selection()
         if not sel: return
         full_path = None
-        if tree == self.tree_search: full_path = self.current_dir / tree.item(sel[0])['values'][1]
+        if tree == self.tree_search:
+            try:
+                # H1/H2 Fix: Secure path resolution and boundary checks
+                vals = tree.item(sel[0])['values']
+                if len(vals) < 2: return
+                rel_p_str = vals[1]
+                
+                # Normalize and ensure it's within project root
+                full_path = (self.current_dir / rel_p_str).resolve()
+                if not PathValidator.is_safe(full_path, self.current_dir):
+                    logger.warning(f"Preview blocked: Path outside project root: {full_path}")
+                    return
+            except (IndexError, ValueError) as e:
+                logger.error(f"Failed to resolve preview path: {e}")
+                return
         elif tree == self.tree_proj: full_path = self.get_tree_path(sel[0])
         elif tree == self.tree_staging: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
         elif tree == self.tree_fav: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
+        
         if not full_path or not full_path.exists(): return
         
         self.current_preview_path = full_path
@@ -749,7 +763,13 @@ class FileCortexApp:
         parts = []
         curr = node_id
         while curr:
-            name = self.tree_proj.item(curr)['text'].replace("📁 ", "").replace("📄 ", "")
+            # L2 Fix: More robust prefix removal
+            item_text = self.tree_proj.item(curr)['text']
+            # Remove any non-alphanumeric/non-symbol prefix that looks like an icon
+            name = item_text.strip()
+            for icon in ["📁 ", "📄 ", "📁", "📄"]:
+                if name.startswith(icon):
+                    name = name[len(icon):].strip()
             parts.insert(0, name)
             curr = self.tree_proj.parent(curr)
         return self.current_dir.parent / pathlib.Path(*parts) if parts else None
@@ -991,7 +1011,8 @@ class FileCortexApp:
             else:
                 # Linux: Often requires xclip or wl-copy, but file copying is non-standard
                 # Fallback to copy paths
-                path_str = "\\n".join([str(p) for p in paths])
+                # M10 Fix: Correct newline character in Linux
+                path_str = "\n".join([str(p) for p in paths])
                 self.root.clipboard_clear()
                 self.root.clipboard_append(path_str)
                 messagebox.showinfo("提示", "Linux 下已将文件路径复制到剪切板。")
@@ -1223,7 +1244,6 @@ class FileCortexApp:
         DuplicateFinderWindow(self.root, self.data_mgr, self.current_dir, 
                               self.exclude_var.get(), self.use_gitignore_var.get())
 
-    def open_batch_io_dialog(self): pass 
 
 class BatchRenameWindow(tk.Toplevel):
     """

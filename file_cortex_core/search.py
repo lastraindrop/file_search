@@ -85,15 +85,35 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 has_neg = any(nk in target_path for nk in neg_keywords)
                 found = has_plain and has_regex and not has_neg
             elif search_mode == 'exact':
-                # Similar logic for exact: check full match on all plain_pos?
-                # Usually exact means "this substring must be present". If multiple, all must be present.
-                has_plain = all(k in target_path for k in plain_pos)
-                has_regex = all(r.search(target_path) for r in regex_pos)
-                has_neg = any(nk in target_path for nk in neg_keywords)
-                found = has_plain and has_regex and not has_neg
-            elif search_mode == 'regex' and re_obj:
-                # CR-B10 Fix: Regex mode matches against full relative path
-                found = re_obj.search(target_path) is not None
+                # M13/M15 Fix: Real exact mode.
+                # All keywords must be present as a SINGLE sequence or we treat
+                # the trimmed search text as the literal substring to find.
+                # If there's a search_text, it must be present as a whole.
+                if search_text_processed:
+                    found = search_text_processed in target_path
+                else:
+                    # Fallback to smart-like behavior for tags if search_text is empty
+                    found = all(k in target_path for k in plain_pos)
+                
+                if found:
+                    # Also check regex tags and negative keywords
+                    has_regex = all(r.search(target_path) for r in regex_pos)
+                    has_neg = any(nk in target_path for nk in neg_keywords)
+                    found = found and has_regex and not has_neg
+            elif search_mode == 'regex':
+                if re_obj:
+                    # CR-B10 Fix: Regex mode matches against full relative path
+                    found = re_obj.search(target_path) is not None
+                else:
+                    # H3 Fix: If regex mode has no re_obj (empty query), it should 
+                    # only match if there are positive tags/regex tags.
+                    if plain_pos or regex_pos:
+                        has_plain = all(k in target_path for k in plain_pos)
+                        has_regex = all(r.search(target_path) for r in regex_pos)
+                        has_neg = any(nk in target_path for nk in neg_keywords)
+                        found = has_plain and has_regex and not has_neg
+                    else:
+                        found = False
             
         return found != is_inverse
     

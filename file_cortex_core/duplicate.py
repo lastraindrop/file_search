@@ -44,7 +44,13 @@ class DuplicateWorker(threading.Thread):
             for root, dirs, files in os.walk(self.root_dir):
                 if self.stop_event.is_set(): return
                 
-                rel_root = pathlib.Path(root).relative_to(self.root_dir)
+                try:
+                    rel_root = pathlib.Path(root).relative_to(self.root_dir)
+                except (ValueError, RuntimeError):
+                    # H9 Fix: Fallback for paths outside root_dir (e.g. symlinks)
+                    # Use a safestring-based calculation or just assume root is the name
+                    rel_root = pathlib.Path(root.replace(str(self.root_dir), "").lstrip(os.sep))
+                
                 # Apply ignore logic to dirs to prune early
                 dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, self.excludes, self.git_spec, is_dir=True)]
                 
