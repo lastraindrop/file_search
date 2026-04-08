@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "file-cortex"
+version = "6.0.0"
+authors = [
+    { name = "Developer", email = "dev@example.com" },
+]
+description = "A powerful workspace orchestrator and file processor for AI-assisted coding."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "pydantic>=2.0.0",
+    "jinja2>=3.1.2",
+    "pathspec>=0.11.0",
+    "charset-normalizer>=3.1.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3.0",
+    "pytest-asyncio>=0.21.0",
+    "requests>=2.31.0",
+]
+gui = [
+    "customtkinter>=5.1.0",
+]
+
+[project.scripts]
+fctx = "fctx:main"
+fctx-web = "web_app:main"
+
+[tool.setuptools]
+packages = ["file_cortex_core"]
+py-modules = ["fctx", "web_app", "file_search"]

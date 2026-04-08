@@ -17,32 +17,28 @@
 ## 📍 阶段 1：编排增强与前端优化 (已完成)
 - [x] **架构解耦 (Modernization)**: 已完成从单文件到包结构的平滑迁移。
 - [x] **AI 特色功能 (v5.2)**: 引入了 Token 计数预估、自动化 Prompt 组装模板。
-- [x] **测试重构 (Resilient Testing)**: 建立了 80+ 矩阵化测试用例。
-- [x] **测试矩阵补完**: 新增 20+ 个针对安全、资源泄露、路径边界的测试。
 - [x] **现代化 Web UI (v5.3 PRO)**: 引入多选、状态反馈、玻璃拟态。
-- [x] **快速路径搜集 (v5.3+)**: 实现多端一致的路径格式化搜集。
 - [x] **工作区配置管理 (v5.3+)**: 实现置顶项目与 LRU 历史记录。
-- [x] **生产加固 (v5.3 Hardening)**: 完成了 72 项测试闭环。
 
-## 📍 阶段 2：通用功能增强与生产加固 (v5.6 - v5.7 增量完成)
+## 📍 阶段 2：通用功能增强与生产加固 (已完成)
 - [x] **确定性路径协议 (v5.7)**: 重构了路径归一化，解决了 Windows 驱动器号 Key 漂移 Bug。
-- [x] **UI-Backend 引用隔离**: 实现了清单数据的副本机制，杜绝内存引用污染。
 - [x] **递归上下文搜集 (v5.7)**: 支持文件夹自动穿透读取与全局去重。
 - [x] **标签化多重检索 (v5.5)**: 引入了 positive/negative 标签系统。
 - [x] **极速查重工具**: 引入 `DuplicateWorker`（大小预筛 + SHA256）。
 - [x] **批量正则重命名 (Regex Rename)**: 实现了基于规则的物理文件批量更名。
 - [x] **增强文件预览 (v5.7)**: 支持 Markdown、Mermaid 及超大文本编码识别。
 
-## 📍 阶段 2.8：UX 增强与工业级稳定性 (v5.8.2 - 当前完成)
-- [x] **[DONE] 工业级生产加固 (v5.8.2)**: 
-    - **并发原子锁补全**: DataManager 实现了方法级 RLock 锁，解决了 Web 并发访问导致的内存字典异常 (B5-B7)。
-    - **安全路径闭环**: 实现了基于 UNC/网络路径的拦截保护 (S1)，防止 Windows 环境下的凭据泄露与挂死。
-    - **前端 DX 系统**: 实现代码编辑器 Tab 缩进、Ctrl+S 远程保存与文件切换脏数据检查，极大提升操作手感。
-    - **搜索逻辑归一化**: 修复正则搜索路径感知缺陷 (B10)，确保跨端搜索参数的一致性。
-    - **背景任务自愈**: 修复了长期失效的背景统计计算线程 (B1)，恢复了实时资源监控。
-- [x] **[DONE] 环境变量注入防御 (v5.8.1)**: ActionBridge 实现了针对 Windows `%` 符号的自动转义 (`%%`)。
-- [x] **[DONE] 中日韩编码增强 (CJK Weighted)**: 重构了 `estimate_tokens` 算法，解决了中文项目预估误差。
-- [x] **[DONE] 183 项回归测试**: 补齐了针对恶意输入、并发冲突和跨平台边界的全自动化测试套件。
+## 📍 阶段 3：工业级稳定性与分类控制 (v6.0 - 当前完成) [x]
+- [x] **[DONE] 分类管理器 (Categorizer)**: 
+    - 实现了三栏式文件分类 UI，支持自定义相对路径映射。
+    - 集成后端物理移动逻辑与跨项目安全拦截。
+- [x] **[DONE] 226 项回归测试矩阵**: 
+    - 测试用例从 183 提升至 226，覆盖率覆盖架构适配、参数组合与 API 契约深度校验。
+    - 实现了测试态的 **Active Process Termination**，彻底解决 Windows 文件句柄占用冲突。
+- [x] **[DONE] 契约式 API 协议 (v6.0 Contract)**: 
+    - 强制 API 返回结构对齐，引入 `size_fmt`, `mtime_fmt`, `is_truncated`, `encoding` 等 UI 级自洽字段。
+    - 强制所有 API 进行物理路径规一化，消除前后端路径一致性隐患。
+- [x] **[DONE] 工业级生产加固**: 修复了 `os.scandir` 在并发场景下的句柄泄露及 Windows UNC 路径安全漏洞。
 
 ## 📍 阶段 3：多端协作与 RAG 准备 (2026 Q3+ 目标)
 - [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel/Word 语义碎片化抓取。
@@ -57,11 +53,12 @@
 
 ## 🛡️ 架构一致性原则 (Maintenance Principles)
 *   **SSOT (Single Source of Truth)**: 所有的路径权限及配置读取必须统一经过 `DataManager`。
-    - **参数动态对齐协议 (Parameter Alignment Protocol - v5.8)**: 
-    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。**v5.8.0 统一要求所有配置请求必须过 DataManager 逻辑校验，严禁直接读写内存字典。**
-    - **UI 过滤器同步**: 桌面端清单过滤器 (`staging_filter`) 与后端统计逻辑通过动态对齐协议实现 100% 同步，确保“所见即所得”的统计体验。
-    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。该方法限制了编码采样的最大字节数，并在读取前进行二进制检测，防止因读取 GB 级日志而发生 OOM 崩溃。**v5.8.0 引入了 Context 生成单文件 1MB 强制熔断。**
-    - **UI 回调防御 (Audit Fix - v5.7.1)**: 为了防止 Tkinter 回调中的 `AttributeError` 导致界面静默失效，所有 UI 渲染回调（如 `_update_stats_ui`）必须包含 `try...except` 保护。
+  - [x] **v6.0 深度契约协议 (Hardened Contract - v6.0)**: 
+    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。**v6.0 统一要求所有配置请求必须过 DataManager 逻辑校验，严禁直接读写内存字典。**
+    - **响应式元数据**: `get_node_info` 强制返回 `size_fmt`, `mtime_fmt`, `has_children` 等 UI 就绪映射，避免前端进行逻辑重组。
+    - **物理对齐原则**: 搜寻结果 `path` 与 API 入参通过 `PathValidator.norm_path` 实现物理级一致性。
+    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。**v6.0 引入了 Context 生成单文件 1MB 强制熔断。**
+    - **句柄自闭环 (Resource Safety)**: 全部 I/O 扫描逻辑强制封装在 `with os.scandir(...)` 上下文管理器中，解决 Windows 文件锁定难题。
 *   **动态对齐 (Dynamic Alignment)**: 任何涉及到路径、Schema 或端到端属性的逻辑，必须实现动态环境感知。
 *   **测试驱动**: 核心逻辑的任何变更必须伴随对应的 Pydantic 模型校验更新及 pytest 回归测试。
 *   **安全分发**: 所有的物理 I/O 操作必须经过 `PathValidator.is_safe` 熔断拦截。

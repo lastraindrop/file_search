@@ -39,5 +39,4 @@ mypy_cache/
 config.json
 
 # Other
-code_review.txt
-code_review.md
+code_review.*

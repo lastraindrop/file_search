@@ -172,13 +172,11 @@ def get_project_config_for_path(path_str: str):
 
 # --- Helpers ---
 def _has_children(path_obj):
-    """Safely check if directory has children without leaking file handles."""
+    """Safely check if directory has children."""
     try:
-        with os.scandir(path_obj) as entries:
-            return any(True for _ in entries)
-    except PermissionError:
-        return False
-    except Exception:
+        with os.scandir(path_obj) as it:
+            return any(it)
+    except (PermissionError, OSError):
         return False
 
 def get_node_info(path_obj, project_root):
@@ -189,12 +187,14 @@ def get_node_info(path_obj, project_root):
     
     return {
         "name": path_obj.name,
-        "path": str(path_obj),
+        "path": PathValidator.norm_path(path_obj),
         "type": "dir" if is_d else "file",
         "has_children": is_d and _has_children(path_obj),
         "mtime_fmt": mtime_fmt,
         "size_fmt": FormatUtils.format_size(meta["size"]),
-        **meta
+        "size": meta["size"],
+        "mtime": meta["mtime"],
+        "ext": meta["ext"]
     }
 
 def get_children(path_str):
@@ -216,26 +216,22 @@ def get_children(path_str):
     try:
         with os.scandir(path) as it:
             entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
-        norm_root = PathValidator.norm_path(project_root)
-        for entry in entries:
-            # Use pathlib's own logic for relative paths where possible, but normalize first
-            ep = pathlib.Path(entry.path)
-            try:
-                # relative_to is sensitive to drive casing, so we resolve both
-                rel = ep.resolve().relative_to(pathlib.Path(project_root).resolve())
-            except ValueError:
-                # Fallback to string manipulation if relative_to fails
-                norm_entry = PathValidator.norm_path(entry.path)
-                if norm_entry.startswith(norm_root.rstrip('/') + '/'):
-                    rel = pathlib.Path(norm_entry[len(norm_root):].lstrip('/'))
-                else:
+            norm_root = PathValidator.norm_path(project_root)
+            for entry in entries:
+                ep = pathlib.Path(entry.path)
+                try:
+                    rel = ep.resolve().relative_to(pathlib.Path(project_root).resolve())
+                except ValueError:
+                    norm_entry = PathValidator.norm_path(entry.path)
+                    if norm_entry.startswith(norm_root.rstrip('/') + '/'):
+                        rel = pathlib.Path(norm_entry[len(norm_root):].lstrip('/'))
+                    else:
+                        continue
+                        
+                if FileUtils.should_ignore(entry.name, rel, excludes, git_spec):
                     continue
-                    
-
-            if FileUtils.should_ignore(entry.name, rel, excludes, git_spec):
-                continue
-            children.append(get_node_info(pathlib.Path(entry.path), project_root))
-    except PermissionError:
+                children.append(get_node_info(pathlib.Path(entry.path), project_root))
+    except (PermissionError, OSError):
         logger.error(f"Permission denied for directory: {path_str}")
     except Exception as e:
         logger.error(f"Error listing children for {path_str}: {e}")
@@ -271,8 +267,13 @@ def open_project(req: ProjectOpenRequest):
 
 @app.post("/api/fs/children")
 def api_children(req: ChildrenRequest):
+    p = pathlib.Path(req.path)
     children = get_children(req.path)
-    return {"status": "ok", "children": children}
+    return {
+        "status": "ok", 
+        "parent": PathValidator.norm_path(p.parent) if p.parent else None,
+        "children": children
+    }
 
 @app.get("/api/content")
 def get_content(path: str):
@@ -290,8 +291,17 @@ def get_content(path: str):
         return {"content": "--- Binary File (Preview Unavailable) ---"}
     try:
         # CR-A01 Fix: Use read_text_smart for consistent encoding detection
-        content = FileUtils.read_text_smart(p, max_bytes=100000)
-        return {"content": content}
+        # We increase max_bytes to 1MB for browsing, and provide truncation hint
+        MAX_PREVIEW = 1000000
+        content = FileUtils.read_text_smart(p, max_bytes=MAX_PREVIEW)
+        
+        # Determine encoding (approximate from smart reader)
+        # In a real scenario, read_text_smart would return this. For now, we assume utf-8 or detected.
+        return {
+            "content": content,
+            "encoding": "utf-8", # Simplified; read_text_smart handles it internally
+            "is_truncated": len(content.encode('utf-8', errors='ignore')) >= MAX_PREVIEW
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
 
@@ -866,9 +876,15 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
     finally:
         stream_task.cancel()
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="FileCortex Web Server")
+    parser.add_argument("--host", default="127.0.0.1", help="Host address")
+    parser.add_argument("--port", type=int, default=8000, help="Port number")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    args = parser.parse_args()
+    
+    uvicorn.run("web_app:app", host=args.host, port=args.port, reload=args.reload)
+
 if __name__ == "__main__":
-    print("Starting Web Server...")
-    # Open browser automatically?
-    # import webbrowser
-    # webbrowser.open("http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    main()

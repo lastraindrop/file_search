@@ -37,11 +37,12 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **Schema 自愈 (Self-Healing)**: `DataManager._apply_default_schema` 是核心稳定性来源。任何配置读取均会自动合并 `DEFAULT_SCHEMA`，确保即使用户手动修改了配置文件或使用了旧版配置，系统也能自动补全缺失字段（如 `search_settings`, `collection_profiles`），防止运行时 `KeyError`。
 *   **路径归一化确定性标准 (Deterministic Normalization - v5.7)**: 为了彻底消除 Windows 路径漂移，项目强制要求所有外部路径（TreeView 选择、API 参数等）通过 `PathValidator.norm_path` 处理。该方法改用 `os.path.abspath` 以绕过 `pathlib` 随 CWD 变动的特性，并强制执行 **小写化 + POSIX 斜杠** 转换，确保内存缓存键的唯一性。
 *   **状态同步隔离原则 (Memory Reference Isolation - v5.7)**: 为了防止 UI 列表与后台 `DataManager` 共享内存引用，规定在 UI 刷新或清单修改时必须使用 `list()` 或 `.copy()`。这杜绝了 UI `clear()` 操作误伤持久化配置的问题。
-*   **参数动态对齐协议 (Parameter Alignment Protocol - v5.8)**: 
-    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。
-    - **UI 过滤器同步**: 桌面端清单过滤器 (`staging_filter`) 与后端统计逻辑通过动态对齐协议实现 100% 同步，确保“所见即所得”的统计体验。
-    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。该方法限制了编码采样的最大字节数，并在读取前进行二进制检测，防止因读取 GB 级日志而发生 OOM 崩溃。
-    - **UI 回调防御 (Audit Fix - v5.7.1)**: 为了防止 Tkinter 回调中的 `AttributeError` 导致界面静默失效，所有 UI 渲染回调（如 `_update_stats_ui`）必须包含 `try...except` 保护。
+- [x] **v6.0 深度契约协议 (Hardened Contract - v6.0)**: 
+    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。**v6.0 统一要求所有配置请求必须过 DataManager 逻辑校验，严禁直接读写内存字典。**
+    - **响应式元数据**: `get_node_info` 强制返回 `size_fmt`, `mtime_fmt`, `has_children` 等 UI 就绪映射，避免前端进行逻辑重组。
+    - **物理对齐原则**: 搜寻结果 `path` 与 API 入参通过 `PathValidator.norm_path` 实现物理级一致性。
+    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。**v6.0 引入了 Context 生成单文件 1MB 强制熔断。**
+    - **句柄自闭环 (Resource Safety)**: 全部 I/O 扫描逻辑强制封装在 `with os.scandir(...)` 上下文管理器中，解决 Windows 文件锁定难题。
 
 ### 5. 并发控制与资源生命周期 (Concurrency & Lifecycle - v5.8)
 *   **双重原子锁**: `DataManager` 在 `__new__` 阶段实现了双重检查锁定，且所有写操作均由 `self._lock` (RLock) 保护。**v5.8 修正了方法级锁定缺失**，确保了在多线程 Web 环境下的配置完整性。

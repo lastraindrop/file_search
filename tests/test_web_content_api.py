@@ -49,8 +49,11 @@ def test_content_unauthorized_path(api_client, tmp_path):
 def test_content_large_file_truncation(project_client, mock_project):
     """Verify large file truncation in content API."""
     large_f = mock_project / "large_preview.txt"
-    large_f.write_text("A" * 200000, encoding="utf-8")
+    # Create 1.5MB file to trigger 1MB truncation (MAX_PREVIEW in web_app)
+    large_f.write_text("A" * 1500000, encoding="utf-8")
     res = project_client.get(f"/api/content?path={str(large_f)}")
     assert res.status_code == 200
-    content = res.json()["content"]
-    assert len(content) <= 100100 # 100KB limit in route + overhead
+    data = res.json()
+    content = data["content"]
+    assert len(content) <= 1000100 # 1MB limit + overhead
+    assert data["is_truncated"] is True
