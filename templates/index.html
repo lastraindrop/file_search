@@ -164,8 +164,17 @@
                     </div>
                 </div>
                 <div class="p-3 border-top">
+                    <div class="mb-2 d-flex gap-2">
+                        <div class="flex-grow-1">
+                             <label class="small text-muted mb-1">📋 Format</label>
+                             <select id="exportFormat" class="form-select form-select-sm bg-dark text-white border-secondary">
+                                 <option value="markdown">Markdown</option>
+                                 <option value="xml">XML (Optimized for LLMs)</option>
+                             </select>
+                        </div>
+                    </div>
                     <div class="mb-2">
-                        <label class="small text-muted mb-1">📋 Prompt Template</label>
+                        <label class="small text-muted mb-1">📜 Prompt Template</label>
                         <select id="promptTemplate" class="form-select form-select-sm bg-dark text-white border-secondary">
                             <option value="">None (Standard)</option>
                         </select>
@@ -179,6 +188,36 @@
     </div>
     <!-- Toast Container -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1055;"></div>
+
+    <!-- Custom Context Menu -->
+    <div id="customContextMenu" class="context-menu glass-panel" style="display:none; position:fixed; z-index:2000;">
+        <div class="context-item" onclick="App.ctxAction('stage')">⬇ Add to Staging</div>
+        <div class="context-item" onclick="App.ctxAction('fav')">⭐ Add to Favorites</div>
+        <div class="context-separator"></div>
+        <div class="context-item" onclick="App.ctxAction('copyPath')">🔗 Copy Full Path</div>
+        <div class="context-item" onclick="App.ctxAction('openOs')">📁 Open in Explorer</div>
+        <div class="context-separator"></div>
+        <div class="context-item text-danger" onclick="App.ctxAction('delete')">🗑️ Delete File</div>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content glass-panel text-white border-secondary">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title">⌨️ Keyboard Shortcuts</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="d-flex justify-content-between mb-2"><span>Alt + 1 / 2 / 3</span> <span style="color:var(--accent)">Switch Tabs</span></div>
+                    <div class="d-flex justify-content-between mb-2"><span>Ctrl + S</span> <span style="color:var(--accent)">Save Editor</span></div>
+                    <div class="d-flex justify-content-between mb-2"><span>Enter (Search)</span> <span style="color:var(--accent)">Trigger Find</span></div>
+                    <div class="d-flex justify-content-between mb-2"><span>?</span> <span style="color:var(--accent)">Show this Help</span></div>
+                    <div class="d-flex justify-content-between mb-2"><span>Esc</span> <span style="color:var(--accent)">Close Modal / Menu</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Tool Execution Result Modal -->
     <div class="modal fade" id="toolResultModal" tabindex="-1" aria-hidden="true">

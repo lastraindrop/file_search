@@ -333,15 +333,23 @@ class FileUtils:
 
     @staticmethod
     def get_metadata(path_obj):
+        """Returns standard metadata dictionary for a file or directory."""
         try:
-            stat = path_obj.stat()
+            p = pathlib.Path(path_obj).resolve()
+            stat = p.stat()
             return {
+                "name": p.name,
+                "path": str(p),
+                "abs_path": str(p),
+                "type": "dir" if p.is_dir() else "file",
                 "size": stat.st_size,
+                "size_fmt": FormatUtils.format_size(stat.st_size),
                 "mtime": stat.st_mtime,
-                "ext": path_obj.suffix.lower()
+                "mtime_fmt": FormatUtils.format_datetime(stat.st_mtime),
+                "ext": p.suffix.lower()
             }
         except Exception:
-            return {"size": 0, "mtime": 0, "ext": ""}
+            return {"size": 0, "mtime": 0, "ext": "", "abs_path": str(path_obj), "name": pathlib.Path(path_obj).name}
 
     @staticmethod
     def generate_ascii_tree(root_dir, excludes_str, use_gitignore=True, max_depth=15):
@@ -454,3 +462,47 @@ class ContextFormatter:
                 logger.error(f"Failed to format file {f_str} for context: {e}")
                 
         return "".join(blocks)
+    @staticmethod
+    def to_xml(paths: list[str], root_dir: str = None, prompt_prefix: str = None, 
+                manual_excludes: list[str] = None, use_gitignore: bool = True):
+        """
+        Converts file contents into a structured XML format, which is often 
+        more robust for LLMs when dealing with mixed markdown/code content.
+        """
+        all_files = FileUtils.flatten_paths(paths, root_dir, manual_excludes, use_gitignore)
+        
+        blocks = []
+        if prompt_prefix:
+            blocks.append(f"<instruction>\n{prompt_prefix}\n</instruction>\n\n")
+            
+        root = pathlib.Path(root_dir).resolve() if root_dir else None
+        blocks.append("<context>\n")
+        
+        for f_str in all_files:
+            p = pathlib.Path(f_str)
+            if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
+                continue
+            
+            try:
+                p_res = p.resolve()
+                rel_path = p_res.relative_to(root) if root and (root == p_res or root in p_res.parents) else p.name
+                size_kb = p.stat().st_size / 1024
+                
+                content = FileUtils.read_text_smart(p, max_bytes=1024*1024)
+                content = NoiseReducer.clean(content)
+                
+                # C4 Implementation: Use CDATA but handle the closing sequence ]]> inside the content
+                safe_content = content.replace("]]>", "]]]]><![CDATA[>")
+                
+                blocks.append(f'  <file path="{rel_path}" size="{size_kb:.1f}KB">\n<![CDATA[\n{safe_content}\n]]>\n  </file>\n')
+            except Exception:
+                pass
+                
+        blocks.append("</context>")
+        return "".join(blocks)
+
+    @staticmethod
+    def generate_blueprint(root_dir: str, excludes_str: str, use_gitignore: bool = True):
+        """Generates a high-level ASCII tree of the project for quick architectural overview."""
+        tree = FileUtils.generate_ascii_tree(root_dir, excludes_str, use_gitignore, max_depth=5)
+        return f"--- PROJECT BLUEPRINT ---\n\n{tree}\n"

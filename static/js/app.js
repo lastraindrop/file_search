@@ -63,10 +63,28 @@ const App = {
 
     init: async () => {
         App.loadWorkspaces();
-        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+        
+        const searchInput = document.getElementById('searchInput');
+        let searchTimer;
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => App.startSearch(), 400);
+        });
+        searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                clearTimeout(searchTimer);
                 App.startSearch();
+            }
+        });
+        
+        // Context Menu Handler
+        window.addEventListener('click', () => App.hideContextMenu());
+        window.addEventListener('contextmenu', (e) => {
+            const target = e.target.closest('[data-path]');
+            if (target) {
+                e.preventDefault();
+                App.showContextMenu(e, target.getAttribute('data-path'));
             }
         });
         
@@ -88,7 +106,7 @@ const App = {
             });
         }
         
-        // Global Shortcuts: Ctrl+S save
+        // Global Shortcuts
         window.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 's') {
                 if (App.state.isEditing) {
@@ -96,6 +114,15 @@ const App = {
                     App.toggleEdit();
                 }
             }
+            if (e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
+                const tabs = ['tab-tree', 'tab-search', 'tab-fav'];
+                const b = document.getElementById(tabs[parseInt(e.key)-1]);
+                if (b) b.click();
+            }
+            if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+                new bootstrap.Modal(document.getElementById('helpModal')).show();
+            }
+            if (e.key === 'Escape') App.hideContextMenu();
         });
 
         // Restore search settings from localStorage
@@ -941,6 +968,7 @@ const App = {
         
         if (count === 0) {
             label.innerText = "0 Tokens";
+            label.classList.remove('pulse-warning');
             return;
         }
 
@@ -954,9 +982,17 @@ const App = {
                 })
             });
             const data = await res.json();
-            label.innerText = `${data.file_count} Files | ${data.total_tokens} Tokens`;
+            label.innerText = `${data.file_count} Files | ${data.total_tokens.toLocaleString()} Tokens`;
+            if (data.total_tokens > 100000) {
+                label.classList.add('pulse-warning');
+                label.title = "High Token Count - Consider removing large files";
+            } else {
+                label.classList.remove('pulse-warning');
+                label.title = "";
+            }
         } catch (e) {
             label.innerText = `${count} Items`;
+            label.classList.remove('pulse-warning');
         }
     },
 
@@ -969,13 +1005,15 @@ const App = {
         btn.disabled = true;
 
         try {
+            const format = document.getElementById('exportFormat').value;
             const res = await App._fetch('/api/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
                     files: Array.from(App.state.staging),
                     project_path: App.state.projectPath,
-                    template_name: templateName
+                    template_name: templateName,
+                    export_format: format
                 })
             });
             const data = await res.json();
@@ -1146,6 +1184,64 @@ const App = {
         } catch (e) {
             App.showToast("Collection failed: " + e.message, "danger");
         }
+    },
+
+    openInExplorer: async (path) => {
+        try {
+            await App._fetch('/api/open', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ path: path })
+            });
+        } catch (e) {
+            App.showToast("Failed to open path: " + e.message, "danger");
+        }
+    },
+
+    showContextMenu: (e, path) => {
+        App.state.contextPath = path;
+        const menu = document.getElementById('customContextMenu');
+        menu.style.display = 'block';
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+    },
+
+    hideContextMenu: () => {
+        const menu = document.getElementById('customContextMenu');
+        if (menu) menu.style.display = 'none';
+        App.state.contextPath = null;
+    },
+
+    ctxAction: async (action) => {
+        const path = App.state.contextPath;
+        if (!path) return;
+        
+        switch (action) {
+            case 'stage': 
+                App.state.staging.add(path); App.renderStaging(); App.updateStats(); 
+                App.showToast("Added to Staging");
+                break;
+            case 'fav': 
+                // We fake currentPath selection for existing methods
+                const oldPath = App.state.currentPath;
+                App.state.currentPath = path; 
+                App.addToFavorites();
+                App.state.currentPath = oldPath;
+                break;
+            case 'copyPath':
+                navigator.clipboard.writeText(path); App.showToast("Path Copied");
+                break;
+            case 'openOs':
+                App.openInExplorer(path); 
+                break;
+            case 'delete':
+                const delPath = App.state.currentPath;
+                App.state.currentPath = path;
+                await App.deleteFile();
+                App.state.currentPath = delPath;
+                break;
+        }
+        App.hideContextMenu();
     }
 };
 

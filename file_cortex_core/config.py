@@ -46,7 +46,12 @@ class DataManager:
             "last_directory": "", 
             "projects": {}, 
             "recent_projects": [], 
-            "pinned_projects": []
+            "pinned_projects": [],
+            "global_settings": {
+                "preview_limit_mb": 1.0,
+                "token_ratio": 4.0,
+                "theme": "dark"
+            }
         }
         self.load()
 
@@ -72,6 +77,8 @@ class DataManager:
                     
                     self.data["recent_projects"] = loaded.get("recent_projects", [])
                     self.data["pinned_projects"] = loaded.get("pinned_projects", [])
+                    if "global_settings" in loaded:
+                        self.data["global_settings"].update(loaded["global_settings"])
                 except Exception as e:
                     logger.error(f"Config load error: {e}")
 
@@ -329,3 +336,12 @@ class DataManager:
                     if norm_p in proj["groups"][group_name]:
                         proj["groups"][group_name].remove(norm_p)
                 self.save()
+
+    def update_global_settings(self, settings: dict):
+        """Updates global application settings."""
+        with self._lock:
+            if not isinstance(settings, dict): return
+            for k, v in settings.items():
+                if k in self.data["global_settings"]:
+                    self.data["global_settings"][k] = v
+            self.save()

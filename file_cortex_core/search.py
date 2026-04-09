@@ -157,9 +157,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                         full_d = pathlib.Path(root) / d
                         meta = FileUtils.get_metadata(full_d)
                         yield {
-                            "path": str(full_d),
                             "match_type": "📁 Folder",
-                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
                         if count >= max_results:
@@ -183,9 +181,7 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                     if match_name(file, rel_path):
                         count += 1
                         yield {
-                            "path": str(full_path),
                             "match_type": "Inverse Match" if is_inverse else "Match",
-                            "mtime_fmt": FormatUtils.format_datetime(meta["mtime"]),
                             **meta
                         }
                         if count >= max_results:
@@ -219,12 +215,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                                 if is_match:
                                     count += 1
                                     yield {
-                                        "path": info["path"],
                                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                                        "size": info["size"],
-                                        "mtime": info["mtime"],
-                                        "ext": info["ext"]
+                                        **info
                                     }
                                     if count >= max_results:
                                         break
@@ -250,12 +242,8 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                 if is_match:
                     count += 1
                     yield {
-                        "path": info["path"],
                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
-                        "mtime_fmt": FormatUtils.format_datetime(info["mtime"]),
-                        "size": info["size"],
-                        "mtime": info["mtime"],
-                        "ext": info["ext"]
+                        **info
                     }
             except Exception:
                 pass

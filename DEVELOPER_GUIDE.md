@@ -75,23 +75,31 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **非侵入式反馈**: 桌面端全面引入 **Status Stream** 机制，取代了大部分阻塞式的 Messagebox。
 *   **内容检索**: 预览区支持 `Ctrl+F` 实时检索。
 
+### 10. 统一全局配置 (Unified Global Settings - v6.0)
+*   **持久化枢纽**: `DataManager` 引入了 `global_settings` 块，用于存放跨项目的通用偏好（如主题、Token 预警阈值、预览上限）。
+*   **动态对齐原则**: 后端路由 `read_text_smart` 等方法必须直接从 `self.global_settings` 读取参数，禁止在逻辑中出现 `1024*1024` 类的硬编码魔法数字。
+*   **Schema 扩展性**: 任何新增的全局配置必须在 `DEFAULT_GLOBAL_SETTINGS` 中注册，依靠 `_apply_default_schema` 实现老版本配置的自动迁徙与自愈。
+
+### 11. LLM 上下文格式化与蓝图 (LLM Context & Blueprint)
+*   **XML 导出引擎**: 为了解决代码中包含 Markdown 语法冲突导致的 LLM 解析混乱，v6.0 引入了 XML 导出模式。所有文件内容强制用 `<![CDATA[ ... ]]>` 封装。
+*   **项目蓝图 (Blueprint)**: 采用 `ContextFormatter.generate_blueprint` 生成 ASCII 树状图，用于向 AI 提供项目整体工程视角的拓扑结构。
+
 ## 🧪 测试方法论
-本项目包含 183 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
-*   **动态参数对齐 (Dynamic Parameter Alignment)**: 
-    *   **原则**: 所有跨端 (UI/Web/CLI) 调用的路径解析必须经过 `PathValidator.norm_path` 处理。
-    *   **原则**: 所有的命令执行必须通过 `ActionBridge._prepare_execution` 枢纽，严禁在业务逻辑中直接拼凑 shell 命令。
-*   **测试隔离与自修复 (v5.8)**: `conftest.py` 引入了 **Active Cleanup**。在每个测试运行后，会自动杀掉所有注册在 `ACTIVE_PROCESSES` 中的进程，确保 Windows 目录句柄被释放。
-*   **项目本地沙箱化**: 为了解决 Windows `PermissionError`，测试临时目录统一迁移至 `.pytest_tmp/` 并加入 `.gitignore`。
+本项目包含 **236** 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
+*   **契约审计协议 (Contract Audit Protocol - v6.0)**: 
+    *   **原则**: 所有返回给 UI 的字典对象必须通过 `test_production_v6_audit.py` 的契约校验，确保包含 `abs_path`, `name`, `size_fmt`, `mtime_fmt` 等关键 UI 映射字段。
+    *   **全参数组合匹配**: 核心逻辑变更（如搜索、导出）必须伴随 `pytest.mark.parametrize` 覆盖所有参数排列组合。
+*   **测试隔离与自修复**: `conftest.py` 引入了 **Active Cleanup**。在每个测试运行后，会自动杀掉所有注册在 `ACTIVE_PROCESSES` 中的进程，确保 Windows 目录句柄被释放。
 *   **测试运行**: 
     ```bash
     python -m pytest
     ```
-    v5.8 版本共包含 **183** 项全自动化测试用例。
 
 ## 🛠️ 打包与分发
 *   **桌面版**: 使用 `build_exe.py` (封装了 PyInstaller) 进行单文件打包。
-*   **网页版**: 基于 FastAPI。
+*   **网页版**: 基于 FastAPI，支持 MCP 协议集成。
 
 ## 📝 贡献准则
 1.  **KISS 原则**: 优先通过内置库解决问题，减少不必要的第三方依赖。
-2.  **防御性编程**: 对所有涉及 `root` 以外的 IO 操作直接进行 `is_safe` 熔断处理。
+2.  **契约自洽**: 变更 API 返回结果前，必须先行更新 `app.js` 接收逻辑与对应的契约测试用例。
+3.  **防御性编程**: 对所有涉及 `root` 以外的 IO 操作直接进行 `is_safe` 熔断处理。

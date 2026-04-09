@@ -56,6 +56,7 @@ class GenerateRequest(BaseModel):
     files: list[str]
     project_path: str | None = None
     template_name: str | None = None
+    export_format: str = "markdown" # "markdown" or "xml"
 
 class FileRenameRequest(BaseModel):
     project_path: str
@@ -97,6 +98,9 @@ class TagRequest(BaseModel):
     file_path: str
     tag: str
     action: str  # "add" or "remove"
+
+class GlobalSettingsRequest(BaseModel):
+    settings: dict
 
 class FavoriteRequest(BaseModel):
     project_path: str
@@ -315,9 +319,15 @@ def generate_context(req: GenerateRequest):
         final_root = root if root else req.project_path
         if proj_config and req.template_name:
             prompt_prefix = proj_config.get("prompt_templates", {}).get(req.template_name)
-        content = ContextFormatter.to_markdown(req.files, root_dir=final_root, prompt_prefix=prompt_prefix)
+        if req.export_format == "xml":
+            content = ContextFormatter.to_xml(req.files, root_dir=final_root, prompt_prefix=prompt_prefix)
+        else:
+            content = ContextFormatter.to_markdown(req.files, root_dir=final_root, prompt_prefix=prompt_prefix)
     else:
-        content = ContextFormatter.to_markdown(req.files, prompt_prefix=None)
+        if req.export_format == "xml":
+            content = ContextFormatter.to_xml(req.files, prompt_prefix=None)
+        else:
+            content = ContextFormatter.to_markdown(req.files, prompt_prefix=None)
     tokens = FormatUtils.estimate_tokens(content)
     return {"content": content, "tokens": tokens}
 
@@ -587,6 +597,15 @@ def update_categories(req: CategoriesUpdateRequest):
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/global/settings")
+def get_global_settings():
+    return _get_dm().data.get("global_settings", {})
+
+@app.post("/api/global/settings")
+def update_global_settings(req: GlobalSettingsRequest):
+    _get_dm().update_global_settings(req.settings)
+    return {"status": "ok"}
 
 # --- FileCortex Action APIs ---
 

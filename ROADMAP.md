@@ -28,37 +28,30 @@
 - [x] **批量正则重命名 (Regex Rename)**: 实现了基于规则的物理文件批量更名。
 - [x] **增强文件预览 (v5.7)**: 支持 Markdown、Mermaid 及超大文本编码识别。
 
-## 📍 阶段 3：工业级稳定性与分类控制 (v6.0 - 当前完成) [x]
+## 📍 阶段 3：工业级稳定性与 Agentic 增强 (v6.0 - 2026 Q2 达成) [x]
 - [x] **[DONE] 分类管理器 (Categorizer)**: 
     - 实现了三栏式文件分类 UI，支持自定义相对路径映射。
-    - 集成后端物理移动逻辑与跨项目安全拦截。
-- [x] **[DONE] 226 项回归测试矩阵**: 
-    - 测试用例从 183 提升至 226，覆盖率覆盖架构适配、参数组合与 API 契约深度校验。
-    - 实现了测试态的 **Active Process Termination**，彻底解决 Windows 文件句柄占用冲突。
-- [x] **[DONE] 契约式 API 协议 (v6.0 Contract)**: 
-    - 强制 API 返回结构对齐，引入 `size_fmt`, `mtime_fmt`, `is_truncated`, `encoding` 等 UI 级自洽字段。
-    - 强制所有 API 进行物理路径规一化，消除前后端路径一致性隐患。
-- [x] **[DONE] 工业级生产加固**: 修复了 `os.scandir` 在并发场景下的句柄泄露及 Windows UNC 路径安全漏洞。
+- [x] **[DONE] 236 项全量测试矩阵**: 
+    - 覆盖架构适配、参数组合与 API 契约深度校验（修复了 content 模式字段漂移 Bug）。
+- [x] **[DONE] 全局统一配置框架 (Unified Settings)**:
+    - 引入了 `global_settings` 持久化体系，彻底消除预览上限 (Preview Limit) 的硬编码。
+- [x] **[DONE] LLM 上下文对齐 (v6.0 Innovation)**:
+    - 实现了 **XML 导出引擎**（CDATA 封装），大幅提升 LLM 对复杂代码片段的解析精度。
+    - 引入了 **Project Blueprint (项目蓝图)** 功能，一键生成项目架构 ASCII 快照。
+- [x] **[DONE] 极致 Web UX (v6.0 Polish)**:
+    - 实现 Web 端自定义右键菜单、搜索防抖 (Debounce) 和全局快捷键辅助。
+- [x] **[DONE] MCP 协议集成**: 
+    - 创建了 `mcp_server.py`，使 FileCortex 能够作为 Claude Desktop 的插件原生工作。
 
-## 📍 阶段 3：多端协作与 RAG 准备 (2026 Q3+ 目标)
-- [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel/Word 语义碎片化抓取。
-- [ ] **结构化导出 (RAG-Ready)**: 支持将搜集内容一键打包为 JSONL 或专为 RAG 优化的 Embedding 包。
-- [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型 (Ollama) 对长代码进行摘要压榨。
-- [ ] **多端编排扩展**: 支持通过 SSH/SFTP 编排远程容器内容。
-
-## 🚀 长期愿景 (v6.0+ Agentic Era)
-- [ ] **MCP 协议标准化**: 将 FileCortex 核心封装为 MCP 插件，使 AI Agent 能原生调用编排。
+## 🚀 后续愿景 (v7.0+ 智能化编排)
+- [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel 语义抓取。
+- [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型对其长代码进行结构化压缩。
 - [ ] **自愈型工作流**: 实现 Agent 驱动的本地工程自动化维护（修复 Bug、生成文档）。
-- [ ] **跨平台语义文件系统**: 建立索引层，支持基于含义而非路径的检索。
 
 ## 🛡️ 架构一致性原则 (Maintenance Principles)
 *   **SSOT (Single Source of Truth)**: 所有的路径权限及配置读取必须统一经过 `DataManager`。
-  - [x] **v6.0 深度契约协议 (Hardened Contract - v6.0)**: 
-    - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。**v6.0 统一要求所有配置请求必须过 DataManager 逻辑校验，严禁直接读写内存字典。**
-    - **响应式元数据**: `get_node_info` 强制返回 `size_fmt`, `mtime_fmt`, `has_children` 等 UI 就绪映射，避免前端进行逻辑重组。
-    - **物理对齐原则**: 搜寻结果 `path` 与 API 入参通过 `PathValidator.norm_path` 实现物理级一致性。
-    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。**v6.0 引入了 Context 生成单文件 1MB 强制熔断。**
-    - **句柄自闭环 (Resource Safety)**: 全部 I/O 扫描逻辑强制封装在 `with os.scandir(...)` 上下文管理器中，解决 Windows 文件锁定难题。
-*   **动态对齐 (Dynamic Alignment)**: 任何涉及到路径、Schema 或端到端属性的逻辑，必须实现动态环境感知。
-*   **测试驱动**: 核心逻辑的任何变更必须伴随对应的 Pydantic 模型校验更新及 pytest 回归测试。
+*   **契约自洽性 (Contract Cohesion - v6.0 NEW)**: 
+    - **API 字段强校验**: 任何提供给前端的 API 对象（特别是搜索结果与文件元数据）**必须** 包含 UI 强依赖字段：`abs_path`, `name`, `size_fmt`, `mtime_fmt`。
+    - **逻辑动态对齐**: 类似于预览上限 (1MB) 等参数必须从 `global_settings` 动态读取，禁止在前端或后端代码中出现 `1024*1024` 类的硬编码。
+*   **测试驱动**: 核心逻辑变更**必须**伴随 `pytest` 回归测试，尤其是多参数组合 (Parametrize) 探查。
 *   **安全分发**: 所有的物理 I/O 操作必须经过 `PathValidator.is_safe` 熔断拦截。

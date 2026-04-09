@@ -36,6 +36,7 @@ class FileCortexApp:
         self.recursive_copy_var = tk.BooleanVar(value=True)
         self.use_gitignore_var = tk.BooleanVar(value=True)
         self.selected_template_var = tk.StringVar(value="None")
+        self.export_format_var = tk.StringVar(value="markdown")
         self.positive_tags = []
         self.negative_tags = []
 
@@ -246,6 +247,11 @@ class FileCortexApp:
         self.tree_search.heading("ext", text="类型", command=lambda: self.sort_tree_column(self.tree_search, "ext", False))
         self.tree_search.column("ext", width=60)
         
+        # Hidden column for absolute path
+        self.tree_search.column("#0", width=0, stretch=False) 
+        self.tree_search["columns"] = ("abs_path", "file", "path", "size", "mtime", "ext")
+        self.tree_search.column("abs_path", width=0, stretch=False)
+        
         self.tree_search.bind("<<TreeviewSelect>>", self.on_tree_select_preview)
         self.tree_search.bind("<Double-1>", lambda e: self.add_selected_to_staging())
 
@@ -313,6 +319,12 @@ class FileCortexApp:
         ttk.Label(tpl_row, text="📋 模板:").pack(side=tk.LEFT, padx=2)
         self.combo_templates = ttk.Combobox(tpl_row, textvariable=self.selected_template_var, state="readonly")
         self.combo_templates.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        fmt_row = ttk.Frame(act)
+        fmt_row.pack(fill=tk.X, pady=2)
+        ttk.Label(fmt_row, text="📋 格式:").pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(fmt_row, text="MD", variable=self.export_format_var, value="markdown").pack(side=tk.LEFT)
+        ttk.Radiobutton(fmt_row, text="XML", variable=self.export_format_var, value="xml").pack(side=tk.LEFT)
 
         ttk.Button(act, text="🚀 导出工作区上下文", command=self.copy_all_staging_content).pack(fill=tk.X, pady=2)
         
@@ -668,6 +680,7 @@ class FileCortexApp:
                     dt = FormatUtils.format_datetime(res['mtime'])
 
                     self.tree_search.insert("", "end", values=(
+                        str(p),
                         ("📁 " if p.is_dir() else "📄 ") + p.name,
                         str(rel),
                         sz_str,
@@ -675,6 +688,7 @@ class FileCortexApp:
                         res["ext"]
                     ))
                 except Exception as e:
+                # ...
                     logger.error(f"Error processing search result: {e}")
                 processed_in_this_tick += 1            
             # Re-register if not done and queue not explicitly stalled (optional safety)
@@ -715,22 +729,18 @@ class FileCortexApp:
         full_path = None
         if tree == self.tree_search:
             try:
-                # H1/H2 Fix: Secure path resolution and boundary checks
                 vals = tree.item(sel[0])['values']
-                if len(vals) < 2: return
-                rel_p_str = vals[1]
-                
-                # Normalize and ensure it's within project root
-                full_path = (self.current_dir / rel_p_str).resolve()
-                if not PathValidator.is_safe(full_path, self.current_dir):
-                    logger.warning(f"Preview blocked: Path outside project root: {full_path}")
-                    return
+                if not vals: return
+                full_path = pathlib.Path(vals[0])
             except (IndexError, ValueError) as e:
-                logger.error(f"Failed to resolve preview path: {e}")
+                logger.error(f"Failed to resolve preview path from search: {e}")
                 return
-        elif tree == self.tree_proj: full_path = self.get_tree_path(sel[0])
-        elif tree == self.tree_staging: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
-        elif tree == self.tree_fav: full_path = pathlib.Path(tree.item(sel[0])['values'][0])
+        elif tree == self.tree_proj:
+            full_path = self.get_tree_path(sel[0])
+        elif tree == self.tree_staging:
+            full_path = pathlib.Path(tree.item(sel[0])['values'][0])
+        elif tree == self.tree_fav:
+            full_path = pathlib.Path(tree.item(sel[0])['values'][0])
         
         if not full_path or not full_path.exists(): return
         
@@ -760,19 +770,10 @@ class FileCortexApp:
         self.preview_text.config(state=tk.DISABLED); self.preview_text.see("1.0")
 
     def get_tree_path(self, node_id):
-        parts = []
-        curr = node_id
-        while curr:
-            # L2 Fix: More robust prefix removal
-            item_text = self.tree_proj.item(curr)['text']
-            # Remove any non-alphanumeric/non-symbol prefix that looks like an icon
-            name = item_text.strip()
-            for icon in ["📁 ", "📄 ", "📁", "📄"]:
-                if name.startswith(icon):
-                    name = name[len(icon):].strip()
-            parts.insert(0, name)
-            curr = self.tree_proj.parent(curr)
-        return self.current_dir.parent / pathlib.Path(*parts) if parts else None
+        vals = self.tree_proj.item(node_id).get('values')
+        if vals:
+             return pathlib.Path(vals[0])
+        return None
 
     def on_tree_expand(self, event):
         node_id = self.tree_proj.focus(); p = self.get_tree_path(node_id)
@@ -794,7 +795,8 @@ class FileCortexApp:
                     rel_path = pathlib.Path(entry.path).relative_to(self.current_dir)
                     if FileUtils.should_ignore(entry.name, rel_path, ex, git_spec): continue
                     
-                    node = self.tree_proj.insert(parent_node, "end", text=("📁 " if entry.is_dir() else "📄 ") + entry.name, open=False)
+                    node = self.tree_proj.insert(parent_node, "end", text=("📁 " if entry.is_dir() else "📄 ") + entry.name, 
+                                                values=(str(pathlib.Path(entry.path).absolute()),), open=False)
                     if entry.is_dir(): self.tree_proj.insert(node, "end", text="加载中...")
         except Exception: pass
 
@@ -876,7 +878,7 @@ class FileCortexApp:
         self.update_stats()
 
     def add_selected_to_staging(self):
-        self._add_paths_to_staging([str(self.current_dir / self.tree_search.item(i)['values'][1]) for i in self.tree_search.selection()])
+        self._add_paths_to_staging([str(self.tree_search.item(i)['values'][0]) for i in self.tree_search.selection()])
 
     def on_tree_double_click(self, event):
         sel = self.tree_proj.selection()
@@ -915,11 +917,18 @@ class FileCortexApp:
         ex_str = self.exclude_var.get()
         use_git = self.use_gitignore_var.get()
         manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
-            
-        final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir, 
-                                                 prompt_prefix=prefix,
-                                                 manual_excludes=manual_excludes,
-                                                 use_gitignore=use_git)
+        
+        fmt = self.export_format_var.get()
+        if fmt == "xml":
+            final_text = ContextFormatter.to_xml(self.staging_files, self.current_dir, 
+                                                     prompt_prefix=prefix,
+                                                     manual_excludes=manual_excludes,
+                                                     use_gitignore=use_git)
+        else:
+            final_text = ContextFormatter.to_markdown(self.staging_files, self.current_dir, 
+                                                     prompt_prefix=prefix,
+                                                     manual_excludes=manual_excludes,
+                                                     use_gitignore=use_git)
         if final_text:
             self.root.clipboard_clear()
             self.root.clipboard_append(final_text)
@@ -976,7 +985,6 @@ class FileCortexApp:
                 else:
                     val = self.active_tree.item(sel_id)['values']
                     p_str = val[0]
-                    if self.active_tree == self.tree_search: p_str = str(self.current_dir / val[1])
                     p = pathlib.Path(p_str)
                 if p: paths.append(p)
             except Exception:

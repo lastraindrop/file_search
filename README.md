@@ -1,31 +1,33 @@
 # FileCortex v6.0 Stable Release (工作区编排助手)
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文以供 AI 辅助编程使用。v6.0 版本引入了三栏式分类器 UI、226 项回归测试加固及 API 深度契约对齐。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.0 版本引入了 **MCP Server 支持**、**XML 导出引擎**、**全局配置框架** 及 **236 项全量审计测试**。
 
 ## 🌟 核心理念
 *   **Orchestration over Collection**: 从简单的“收集”进化为对工作区的“编排”。
+*   **Agentic Era Ready**: 直接接入 AI 智能体生态 (MCP 协议)。
 
-## 🌟 主要功能
-- **文件分类器 (Categorizer - v6.0)**：引入三栏式（列表、预览、分类按钮）UI，支持自定义物理路径映射。
-- **226 项工业级加固 (v6.0 Hardened)**：补齐了针对架构适配、参数组合及 API 契约的 226 项全自动化回归测试。
-- **API 深度契约协议 (v6.0 Contract)**：统一所有端点的响应 Schema，支持 `is_truncated`, `encoding` 等 UI 级自洽反馈。
+## 🌟 主要功能 (v6.0 Final)
+- **AI 上下文对齐 (XML Export)**：实现了 **XML 导出引擎**（支持 CDATA 封装），大幅提升 LLM 对复杂/嵌套代码片段的解析精度。
+- **项目蓝图 (Blueprint)**：一键生成项目架构 ASCII 快照，快速同步项目结构。
+- **全局统一配置框架 (Unified Settings)**：引入了全局设置体系，彻底消除预览上限 (Preview Limit) 的硬编码。
+- **MCP Server 标准化**：支持作为 **Model Context Protocol** 服务器运行，使 AI Agent (如 Claude Desktop) 能原生调用编排。
+- **文件分类器 (Categorizer)**：三栏式 UI，支持自定义物理路径映射与跨项目安全移动。
+- **236 项工业级审计测试**：覆盖架构适配、多参数组合、并发竞争及 **API 深度契约对齐**。
+- **极致 Web UX**：引入网页端自定义右键菜单、搜索防抖 (Debounce Search) 和全局快捷键辅助。
 - **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**通过 Path Casing 适配实现 100% 跨平台一致性**。
-- **微内核架构 (v5.2)**：核心逻辑已完全迁移至 `file_cortex_core/` 包，支持作为库被第三方调用。
+- **微内核架构**：核心逻辑已完全迁移至 `file_cortex_core/` 包，支持作为库被第三方调用。
 - **AI 上下文增强**：集成 **中日韩加权 Token 估算 (FormatUtils)**、**Token 预算预警** 与 **Prompt 自动化模板**。
 - **路径搜集预设**：支持自定义文件前缀 (Prefix) 与 目录后缀 (Suffix)，内置 GPT/RAG 多套搜集预设。
 - **高性能加载**：网页版支持目录懒加载、**自适应并发多线程搜索** 及 **二进制检测 Fast-path**。
 - **ActionBridge 指令加固**：自动识别 Windows 内置指令 (Echo/Dir)，支持环境变量转义 (`%%`)，彻底杜绝注入扩展风险。
 - **智能化清单过滤器**：支持清单内容的实时搜索过滤与批量按类移除。
-- **预览区内容检索**：桌面端预览支持 `Ctrl+F` 高亮关键词查找。
 - **ActionBridge 异步流 (Real-time Streaming)**：支持外部编排工具的 `stdout` 实时推送。
 - **原子化持久化与自愈**：内核级项目配置 Schema 自动对齐、**线程安全单例模型 (RLock)** 及 原子化写入。
 - **安全路径监控**：UNC/网络路径拦截、AppleScript 注入拦截及基于白名单的 Settings 修改保护。
 - **强制资源治理**：外部工具 300s 强制超时暗杀、Windows/Unix 树级进程清理以及 `os.scandir` 句柄自动回收机制。
 - **极速查重工具**：引入 `DuplicateWorker`（后台线程），采用“大小预筛 + SHA256 哈希”策略。
-- **非侵入式 UI 反馈**：桌面端引入 Status Stream 机制，减少阻塞式 Messagebox 弹出。
 - **内存安全与 OOM 防护**：采用流式编码探测与智能文本读取 (`read_text_smart`)。
 - **工作区常驻与历史**：自动记录最近使用的 15 个项目，支持置顶 (Pin) 常用工作区。
-- **健壮的错误处理**: UI 渲染回调加入全局异常守卫，UI 轮询加入容错机制。
 
 
 ## 📚 详细文档
