@@ -49,6 +49,8 @@ class DataManager:
             "pinned_projects": [],
             "global_settings": {
                 "preview_limit_mb": 1.0,
+                "token_threshold": 128000,
+                "enable_noise_reducer": False,
                 "token_ratio": 4.0,
                 "theme": "dark"
             }
@@ -91,10 +93,9 @@ class DataManager:
 
             config_file = _get_config_file()
             import tempfile
+            import time
             temp_path = None
             try:
-                # CR-B04 Hardening: Use NamedTemporaryFile to ensure handle closure 
-                # before replacement/unlinking on Windows.
                 with tempfile.NamedTemporaryFile(
                     'w', 
                     encoding='utf-8', 
@@ -105,9 +106,16 @@ class DataManager:
                     temp_path = f.name
                     json.dump(data_to_save, f, ensure_ascii=False, indent=4)
                 
-                # File is closed here, safe to replace on Windows
-                os.replace(temp_path, config_file)
-                temp_path = None
+                # CR-W05 Hardening: Windows concurrency resilience.
+                # Sometimes file handles take a few ms to release, triggering WinError 5.
+                for attempt in range(5):
+                    try:
+                        os.replace(temp_path, config_file)
+                        temp_path = None
+                        break
+                    except PermissionError:
+                        if attempt == 4: raise
+                        time.sleep(0.05 * (attempt + 1))
             except Exception as e:
                 if temp_path and os.path.exists(temp_path):
                     try:

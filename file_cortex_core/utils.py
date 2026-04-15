@@ -314,7 +314,8 @@ class FileUtils:
             pass
         
         # Super-fallback
-        return file_path.read_text('utf-8', 'ignore')
+        content = file_path.read_text('utf-8', 'ignore')
+        return content[:max_bytes] if max_bytes else content
 
     @staticmethod
     def get_language_tag(suffix):

@@ -16,7 +16,7 @@
 *   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
 *   **专用配置 API (v5.3)**: `custom_tools` 与 `quick_categories` 已移至专用端点 (`/api/project/tools`, `/api/project/categories`)，并增加了格式校验与路径穿越防护，彻底切断了通过 settings 注入实现 RCE 的可能性。
 *   **跨项目移动防护 (v5.3)**: `/api/fs/move` 路由强制执行 `src_root == dst_root` 校验，禁止在不同项目间移动文件。
-*   **资源泄漏防御 (v5.8)**: 全局强制使用 `with os.scandir(...)`。针对 Windows 平台，在测试清理阶段引入了 **Active Process Termination** 机制，通过 `taskkill /F /T` 强力释放被残留子进程锁定的目录。
+*   **资源泄漏防御 (v6.0)**: 全局强制使用 `with os.scandir(...)`。针对 Windows 平台，在 `DataManager.save()` 中实现了**权限重试机制 (Retries)** 以防御 WinError 5。同时在测试清理阶段引入了 **Active Process Termination** 机制。
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
@@ -85,11 +85,16 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **项目蓝图 (Blueprint)**: 采用 `ContextFormatter.generate_blueprint` 生成 ASCII 树状图，用于向 AI 提供项目整体工程视角的拓扑结构。
 
 ## 🧪 测试方法论
-本项目包含 **236** 个自动化测试，覆盖了从核心逻辑到 Web 接口的全路径。
+本项目包含 **50** 个核心加固测试，由五大核心模块整合而成，大幅提升了测试运行效率。
 *   **契约审计协议 (Contract Audit Protocol - v6.0)**: 
-    *   **原则**: 所有返回给 UI 的字典对象必须通过 `test_production_v6_audit.py` 的契约校验，确保包含 `abs_path`, `name`, `size_fmt`, `mtime_fmt` 等关键 UI 映射字段。
-    *   **全参数组合匹配**: 核心逻辑变更（如搜索、导出）必须伴随 `pytest.mark.parametrize` 覆盖所有参数排列组合。
-*   **测试隔离与自修复**: `conftest.py` 引入了 **Active Cleanup**。在每个测试运行后，会自动杀掉所有注册在 `ACTIVE_PROCESSES` 中的进程，确保 Windows 目录句柄被释放。
+    *   **原则**: 所有返回给 UI 的字典对象经过领域级契约校验，确保包含 `abs_path`, `name`, `size_fmt`, `mtime_fmt` 等关键 UI 映射字段。
+    *   **领域驱动部署**: 
+        - `test_api_v6.py`: API 契约与 Content 回传分析。
+        - `test_core_integration.py`: 核心工具与原子文件操作。
+        - `test_dm_config.py`: DataManager 持久化与 Schema 对齐。
+        - `test_search_engine.py`: 模式矩阵检索。
+        - `test_security_resilience.py`: 路径安全与 Windows 并发加固。
+*   **测试隔离与自修复**: `conftest.py` 引入了 **Active Cleanup**。每个测试运行后，会自动杀掉所有注册在 `ACTIVE_PROCESSES` 中的进程，并重置 DataManager 单例。
 *   **测试运行**: 
     ```bash
     python -m pytest

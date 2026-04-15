@@ -119,28 +119,32 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
     
     def match_content(path):
         if search_mode not in ('content', 'regex') or not search_text_processed:
-            return False
+            return False, ""
         try:
             limit = max_size_mb * 1024 * 1024
             if path.stat().st_size > limit:
-                return False
+                return False, ""
             # CR-13 Fix: Use read_text_smart for consistent encoding handling and OOM safety
             content = FileUtils.read_text_smart(path)
             found = False
+            snippet = ""
             for line in content.splitlines():
+                target_line = line if case_sensitive else line.lower()
                 if search_mode == 'regex' and re_obj:
                     if re_obj.search(line):
                         found = True
+                        snippet = line.strip()
                         break
                 elif search_mode == 'content':
-                    if search_text_processed in (line if case_sensitive else line.lower()):
+                    if search_text_processed in target_line:
                         found = True
+                        snippet = line.strip()
                         break
             
-            return found != is_inverse
+            return (found != is_inverse), snippet
         except Exception as e:
             logger.error(f"Error reading file {path}: {e}")
-            return False
+            return False, ""
 
     executor = SHARED_SEARCH_POOL
     content_futures = {}
@@ -210,12 +214,13 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
                             except Exception: pass
                         for f in batch:
                             try:
-                                is_match = f.result()
+                                is_match, snippet = f.result()
                                 info = content_futures.pop(f)
                                 if is_match:
                                     count += 1
                                     yield {
                                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                                        "snippet": snippet,
                                         **info
                                     }
                                     if count >= max_results:
@@ -237,12 +242,13 @@ def search_generator(root_dir, search_text, search_mode, manual_excludes,
             if count >= max_results:
                 break
             try:
-                is_match = f.result()
+                is_match, snippet = f.result()
                 info = content_futures.pop(f)
                 if is_match:
                     count += 1
                     yield {
                         "match_type": "Inverse Content" if info["is_inverse"] else "Content Match",
+                        "snippet": snippet,
                         **info
                     }
             except Exception:

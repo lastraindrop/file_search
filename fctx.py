@@ -7,6 +7,10 @@ def main():
     parser = argparse.ArgumentParser(description="FileCortex CLI: Workspace Orchestrator")
     subparsers = parser.add_subparsers(dest="command")
 
+    # Open
+    open_p = subparsers.add_parser("open", help="Open and register a new project workspace")
+    open_p.add_argument("path", help="Project root path to register")
+
     # Projects
     subparsers.add_parser("projects", help="List registered projects")
 
@@ -28,7 +32,25 @@ def main():
     args = parser.parse_args()
     data_mgr = DataManager()
 
-    if args.command == "projects":
+    if args.command == "open":
+        abs_path = PathValidator.norm_path(args.path)
+        if not os.path.exists(abs_path):
+            print(f"ERROR: Path '{abs_path}' does not exist.")
+            return
+        if not os.path.isdir(abs_path):
+            print(f"ERROR: Path '{abs_path}' is not a directory.")
+            return
+        # Security: Blocking system root or forbidden paths
+        # Actually is_safe needs project root, but for REGISTRATION, we check against sys root
+        if not PathValidator.is_safe(abs_path, os.path.abspath(os.sep)):
+             print(f"ERROR: Cannot register unsafe system directory: {abs_path}")
+             return
+             
+        data_mgr.add_to_recent(abs_path)
+        print(f"PROJECT REGISTERED: {abs_path}")
+        return
+
+    elif args.command == "projects":
         for p in data_mgr.data["projects"]:
             print(f"- {p}")
 

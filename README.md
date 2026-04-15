@@ -12,9 +12,9 @@
 - **全局统一配置框架 (Unified Settings)**：引入了全局设置体系，彻底消除预览上限 (Preview Limit) 的硬编码。
 - **MCP Server 标准化**：支持作为 **Model Context Protocol** 服务器运行，使 AI Agent (如 Claude Desktop) 能原生调用编排。
 - **文件分类器 (Categorizer)**：三栏式 UI，支持自定义物理路径映射与跨项目安全移动。
-- **236 项工业级审计测试**：覆盖架构适配、多参数组合、并发竞争及 **API 深度契约对齐**。
+- **50 项核心精简加固测试**：由五大模块整合而成，覆盖架构适配、多参数组合、并发竞争及 **API 深度契约对齐**。
 - **极致 Web UX**：引入网页端自定义右键菜单、搜索防抖 (Debounce Search) 和全局快捷键辅助。
-- **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**通过 Path Casing 适配实现 100% 跨平台一致性**。
+- **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**通过项目注册 (fctx open) 实现 100% 跨平台一致性**。
 - **微内核架构**：核心逻辑已完全迁移至 `file_cortex_core/` 包，支持作为库被第三方调用。
 - **AI 上下文增强**：集成 **中日韩加权 Token 估算 (FormatUtils)**、**Token 预算预警** 与 **Prompt 自动化模板**。
 - **路径搜集预设**：支持自定义文件前缀 (Prefix) 与 目录后缀 (Suffix)，内置 GPT/RAG 多套搜集预设。
@@ -52,7 +52,7 @@
    ```
 2. 在浏览器中访问：`http://127.0.0.1:8000`
 
-- **183+ 自动测试 (183+ Automated Tests)**: `pytest` 全覆盖。测试环境实现了 **DataManager 强制隔离重置** 与 **Windows 进程树强制杀伤**，确保跨平台逻辑的绝对可靠性：
+- **50 核心全自动测试 (50 Core Automated Tests)**: `pytest` 全面覆盖。测试环境实现了 **DataManager 强制隔离重置**、**Windows 并发鲁棒性验证 (WinError 5)** 与 **进程树强制杀伤**：
 ```bash
 python -m pytest
 ```

@@ -10,13 +10,17 @@ import re
 from file_cortex_core import DataManager, FileUtils, SearchWorker, FileOps, ContextFormatter, FormatUtils, ActionBridge, PathValidator, logger
 
 # --- Constants ---
-PREVIEW_LIMIT = 100000  # Max characters to display in preview
 TOKEN_RATIO = 4         # Character to token ratio estimate
 SEARCH_POLL_MS = 100    # Queue polling interval
+
+def get_preview_limit(dm: DataManager) -> int:
+    """Gets preview limit from global settings (default 1MB)."""
+    mb = dm.data.get("global_settings", {}).get("preview_limit_mb", 1)
+    return mb * 1024 * 1024
 class FileCortexApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("FileCortex v5.8.2 Production | 工业级分析助手")
+        self.root.title("FileCortex v6.0.0 Production | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -378,6 +382,8 @@ class FileCortexApp:
         self.context_menu.add_command(label="⭐ 收藏至当前组", command=self.ctx_add_to_favorites)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="🗑️ 删除", command=self.ctx_delete_file)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="🖼️ 发送至图像处理器", command=self.ctx_send_to_image_splitter)
         for t in [self.tree_search, self.tree_fav, self.tree_staging, self.tree_proj]: t.bind("<Button-3>", self.show_context_menu)
 
     def on_browse(self, fixed_path=None):
@@ -757,7 +763,8 @@ class FileCortexApp:
             else:
                 try:
                     # CR-14 Fix: Use read_text_smart for consistent encoding detection
-                    content = FileUtils.read_text_smart(full_path, max_bytes=PREVIEW_LIMIT)
+                    limit = get_preview_limit(self.data_mgr)
+                    content = FileUtils.read_text_smart(full_path, max_bytes=limit)
                     self.preview_text.insert(tk.END, content)
                     # CR-C08 Fix: Re-enable edit button for text files
                     self.btn_edit_save.config(state=tk.NORMAL)
@@ -1171,6 +1178,17 @@ class FileCortexApp:
                     FileOps.delete_file(str(p))
                 self.load_project(str(self.current_dir))
             except Exception as e: messagebox.showerror("错误", f"删除中断: {str(e)}")
+
+    def ctx_send_to_image_splitter(self):
+        paths = self._get_ctx_paths()
+        img_paths = [str(p) for p in paths if p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.bmp']]
+        if img_paths:
+            import subprocess
+            gui_path = pathlib.Path(__file__).parent.parent / "image_process" / "image_splitter" / "gui.py"
+            if gui_path.exists():
+                subprocess.Popen([sys.executable, str(gui_path)] + img_paths)
+            else:
+                self.show_status("找不到图像处理器", is_error=True)
 
     def ctx_move_file(self):
         paths = self._get_ctx_paths()

@@ -9,19 +9,17 @@ class PathValidator:
         if not root_path:
             return False
         try:
-            # resolve() handles '..' and case-normalization
-            target = pathlib.Path(target_path).resolve()
-            root = pathlib.Path(root_path).resolve()
-            
-            # Explicitly check for traversal before is_relative_to for older Python versions
-            # Explicitly check for traversal: although resolve() handles it, 
-            # we allow ".." as long as it doesnt break the is_relative_to boundary check below.
-            pass
+            t = pathlib.Path(target_path)
+            r = pathlib.Path(root_path).resolve()
+            if not t.is_absolute():
+                target = (r / t).resolve()
+            else:
+                target = t.resolve()
 
             if hasattr(target, 'is_relative_to'):
-                 return target.is_relative_to(root)
+                 return target.is_relative_to(r)
             # Fallback for Python < 3.9
-            return root == target or root in target.parents
+            return r == target or r in target.parents
         except Exception:
             return False
 

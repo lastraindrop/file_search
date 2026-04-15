@@ -1,37 +1,30 @@
 # FileCortex - 自动化测试套件说明 (Test Suite)
 
-本项目包含 **183** 项全自动化的 `pytest` 测试，采用 **微内核一对一镜像测试** 架构，实现了对核心逻辑、API 安全、及 AI 编排工作流的全方位覆盖。
+本项目包含 **50** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约的全方位覆盖。
 
-## 🧪 测试分类 (Modular Architecture)
+## 🧪 测试分类 (Consolidated Architecture)
 
-### 1. 核心引擎测试 (file_cortex_core 镜像)
-- **搜索引擎 (`test_search.py`)**: 采用 **参数矩阵 (Matrix Testing)** 覆盖了 Smart/Exact/Regex/Content 模式。
-- **安全检查 (`test_security.py`)**: 验证 `PathValidator` 的路径组件匹配机制。
-- **系统工具 (`test_utils.py`)**: 特色功能测试，包括 **Token 估算准确度**、搜集符号注入等。
-- **配置一致性 (`test_config.py`)**: 验证 `DataManager` 的原子写入、RLock 并发保护。
-- **物理操作 (`test_actions.py`)**: 测试 `FileOps` 隔离性及 `ActionBridge` 的 **环境变量注入审计 (v5.8)**。
+### 1. API 契约与回传分析 (`test_api_v6.py`)
+- **深度契约校验**: 验证所有 API 返回对象包含 UI 所需的必备元数据。
+- **Content Edge Cases**: 覆盖超大文件截断与二进制安全检测。
 
-### 2. Web API 接入测试 (`test_web_api.py`)
-- **权限与审计**: 验证所有 API 的 `get_valid_project_root` 拦截效果。
-- **交互流程**: 涵盖 WebSocket 搜索流、文件操作。
+### 2. 核心工具与原子操作 (`test_core_integration.py`)
+- **FileOps 隔离性**: 测试文件重命名回滚、项目项创建。
+- **DuplicateWorker**: 验证后台查重任务的准确性。
 
-### 3. 桌面端特化测试 (`test_desktop_security.py`)
-- **命令注入防护**: 针对 Windows PowerShell `Set-Clipboard` 的参数化调用防御测试。
+### 3. 配置持久化与 Schema 对齐 (`test_dm_config.py`)
+- **自愈型 Schema**: 验证 DataManager 在读取过程中的自动补全逻辑。
+- **分组管理**: 测试 Path Normalization 在 Windows/Unix 下的一致性。
 
-### 4. 生产稳定性测试 (v5.8.0 Hardening)
-- **并发压力测试 (`test_stress_concurrency.py`)**: 验证高负载下的配置原子性。
-- **环境安全测试 (`test_audit_fixes_v58.py`)**: 专项验证符号注入拦截。
-- **增量加固验证 (`test_v571_improvements.py`)**: 专项验证 v5.8.0 版本的 OOM 保护、Base64 降噪及敏感目录拦截逻辑。
-- **沙箱隔离验证**: 确保在 Windows 环境下残留进程被递归杀伤 (`conftest.py`)。
+### 4. 模式矩阵检索 (`test_search_engine.py`)
+- **搜索参数对决**: 覆盖 Smart/Exact/Regex/Content 四大模式的所有逻辑组合。
+
+### 5. 路径安全与 Windows 并发加固 (`test_security_resilience.py`)
+- **OS 并发鲁棒性**: 专项验证在高频写操作下通过 **Retry 机制** 解决 WinError 5。
+- **Security Matrix**: 严密封锁 UNC 路径注入与 Directory Traversal。
 
 ## 🚀 运行测试
-
 在项目根目录下执行：
-
 ```powershell
 python -m pytest
 ```
-
-## 🛡️ 设计准则：动态对齐 (Dynamic Alignment)
-本项目的所有测试均遵循 **“零硬编码”** 原则，确保在任何宿主环境（Windows/Unix）下的逻辑路径、权限校验及并发控制均能实现镜像对齐。
-

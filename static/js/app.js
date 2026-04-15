@@ -62,6 +62,7 @@ const App = {
     },
 
     init: async () => {
+        App.loadGlobalSettings();
         App.loadWorkspaces();
         
         const searchInput = document.getElementById('searchInput');
@@ -278,6 +279,41 @@ const App = {
                 })
             });
         } catch (e) { console.warn("Auto-save settings failed", e); }
+    },
+
+    loadGlobalSettings: async () => {
+        try {
+            const res = await App._fetch('/api/config/global');
+            App.state.globalSettings = await res.json();
+            // Inject values into modal if open or just keep in state
+        } catch (e) { console.error("Failed to load global settings", e); }
+    },
+
+    showGlobalSettings: async () => {
+        await App.loadGlobalSettings();
+        const s = App.state.globalSettings;
+        document.getElementById('set-preview-limit').value = s.preview_limit_mb || 1;
+        document.getElementById('set-allowed-exts').value = s.allowed_extensions || "";
+        document.getElementById('set-noise-reducer').checked = s.enable_noise_reducer || false;
+        new bootstrap.Modal(document.getElementById('settingsModal')).show();
+    },
+
+    saveGlobalSettings: async () => {
+        const body = {
+            preview_limit_mb: parseInt(document.getElementById('set-preview-limit').value),
+            allowed_extensions: document.getElementById('set-allowed-exts').value,
+            enable_noise_reducer: document.getElementById('set-noise-reducer').checked
+        };
+        try {
+            await App._fetch('/api/config/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            App.state.globalSettings = { ...App.state.globalSettings, ...body };
+            App.showToast("Global settings saved successfully");
+            bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+        } catch (e) { App.showToast("Failed to save settings: " + e.message, 'danger'); }
     },
 
     // --- File Tree Rendering ---
@@ -645,12 +681,14 @@ const App = {
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'flex-grow-1 overflow-hidden';
+        const snippetHtml = data.snippet ? `<div class="x-small text-warning mt-1 text-truncate border-start border-warning ps-2" style="background: rgba(255,193,7,0.05)">${App.escapeHtml(data.snippet)}</div>` : "";
         contentDiv.innerHTML = `
             <div class="d-flex justify-content-between align-items-center">
                 <div class="fw-bold text-info">${App.escapeHtml(data.name)}</div>
                 <div class="text-muted x-small" style="font-size:0.7rem">${data.mtime_fmt || ''}</div>
             </div>
             <div class="small text-muted text-truncate">${App.escapeHtml(data.path)}</div>
+            ${snippetHtml}
         `;
         item.appendChild(contentDiv);
         
@@ -982,13 +1020,21 @@ const App = {
                 })
             });
             const data = await res.json();
+            const threshold = (App.state.globalSettings && App.state.globalSettings.token_threshold) || 128000;
             label.innerText = `${data.file_count} Files | ${data.total_tokens.toLocaleString()} Tokens`;
-            if (data.total_tokens > 100000) {
-                label.classList.add('pulse-warning');
-                label.title = "High Token Count - Consider removing large files";
+            
+            // Remove all possible state classes
+            label.classList.remove('bg-info', 'bg-warning', 'bg-danger', 'pulse-warning');
+            
+            if (data.total_tokens > threshold) {
+                label.classList.add('bg-danger', 'pulse-warning');
+                label.title = "CRITICAL: Token Count Exceeds Budget!";
+            } else if (data.total_tokens > threshold * 0.7) {
+                label.classList.add('bg-warning', 'text-dark');
+                label.title = "Warning: High Token Count";
             } else {
-                label.classList.remove('pulse-warning');
-                label.title = "";
+                label.classList.add('bg-info');
+                label.title = "Tokens within budget";
             }
         } catch (e) {
             label.innerText = `${count} Items`;

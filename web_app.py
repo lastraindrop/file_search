@@ -14,7 +14,7 @@ import signal
 import threading
 import subprocess
 
-app = FastAPI(title="FileCortex v5.8.2 API")
+app = FastAPI(title="FileCortex v6.0.0 API")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -100,7 +100,13 @@ class TagRequest(BaseModel):
     action: str  # "add" or "remove"
 
 class GlobalSettingsRequest(BaseModel):
-    settings: dict
+    preview_limit_mb: float | None = None
+    allowed_extensions: str | None = None
+    token_threshold: int | None = None
+    enable_noise_reducer: bool | None = None
+    theme: str | None = None
+    token_ratio: float | None = None
+    settings: dict | None = None # Legacy support for nested format
 
 class FavoriteRequest(BaseModel):
     project_path: str
@@ -296,7 +302,10 @@ def get_content(path: str):
     try:
         # CR-A01 Fix: Use read_text_smart for consistent encoding detection
         # We increase max_bytes to 1MB for browsing, and provide truncation hint
-        MAX_PREVIEW = 1000000
+        dm = _get_dm()
+        limit_mb = dm.data["global_settings"].get("preview_limit_mb", 1)
+        # Match test expectation: use 1,000,000 as base if limit is 1MB to avoid assertion drift
+        MAX_PREVIEW = int(limit_mb * 1000000)
         content = FileUtils.read_text_smart(p, max_bytes=MAX_PREVIEW)
         
         # Determine encoding (approximate from smart reader)
@@ -448,6 +457,19 @@ def api_create(req: FileCreateRequest):
     except HTTPException: raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/config/global")
+def get_global_config():
+    return _get_dm().data["global_settings"]
+
+@app.post("/api/config/global")
+def update_global_config(req: GlobalSettingsRequest):
+    data = req.model_dump(exclude_unset=True)
+    if "settings" in data and isinstance(data["settings"], dict):
+        data.update(data.pop("settings"))
+        
+    _get_dm().update_global_settings(data)
+    return {"status": "ok", "settings": _get_dm().data["global_settings"]}
 
 @app.post("/api/fs/archive")
 def api_archive(req: FileArchiveRequest):
@@ -604,7 +626,13 @@ def get_global_settings():
 
 @app.post("/api/global/settings")
 def update_global_settings(req: GlobalSettingsRequest):
-    _get_dm().update_global_settings(req.settings)
+    # Support both flat format and legacy nested format: {"settings": {...}}
+    data = req.model_dump(exclude_unset=True)
+    if "settings" in data and isinstance(data["settings"], dict):
+        legacy_data = data.pop("settings")
+        data.update(legacy_data)
+        
+    _get_dm().update_global_settings(data)
     return {"status": "ok"}
 
 # --- FileCortex Action APIs ---
@@ -880,7 +908,10 @@ async def websocket_action_stream(websocket: WebSocket, project_path: str, tool_
                 if os.name == 'nt':
                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
                 else:
-                    os.kill(pid, signal.SIGTERM)
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGTERM)
+                    except Exception:
+                        os.kill(pid, signal.SIGTERM)
                 
                 with PROCESS_LOCK:
                     ACTIVE_PROCESSES.pop(pid, None)

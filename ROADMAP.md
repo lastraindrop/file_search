@@ -31,8 +31,8 @@
 ## 📍 阶段 3：工业级稳定性与 Agentic 增强 (v6.0 - 2026 Q2 达成) [x]
 - [x] **[DONE] 分类管理器 (Categorizer)**: 
     - 实现了三栏式文件分类 UI，支持自定义相对路径映射。
-- [x] **[DONE] 236 项全量测试矩阵**: 
-    - 覆盖架构适配、参数组合与 API 契约深度校验（修复了 content 模式字段漂移 Bug）。
+- [x] **[DONE] 50 项核心精简测试矩阵 (v6.0 Consolidation)**: 
+    - 实现五大领域驱动模块整合（API契约、核心工具、配置、搜索、安全鲁棒性），修复了 Windows 并发竞争 Bug。
 - [x] **[DONE] 全局统一配置框架 (Unified Settings)**:
     - 引入了 `global_settings` 持久化体系，彻底消除预览上限 (Preview Limit) 的硬编码。
 - [x] **[DONE] LLM 上下文对齐 (v6.0 Innovation)**:
@@ -40,8 +40,8 @@
     - 引入了 **Project Blueprint (项目蓝图)** 功能，一键生成项目架构 ASCII 快照。
 - [x] **[DONE] 极致 Web UX (v6.0 Polish)**:
     - 实现 Web 端自定义右键菜单、搜索防抖 (Debounce) 和全局快捷键辅助。
-- [x] **[DONE] MCP 协议集成**: 
-    - 创建了 `mcp_server.py`，使 FileCortex 能够作为 Claude Desktop 的插件原生工作。
+- [x] **[DONE] MCP 协议集成与 CLI 增强**: 
+    - 创建了 `mcp_server.py`，并扩展了 `fctx.py` 增加 `open` 命令，支持 headless 环境下的工作空间快速注册。
 
 ## 🚀 后续愿景 (v7.0+ 智能化编排)
 - [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel 语义抓取。

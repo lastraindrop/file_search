@@ -49,7 +49,12 @@ class DuplicateWorker(threading.Thread):
                 except (ValueError, RuntimeError):
                     # H9 Fix: Fallback for paths outside root_dir (e.g. symlinks)
                     # Use a safestring-based calculation or just assume root is the name
-                    rel_root = pathlib.Path(root.replace(str(self.root_dir), "").lstrip(os.sep))
+                    norm_root = os.path.normcase(os.path.abspath(root))
+                    norm_base = os.path.normcase(os.path.abspath(self.root_dir))
+                    if norm_root.startswith(norm_base):
+                        rel_root = pathlib.Path(norm_root[len(norm_base):].lstrip(os.sep))
+                    else:
+                        rel_root = pathlib.Path(os.path.basename(root))
                 
                 # Apply ignore logic to dirs to prune early
                 dirs[:] = [d for d in dirs if not FileUtils.should_ignore(d, rel_root / d, self.excludes, self.git_spec, is_dir=True)]
