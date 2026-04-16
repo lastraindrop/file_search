@@ -1,11 +1,29 @@
-import pathlib
+#!/usr/bin/env python3
+"""Security module for FileCortex.
+
+Provides path validation and security checks to prevent unauthorized
+file system access.
+"""
+
 import os
+import pathlib
 import sys
 
+
 class PathValidator:
+    """Validates paths to prevent path traversal attacks."""
+
     @staticmethod
-    def is_safe(target_path, root_path):
-        """Strict check to prevent path traversal outside project root."""
+    def is_safe(target_path: str | pathlib.Path, root_path: str | pathlib.Path) -> bool:
+        """Checks if a target path is within the root path.
+
+        Args:
+            target_path: The path to validate.
+            root_path: The root directory to check against.
+
+        Returns:
+            True if the path is safe, False otherwise.
+        """
         if not root_path:
             return False
         try:
@@ -16,82 +34,128 @@ class PathValidator:
             else:
                 target = t.resolve()
 
-            if hasattr(target, 'is_relative_to'):
-                 return target.is_relative_to(r)
-            # Fallback for Python < 3.9
+            if hasattr(target, "is_relative_to"):
+                return target.is_relative_to(r)
             return r == target or r in target.parents
         except Exception:
             return False
 
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
-        """Canonicalize path: absolute, platform-aware casing, posix-style, and trail-slash standardized."""
+        """Normalizes a path to canonical form.
+
+        Args:
+            p: The path to normalize.
+
+        Returns:
+            The normalized path as a string.
+        """
         if not p:
             return ""
         try:
-            # os.path.abspath for industrial-strength determinism
-            p_str = os.path.abspath(str(p)).replace('\\', '/')
-            
-            if sys.platform == 'win32':
+            p_str = os.path.abspath(str(p)).replace("\\", "/")
+
+            if sys.platform == "win32":
                 p_str = p_str.lower()
-                # Protection for UNC/Long paths on Windows
-                if p_str.startswith('//?/'):
-                    return p_str.rstrip('/')
-                # Windows drive root: 'c:/'
-                if len(p_str) == 3 and p_str[1:3] == ':/':
+                if p_str.startswith("//?/"):
+                    return p_str.rstrip("/")
+                if len(p_str) == 3 and p_str[1:3] == ":/":
                     return p_str
             else:
-                # Unix root: '/'
-                if p_str == '/':
-                    return '/'
-            
-            # Standard paths: remove trailing slash
-            return p_str.rstrip('/')
+                if p_str == "/":
+                    return "/"
+
+            return p_str.rstrip("/")
         except Exception:
-            s = str(p).replace('\\', '/')
-            if sys.platform == 'win32': s = s.lower()
-            if s == '/': return '/'
-            if len(s) == 3 and s[1:3] == ':/': return s
-            return s.rstrip('/')
+            s = str(p).replace("\\", "/")
+            if sys.platform == "win32":
+                s = s.lower()
+            if s == "/":
+                return "/"
+            if len(s) == 3 and s[1:3] == ":/":
+                return s
+            return s.rstrip("/")
 
     @staticmethod
     def validate_project(path_str: str) -> pathlib.Path:
-        # Standardize representation before resolution
-        normalized_str = str(path_str).replace('/', '\\') if sys.platform == 'win32' else str(path_str)
-        
-        if sys.platform == 'win32' and normalized_str.startswith('\\\\'):
-             raise PermissionError("UNC/Network paths are blocked for security (Potential SMB credential leak).")
+        """Validates and returns a project path.
+
+        Args:
+            path_str: The path to validate.
+
+        Returns:
+            The validated path as a pathlib.Path.
+
+        Raises:
+            PermissionError: If the path is blocked for security reasons.
+            FileNotFoundError: If the path does not exist.
+            NotADirectoryError: If the path is not a directory.
+        """
+        normalized_str = (
+            str(path_str).replace("/", "\\")
+            if sys.platform == "win32"
+            else str(path_str)
+        )
+
+        if sys.platform == "win32" and normalized_str.startswith("\\\\"):
+            raise PermissionError(
+                "UNC/Network paths are blocked for security "
+                "(Potential SMB credential leak)."
+            )
 
         p = pathlib.Path(path_str).resolve()
-        
+
         if not p.exists():
             raise FileNotFoundError(f"Path does not exist: {path_str}")
         if not p.is_dir():
             raise NotADirectoryError(f"Not a directory: {path_str}")
-        
-        # Block sensitive names (RCE prevention)
-        sensitive_names = {'.git', '.env', '__pycache__', 'node_modules', '.idea', '.vscode'}
+
+        sensitive_names = {
+            ".git",
+            ".env",
+            "__pycache__",
+            "node_modules",
+            ".idea",
+            ".vscode",
+        }
         if p.name.lower() in sensitive_names:
-            raise PermissionError(f"Cannot register sensitive directory as project root: {p.name}")
-            
-        # Block root drives first
+            raise PermissionError(
+                f"Cannot register sensitive directory as project root: {p.name}"
+            )
+
         if len(p.parts) <= 1:
             raise PermissionError("Cannot register root drive as a project.")
-        
-        # Only block if the directory IS or is inside a system directory (prefix-match)
+
         blocked_prefixes = []
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             blocked_prefixes = [
                 pathlib.Path(os.environ.get("SYSTEMROOT", "C:/Windows")).resolve(),
-                pathlib.Path(os.environ.get("PROGRAMFILES", "C:/Program Files")).resolve(),
-                pathlib.Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")).resolve(),
+                pathlib.Path(
+                    os.environ.get("PROGRAMFILES", "C:/Program Files")
+                ).resolve(),
+                pathlib.Path(
+                    os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")
+                ).resolve(),
             ]
         else:
-            blocked_prefixes = [pathlib.Path(d).resolve() for d in 
-                               ["/etc", "/usr", "/bin", "/sbin", "/boot", "/var", "/proc", "/sys", "/dev"]]
-        
+            blocked_prefixes = [
+                pathlib.Path(d).resolve()
+                for d in [
+                    "/etc",
+                    "/usr",
+                    "/bin",
+                    "/sbin",
+                    "/boot",
+                    "/var",
+                    "/proc",
+                    "/sys",
+                    "/dev",
+                ]
+            ]
+
         for blocked in blocked_prefixes:
-            # Block if p IS a system dir or p is INSIDE a system dir
             if p == blocked or blocked in p.parents:
-                raise PermissionError(f"Access to system directory '{blocked}' is blocked for security.")
+                raise PermissionError(
+                    f"Access to system directory '{blocked}' is blocked."
+                )
         return p

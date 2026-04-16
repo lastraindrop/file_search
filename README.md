@@ -35,6 +35,51 @@
 - [项目路线图 (Roadmap)](ROADMAP.md)
 - [Pytest 测试说明](tests/README.md)
 
+## 📐 代码规范
+
+本项目遵循 **Google Python Style Guide**：
+
+### 导入排序
+```python
+# 标准库
+import os
+import pathlib
+import threading
+
+# 第三方库
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+# 本地模块
+from file_cortex_core import DataManager
+```
+
+### 类型注解
+所有公共函数和方法均添加了完整的类型注解：
+```python
+def search_generator(
+    root_dir: pathlib.Path,
+    search_text: str,
+    search_mode: str,
+    manual_excludes: str,
+    ...
+) -> Generator[dict[str, Any], None, None]:
+```
+
+### Docstring 规范
+所有公共类和方法均包含规范的 Google 风格文档字符串：
+```python
+def format_size(size_bytes: int) -> str:
+    """Formats a byte size into human-readable string.
+
+    Args:
+        size_bytes: Size in bytes.
+
+    Returns:
+        Formatted size string (B, KB, MB, GB).
+    """
+```
+
 ## 🚀 快速开始
 
 ### 桌面版

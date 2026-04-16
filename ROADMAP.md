@@ -48,6 +48,17 @@
 - [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型对其长代码进行结构化压缩。
 - [ ] **自愈型工作流**: 实现 Agent 驱动的本地工程自动化维护（修复 Bug、生成文档）。
 
+## ✅ v6.1 代码规范化 (2026 Q2 完成)
+- [x] **Google Python Style Guide 合规**:
+    - 完整类型注解：所有函数和方法添加完整的类型提示
+    - Docstring 规范：所有公共类和方法包含 Google 风格文档字符串
+    - 导入排序：标准库 → 第三方 → 本地模块，组间空行
+    - 命名规范：下划线命名法，私有方法用 `_` 前缀
+- [x] **文档同步更新**:
+    - README.md 更新代码规范章节
+    - DEVELOPER_GUIDE.md 添加贡献准则中的代码风格说明
+    - ROADMAP.md 新增 v6.1 阶段记录
+
 ## 🛡️ 架构一致性原则 (Maintenance Principles)
 *   **SSOT (Single Source of Truth)**: 所有的路径权限及配置读取必须统一经过 `DataManager`。
 *   **契约自洽性 (Contract Cohesion - v6.0 NEW)**: 

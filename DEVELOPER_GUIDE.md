@@ -108,3 +108,20 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 1.  **KISS 原则**: 优先通过内置库解决问题，减少不必要的第三方依赖。
 2.  **契约自洽**: 变更 API 返回结果前，必须先行更新 `app.js` 接收逻辑与对应的契约测试用例。
 3.  **防御性编程**: 对所有涉及 `root` 以外的 IO 操作直接进行 `is_safe` 熔断处理。
+4.  **Google Python Style Guide**: 本项目遵循 [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)：
+    - **导入排序**: 标准库 → 第三方 → 本地模块，组间空行分隔
+    - **类型注解**: 所有公共函数和方法必须添加完整类型注解
+    - **Docstring**: 所有公共类和方法必须包含规范的文档字符串
+    - **命名规范**: 下划线命名法，私有方法用 `_` 前缀
+    - **行长度**: 建议不超过 100 字符（软限制）
+
+### 快速代码格式化
+```bash
+# 安装工具
+pip install isort ruff black
+
+# 格式化代码
+isort .
+ruff check --fix .
+black .
+```

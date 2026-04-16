@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "file-cortex"
-version = "6.0.0"
+version = "6.1.0"
 authors = [
     { name = "Developer", email = "dev@example.com" },
 ]
 description = "A powerful workspace orchestrator and file processor for AI-assisted coding."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -31,6 +31,9 @@ dev = [
     "pytest>=7.3.0",
     "pytest-asyncio>=0.21.0",
     "requests>=2.31.0",
+    "ruff>=0.1.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
 ]
 gui = [
     "customtkinter>=5.1.0",
@@ -43,3 +46,19 @@ fctx-web = "web_app:main"
 [tool.setuptools]
 packages = ["file_cortex_core"]
 py-modules = ["fctx", "web_app", "file_search"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "google"
+line_length = 100
