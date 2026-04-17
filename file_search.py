@@ -40,7 +40,7 @@ SEARCH_POLL_MS = 100
 def get_preview_limit(dm: DataManager) -> int:
     """Gets preview limit from global settings (default 1MB)."""
     mb = dm.data.get("global_settings", {}).get("preview_limit_mb", 1)
-    return mb * 1024 * 1024
+    return int(mb * 1024 * 1024)
 
 
 class FileCortexApp:
@@ -53,7 +53,7 @@ class FileCortexApp:
             root: The root tkinter window.
         """
         self.root = root
-        self.root.title("FileCortex v6.0.0 Production | 工业级分析助手")
+        self.root.title("FileCortex v6.2.0 Production | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -795,7 +795,7 @@ class FileCortexApp:
         self.tools_scroll.insert(tk.END, f"\n> 执行: {tool_name}\n", "cyan")
         for p_str in self.staging_files:
             file_name = pathlib.Path(p_str).name
-            res = ActionBridge.execute_tool(template, p_str, self.current_dir)
+            res = ActionBridge.execute_tool(template, p_str, str(self.current_dir))
             if "error" in res:
                 self.tools_scroll.insert(
                     tk.END,
@@ -1216,7 +1216,9 @@ class FileCortexApp:
             with os.scandir(path) as it:
                 for entry in sorted(it, key=lambda e: (not e.is_dir(), e.name.lower())):
                     rel_path = pathlib.Path(entry.path).relative_to(self.current_dir)
-                    if FileUtils.should_ignore(entry.name, rel_path, ex, git_spec):
+                    if FileUtils.should_ignore(
+                        entry.name, rel_path, ex, git_spec, entry.is_dir()
+                    ):
                         continue
 
                     node = self.tree_proj.insert(

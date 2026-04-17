@@ -20,7 +20,8 @@
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
 
 ### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
-# FileCortex v5.8 - 工业级大规模文件分析与 Kontext 搜集工具
+# Developer Guide - FileCortex v6.2
+ - 工业级大规模文件分析与 Kontext 搜集工具
 FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_core/` 包，实现了高内聚低耦合：
 *   **config.py**: 线程安全的 `DataManager` 单例。**v5.8 强化了原子锁机制**，确保“读取-修改-保存”全生命周期由 `RLock` 保护，杜绝并发下的字典大小变动错误。
 *   **security.py**: `PathValidator` 负责所有路径的安全性校验。
@@ -41,7 +42,7 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
     - **API 上下文保障**: 任何涉及文件列表统计（如 `StatsRequest`）或内容生成（如 `GenerateRequest`）的模型必须显式包含 `project_path`。**v6.0 统一要求所有配置请求必须过 DataManager 逻辑校验，严禁直接读写内存字典。**
     - **响应式元数据**: `get_node_info` 强制返回 `size_fmt`, `mtime_fmt`, `has_children` 等 UI 就绪映射，避免前端进行逻辑重组。
     - **物理对齐原则**: 搜寻结果 `path` 与 API 入参通过 `PathValidator.norm_path` 实现物理级一致性。
-    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。**v6.0 引入了 Context 生成单文件 1MB 强制熔断。**
+    - **OOM 拦截规约**: 所有的文本读取操作必须调用 `FileUtils.read_text_smart`。**v6.0 引入了 Context 生成单文件 1MB 强制熔断。v6.2.0 强化了预览参数的类型对齐，确保所有切片偏移量经过 int() 转换以防止运行时崩溃。**
     - **句柄自闭环 (Resource Safety)**: 全部 I/O 扫描逻辑强制封装在 `with os.scandir(...)` 上下文管理器中，解决 Windows 文件锁定难题。
 
 ### 5. 并发控制与资源生命周期 (Concurrency & Lifecycle - v5.8)
@@ -85,7 +86,7 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 *   **项目蓝图 (Blueprint)**: 采用 `ContextFormatter.generate_blueprint` 生成 ASCII 树状图，用于向 AI 提供项目整体工程视角的拓扑结构。
 
 ## 🧪 测试方法论
-本项目包含 **50** 个核心加固测试，由五大核心模块整合而成，大幅提升了测试运行效率。
+本项目包含 **80** 个生产级回归测试用例，实现了 100% 的关键路径覆盖。
 *   **契约审计协议 (Contract Audit Protocol - v6.0)**: 
     *   **原则**: 所有返回给 UI 的字典对象经过领域级契约校验，确保包含 `abs_path`, `name`, `size_fmt`, `mtime_fmt` 等关键 UI 映射字段。
     *   **领域驱动部署**: 
@@ -94,6 +95,10 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
         - `test_dm_config.py`: DataManager 持久化与 Schema 对齐。
         - `test_search_engine.py`: 模式矩阵检索。
         - `test_security_resilience.py`: 路径安全与 Windows 并发加固。
+        - `test_utils_format.py`: (v6.2.0) 格式化边界、字节单位与 Token 估算。
+        - `test_context_formatter.py`: (v6.2.0) XML/Markdown/Blueprint 逻辑验证。
+        - `test_fileops_advanced.py`: (v6.2.0) 进阶文件操作与冲突处理。
+        - `test_web_endpoints.py`: (v6.2.0) Web API 权限、Schema 同步与端点安全。
 *   **测试隔离与自修复**: `conftest.py` 引入了 **Active Cleanup**。每个测试运行后，会自动杀掉所有注册在 `ACTIVE_PROCESSES` 中的进程，并重置 DataManager 单例。
 *   **测试运行**: 
     ```bash

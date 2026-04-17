@@ -33,9 +33,14 @@ except ImportError:
         def tool(self):
             return lambda x: x
 
+        def run(self):
+            print(f"MCP Fallback: {self.name} server would start here if SDK was installed.")
+
 
 mcp = FastMCP("FileCortex")
-dm = DataManager()
+
+def get_dm():
+    return DataManager()
 
 
 @mcp.tool()
@@ -56,7 +61,7 @@ async def search_files(
     Returns:
         A string containing matching file paths and their match types.
     """
-    root = dm.resolve_project_root(project_path)
+    root = get_dm().resolve_project_root(project_path)
     if not root:
         return f"Error: Project path '{project_path}' is not registered or authorized."
 
@@ -95,7 +100,7 @@ async def get_file_context(
     Returns:
         Formatted file contents as a string.
     """
-    root = dm.resolve_project_root(project_path)
+    root = get_dm().resolve_project_root(project_path)
     if not root:
         return "Error: Unauthorized project path."
 
@@ -116,6 +121,7 @@ async def list_workspaces() -> str:
     Returns:
         A formatted string listing all workspaces.
     """
+    dm = get_dm()
     summary = dm.get_workspaces_summary()
     lines = ["Registered Workspaces:"]
     for p in summary["pinned"]:

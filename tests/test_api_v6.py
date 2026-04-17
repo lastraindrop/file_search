@@ -53,8 +53,8 @@ def test_api_content_edge_cases(project_client, mock_project, file_type, expecte
         large_f = mock_project / "large_trunc.txt"
         large_f.write_text("X" * 1500000) # 1.5MB
         res = project_client.get(f"/api/content?path={str(large_f)}")
-        # Check truncation (MAX_PREVIEW is 1,000,000 for 1MB)
-        assert len(res.json()["content"]) <= 1000100 
+        # Check truncation (MAX_PREVIEW is ~1,048,576 for 1MB)
+        assert len(res.json()["content"]) <= 1050000 
         assert res.json()["is_truncated"] is True
 
 # -----------------------------------------------------------------------------

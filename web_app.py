@@ -13,6 +13,7 @@ import pathlib
 import signal
 import subprocess
 import threading
+import uvicorn
 from typing import Any
 
 from fastapi import (
@@ -39,7 +40,7 @@ from file_cortex_core import (
     search_generator,
 )
 
-app = FastAPI(title="FileCortex v6.0.0 API")
+app = FastAPI(title="FileCortex v6.2.0 API")
 
 ACTIVE_PROCESSES: dict[int, subprocess.Popen] = {}
 PROCESS_LOCK = threading.Lock()
@@ -485,7 +486,7 @@ def get_content(path: str) -> dict[str, Any]:
     try:
         dm = _get_dm()
         limit_mb = dm.data["global_settings"].get("preview_limit_mb", 1)
-        max_preview = int(limit_mb * 1000000)
+        max_preview = int(limit_mb * 1024 * 1024)
         content = FileUtils.read_text_smart(p, max_bytes=max_preview)
 
         return {
@@ -808,9 +809,10 @@ def get_proj_config(path: str) -> dict[str, Any]:
     Returns:
         Project configuration dictionary.
     """
-    if not get_valid_project_root(path):
+    root, _ = get_project_config_for_path(path)
+    if not root:
         raise HTTPException(status_code=403, detail="Access denied")
-    return _get_dm().get_project_data(path)
+    return _get_dm().get_project_data(root)
 
 
 @app.get("/api/project/prompt_templates")
@@ -1055,7 +1057,7 @@ def update_global_settings(req: GlobalSettingsRequest) -> dict[str, str]:
 
 
 @app.post("/api/actions/stage_all")
-def api_stage_all(req: StageAllRequest) -> dict[str, int]:
+def api_stage_all(req: StageAllRequest) -> dict[str, Any]:
     """Stages all files in a project.
 
     Args:
@@ -1308,6 +1310,7 @@ async def websocket_search(
                         "path": res_dict["path"],
                         "type": res_dict["match_type"],
                         "size": res_dict["size"],
+                        "size_fmt": FormatUtils.format_size(res_dict["size"]),
                         "mtime": res_dict["mtime"],
                         "mtime_fmt": res_dict.get("mtime_fmt", ""),
                         "ext": res_dict["ext"],

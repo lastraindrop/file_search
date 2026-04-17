@@ -316,47 +316,32 @@ class DataManager:
         return None
 
     def add_note(self, project_path: str, file_path: str, note: str) -> None:
-        """Adds a note to a file.
-
-        Args:
-            project_path: The project path.
-            file_path: The file path.
-            note: The note content.
-        """
+        """Adds a note to a file with normalized path key."""
         with self._lock:
             proj = self.get_project_data(project_path)
-            proj["notes"][file_path] = note
+            norm_f = PathValidator.norm_path(file_path)
+            proj["notes"][norm_f] = note
             self.save()
 
     def add_tag(self, project_path: str, file_path: str, tag: str) -> None:
-        """Adds a tag to a file.
-
-        Args:
-            project_path: The project path.
-            file_path: The file path.
-            tag: The tag to add.
-        """
+        """Adds a tag to a file with normalized path key."""
         with self._lock:
             proj = self.get_project_data(project_path)
-            if file_path not in proj["tags"]:
-                proj["tags"][file_path] = []
-            if tag not in proj["tags"][file_path]:
-                proj["tags"][file_path].append(tag)
+            norm_f = PathValidator.norm_path(file_path)
+            if norm_f not in proj["tags"]:
+                proj["tags"][norm_f] = []
+            if tag not in proj["tags"][norm_f]:
+                proj["tags"][norm_f].append(tag)
             self.save()
 
     def remove_tag(self, project_path: str, file_path: str, tag: str) -> None:
-        """Removes a tag from a file.
-
-        Args:
-            project_path: The project path.
-            file_path: The file path.
-            tag: The tag to remove.
-        """
+        """Removes a tag from a file with normalized path key."""
         with self._lock:
             proj = self.get_project_data(project_path)
-            if file_path in proj["tags"] and tag in proj["tags"][file_path]:
-                proj["tags"][file_path].remove(tag)
-            self.save()
+            norm_f = PathValidator.norm_path(file_path)
+            if norm_f in proj["tags"] and tag in proj["tags"][norm_f]:
+                proj["tags"][norm_f].remove(tag)
+                self.save()
 
     def save_session(self, project_path: str, session_data: dict) -> None:
         """Saves a project session.
