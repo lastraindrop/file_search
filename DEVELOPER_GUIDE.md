@@ -12,12 +12,14 @@
 *   **注入防御 (v5.8.2)**：ActionBridge 增加了对 AppleScript 指令的双引号转义防护，彻底堵塞了 macOS 环境下的命令注入途径。
 *   **API 前端通信 (App._fetch)**: 前端 `app.js` 现已强制要求所有异步请求通过 `App._fetch` 枢纽，支持全局快捷键协同（如 Ctrl+S 被 `init()` 捕获并分发至 `toggleEdit`）。
 *   **输入限制与 OOM (v5.8.2)**: `web_app.py` 引入了 `FileSaveRequest` 的 10MB 长度阈值，配合 `FileUtils.read_text_smart` 形成全链路内存溢出防护。
-*   **参数动态对齐 (v5.8.2)**: 修复了后端统计逻辑在处理 Regex 时的相对路径映射误差，确保前端过滤器的渲染与后端计算完全镜像。
+*   **参数动态对齐 (v5.8.2)**: 修复了后端统计逻辑在处理 Regex 时的相��路径映射误差，确保前端过滤器的渲染与后端计算完全镜像。
 *   **Settings API 白名单 (v5.3)**: `DataManager.MUTABLE_SETTINGS` 定义了允许通过 `/api/project/settings` 修改的字段。敏感字段（如 `groups`, `notes`, `tags`）被保护在白名单外。
 *   **专用配置 API (v5.3)**: `custom_tools` 与 `quick_categories` 已移至专用端点 (`/api/project/tools`, `/api/project/categories`)，并增加了格式校验与路径穿越防护，彻底切断了通过 settings 注入实现 RCE 的可能性。
 *   **跨项目移动防护 (v5.3)**: `/api/fs/move` 路由强制执行 `src_root == dst_root` 校验，禁止在不同项目间移动文件。
 *   **资源泄漏防御 (v6.0)**: 全局强制使用 `with os.scandir(...)`。针对 Windows 平台，在 `DataManager.save()` 中实现了**权限重试机制 (Retries)** 以防御 WinError 5。同时在测试清理阶段引入了 **Active Process Termination** 机制。
 *   **操作审计**: 关键 API 操作（如删除、ARCHIVE、SAVE）必须在 `web_app.py` 中记录带有 `AUDIT` 前缀的日志。
+*   **API Token 认证 (v6.2.0)**：通过环境变量 `FCTX_API_TOKEN` 进行 API 认证，保护 `/api/*` 端点。
+*   **CORS 中间件 (v6.2.0)**：Web API 添加 CORS 中间件，支持跨域请求（可通过 `FCTX_ALLOWED_ORIGINS` 配置）。
 
 ### 2. 微内核设计与包结构 (Micro-kernel & Package Structure)
 # Developer Guide - FileCortex v6.2
@@ -84,6 +86,19 @@ FileCortex v5.2 将逻辑从单文件 `core_logic.py` 迁移至 `file_cortex_cor
 ### 11. LLM 上下文格式化与蓝图 (LLM Context & Blueprint)
 *   **XML 导出引擎**: 为了解决代码中包含 Markdown 语法冲突导致的 LLM 解析混乱，v6.0 引入了 XML 导出模式。所有文件内容强制用 `<![CDATA[ ... ]]>` 封装。
 *   **项目蓝图 (Blueprint)**: 采用 `ContextFormatter.generate_blueprint` 生成 ASCII 树状图，用于向 AI 提供项目整体工程视角的拓扑结构。
+
+### 12. MCP Server 工具 (MCP Protocol - v6.2.0)
+*   **可用工具**: `mcp_server.py` 提供 6 个 MCP 工具：
+    *   `search_files`: 搜索文件
+    *   `get_file_context`: 获取文件上下文
+    *   `list_workspaces`: 列出工作区
+    *   `register_workspace`: 注册工作区
+    *   `get_project_blueprint`: 获取项目蓝图
+    *   `get_file_stats`: 获取文件统计
+*   **运行方式**:
+    ```bash
+    python mcp_server.py --transport stdio
+    ```
 
 ## 🧪 测试方法论
 本项目包含 **80** 个生产级回归测试用例，实现了 100% 的关键路径覆盖。

@@ -14,7 +14,11 @@ def _reset_singleton():
     """Ensure DataManager singleton and global process registry are reset between tests."""
     from file_cortex_core import FileUtils
     from web_app import ACTIVE_PROCESSES
+
+    with DataManager._lock:
+        DataManager._instance = None
     yield
+
     # Cleanup lingering processes to release file locks on Windows
     for pid in list(ACTIVE_PROCESSES.keys()):
         proc = ACTIVE_PROCESSES.get(pid)
@@ -22,15 +26,18 @@ def _reset_singleton():
             try:
                 if os.name == 'nt':
                     # Use taskkill /F /T to ensure subtree is killed
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], 
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
                                  capture_output=True, timeout=2)
                 else:
                     os.killpg(os.getpgid(pid), 15)
             except Exception:
-                try: proc.kill()
-                except Exception: pass
-    
-    DataManager._instance = None
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    with DataManager._lock:
+        DataManager._instance = None
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
     gc.collect()

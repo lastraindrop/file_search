@@ -52,6 +52,20 @@
     - 重构了 `mcp_server.py`，实现 DataManager 实例化解耦，支持更灵活的无头环境部署。
 - [x] **[DONE] 全局规范化一致性**:
     - 在 DataManager 核心层强制执行路径规范化（Norm Path），消除了 Windows 环境下由于大小写敏感性差异导致的标签与笔记丢失 Bug。
+- [x] **[DONE] CORS 与日志轮转 (v6.2.0)**:
+    - Web API 添加 CORS 中间件，允许跨域请求。
+    - 配置模块添加 RotatingFileHandler，实现日志轮转 (10MB, 5个备份)。
+- [x] **[DONE] MCP 工具扩展 (v6.2.0)**:
+    - 新增 `register_workspace` 工具：注册工作区。
+    - 新增 `get_project_blueprint` 工具：获取项目蓝图。
+    - 新增 `get_file_stats` 工具：获取文件统计信息。
+
+## 📍 阶段 5：安全加固与 API 认证 (v6.3.0 - 2026 Q3 规划) [ ]
+- [ ] **[PLANNED] API Token 认证**:
+    - 添加环境变量 `FCTX_API_TOKEN` 进行 API 认证。
+    - 添加 `FCTX_ALLOWED_ORIGINS` 限制跨域请求。
+- [ ] **[PLANNED] 性能监控中间件**:
+    - 添加 SlowAPI 中间件，记录慢请求 (>1s)。
 
 ## 🚀 后续愿景 (v7.0+ 智能化编排)
 - [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel 语义抓取。

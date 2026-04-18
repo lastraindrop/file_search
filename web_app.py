@@ -23,6 +23,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -42,11 +43,52 @@ from file_cortex_core import (
 
 app = FastAPI(title="FileCortex v6.2.0 API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+API_TOKEN = os.getenv("FCTX_API_TOKEN", "")
+ALLOWED_ORIGINS = os.getenv("FCTX_ALLOWED_ORIGINS", "*").split(",")
+
 ACTIVE_PROCESSES: dict[int, subprocess.Popen] = {}
 PROCESS_LOCK = threading.Lock()
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+
+async def verify_api_token(request: Request, call_next):
+    """Verify API token for protected endpoints."""
+    if not API_TOKEN:
+        return await call_next(request)
+
+    if request.url.path.startswith("/api/"):
+        token = request.headers.get("X-API-Token", "")
+        if token != API_TOKEN:
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "detail": "Invalid or missing API token"},
+            )
+
+        origin = request.headers.get("origin", "*")
+        if ALLOWED_ORIGINS != ["*"] and origin not in ALLOWED_ORIGINS:
+            return JSONResponse(
+                status_code=403,
+                content={"status": "error", "detail": "Origin not allowed"},
+            )
+
+    return await call_next(request)
+
+
+app.middleware("http")(verify_api_token)
+
+_BASE_DIR = pathlib.Path(__file__).parent.resolve()
+_STATIC_DIR = _BASE_DIR / "static"
+_TEMPLATES_DIR = _BASE_DIR / "templates"
+
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
 @app.exception_handler(Exception)

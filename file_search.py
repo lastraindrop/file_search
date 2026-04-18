@@ -76,6 +76,8 @@ class FileCortexApp:
         self.export_format_var = tk.StringVar(value="markdown")
         self.positive_tags: list[str] = []
         self.negative_tags: list[str] = []
+        self.current_preview_path: pathlib.Path | None = None
+        self.is_editing = False
 
         self._init_ui()
         self._init_context_menu()
@@ -1757,25 +1759,34 @@ class FileCortexApp:
             except Exception as e:
                 messagebox.showerror("错误", f"删除中断: {str(e)}")
 
-    def ctx_send_to_image_splitter(self) -> None:
+def ctx_send_to_image_splitter(self) -> None:
         """Sends selected images to the image splitter tool."""
         paths = self._get_ctx_paths()
         img_paths = [
             str(p)
             for p in paths
-            if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp", ".bmp"]
+            if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp", "bmp"]
         ]
-        if img_paths:
+        if not img_paths:
+            return
+
+        config = self.data_mgr.data.get("external_tools", {})
+        gui_path_str = config.get("image_splitter_path")
+
+        if gui_path_str:
+            gui_path = pathlib.Path(gui_path_str)
+        else:
             gui_path = (
                 pathlib.Path(__file__).parent.parent
                 / "image_process"
                 / "image_splitter"
                 / "gui.py"
             )
-            if gui_path.exists():
-                subprocess.Popen([sys.executable, str(gui_path)] + img_paths)
-            else:
-                self.show_status("找不到图像处理器", is_error=True)
+
+        if gui_path.exists() and gui_path.is_file():
+            subprocess.Popen([sys.executable, str(gui_path)] + img_paths)
+        else:
+            self.show_status("图像处理器未配置或不存在，请在设置中配置路径", is_error=True)
 
     def ctx_move_file(self) -> None:
         """Moves the selected file(s) to another directory."""

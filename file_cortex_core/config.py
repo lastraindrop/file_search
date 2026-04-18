@@ -7,6 +7,7 @@ Manages application and project configuration with atomic persistence.
 import copy
 import json
 import logging
+import logging.handlers
 import os
 import pathlib
 import tempfile
@@ -16,10 +17,42 @@ from typing import Any
 
 from .security import PathValidator
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("FileCortex")
+def _setup_logging() -> logging.Logger:
+    """Setup logging with rotation."""
+    logger = logging.getLogger("FileCortex")
+
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(logging.INFO)
+
+    log_format = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_format)
+    logger.addHandler(console_handler)
+
+    log_dir = pathlib.Path.home() / ".filecortex" / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "filecortex.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(log_format)
+        logger.addHandler(file_handler)
+    except OSError:
+        pass
+
+    logger.info("FileCortex logger initialized")
+    return logger
+
+
+logger = _setup_logging()
 
 _CONFIG_FILE: pathlib.Path | None = None
 

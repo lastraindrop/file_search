@@ -1,18 +1,18 @@
-# FileCortex v6.0 Stable Release (工作区编排助手)
+# FileCortex v6.2.0 Stable Release (工作区编排助手)
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.0 版本引入了 **MCP Server 支持**、**XML 导出引擎**、**全局配置框架** 及 **236 项全量审计测试**。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.2.0 版本引入了 **MCP Server 完整支持**、**XML 导出引擎**、**全局配置框架** 及 **80 项全量审计测试**。
 
 ## 🌟 核心理念
-*   **Orchestration over Collection**: 从简单的“收集”进化为对工作区的“编排”。
+*   **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
 *   **Agentic Era Ready**: 直接接入 AI 智能体生态 (MCP 协议)。
 
-## 🌟 主要功能 (v6.0 Final)
+## 🌟 主要功能 (v6.2.0 Final)
 - **AI 上下文对齐 (XML Export)**：实现了 **XML 导出引擎**（支持 CDATA 封装），大幅提升 LLM 对复杂/嵌套代码片段的解析精度。
 - **项目蓝图 (Blueprint)**：一键生成项目架构 ASCII 快照，快速同步项目结构。
 - **全局统一配置框架 (Unified Settings)**：引入了全局设置体系，彻底消除预览上限 (Preview Limit) 的硬编码。
-- **MCP Server 标准化**：支持作为 **Model Context Protocol** 服务器运行，使 AI Agent (如 Claude Desktop) 能原生调用编排。
+- **MCP Server 标准化**：支持作为 **Model Context Protocol** 服务器运行，使 AI Agent (如 Claude Desktop) 能原生调用编排。提供 6 个工具：`search_files`, `get_file_context`, `list_workspaces`, `register_workspace`, `get_project_blueprint`, `get_file_stats`。
 - **文件分类器 (Categorizer)**：三栏式 UI，支持自定义物理路径映射与跨项目安全移动。
-- **50 项核心精简加固测试**：由五大模块整合而成，覆盖架构适配、多参数组合、并发竞争及 **API 深度契约对齐**。
+- **80 项核心精简加固测试**：由五大模块整合而成，覆盖架构适配、多参数组合、并发竞争及 **API 深度契约对齐**。
 - **极致 Web UX**：引入网页端自定义右键菜单、搜索防抖 (Debounce Search) 和全局快捷键辅助。
 - **多端支持**：提供本地桌面版 (Tkinter) 和 现代网页版 (FastAPI)，**通过项目注册 (fctx open) 实现 100% 跨平台一致性**。
 - **微内核架构**：核心逻辑已完全迁移至 `file_cortex_core/` 包，支持作为库被第三方调用。
