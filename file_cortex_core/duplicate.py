@@ -9,7 +9,6 @@ import os
 import pathlib
 import queue
 import threading
-from typing import Any
 
 from .config import logger
 from .utils import FileUtils

@@ -10,11 +10,12 @@ import pathlib
 import queue
 import re
 import threading
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Generator
+from typing import Any
 
 from .config import logger
-from .utils import FileUtils, FormatUtils
+from .utils import FileUtils
 
 MAX_SEARCH_RESULTS = 5000
 DEFAULT_BATCH_SIZE = 40

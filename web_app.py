@@ -7,15 +7,14 @@ and context generation APIs for the FileCortex application.
 
 import argparse
 import asyncio
-import json
 import os
 import pathlib
 import signal
 import subprocess
 import threading
-import uvicorn
 from typing import Any
 
+import uvicorn
 from fastapi import (
     FastAPI,
     HTTPException,

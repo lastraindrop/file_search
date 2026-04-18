@@ -60,14 +60,40 @@
     - 新增 `get_project_blueprint` 工具：获取项目蓝图。
     - 新增 `get_file_stats` 工具：获取文件统计信息。
 
+## 📍 阶段 4.5：代码规范整肃 (v6.2.x - 2026 Q2 达成) [x]
+- [x] **[DONE] Ruff 静态分析集成**:
+    - 运行 `ruff check .` 识别代码问题，修复核心模块所有可自动修复的问题。
+- [x] **[DONE] 核心模块规范修复**:
+    - 修复 `file_cortex_core/` 全部 6 个导入/类型问题。
+    - 修复 `fctx.py` 导入排序与未使用导入。
+    - 修复 `mcp_server.py` 缩进错误 (B5 BUG) 与未使用导入。
+    - 修复 `file_search.py` f-string 语法兼容性与变量命名。
+    - 修复 `web_app.py` 导入排序与异常链建议。
+- [x] **[DONE] 代码健康度深度排查**:
+    - 安全性：路径遍历、命令注入、参数注入全面检查通过。
+    - 并发：DataManager RLock、SearchWorker/DuplicateWorker 线程安全。
+    - 内存：大文件读取限制、编码检测优化。
+    - 异常：40+ try-except 块，日志记录完善。
+    - 边界：无除零错误，路径边界处理完善。
+
 ## 📍 阶段 5：安全加固与 API 认证 (v6.3.0 - 2026 Q3 规划) [ ]
 - [ ] **[PLANNED] API Token 认证**:
     - 添加环境变量 `FCTX_API_TOKEN` 进行 API 认证。
     - 添加 `FCTX_ALLOWED_ORIGINS` 限制跨域请求。
 - [ ] **[PLANNED] 性能监控中间件**:
     - 添加 SlowAPI 中间件，记录慢请求 (>1s)。
+- [ ] **[PLANNED] 异常链规范 (B904)**:
+    - 在 `web_app.py` 中 17 处 B904 警告处添加 `from e` 异常链。
 
-## 🚀 后续愿景 (v7.0+ 智能化编排)
+## 📍 阶段 6：架构解耦与插件系统 (v7.0 - 2026 Q4 规划) [ ]
+- [ ] **[PLANNED] DataManager 单例重构**:
+    - 支持测试隔离，移除全局单例耦合。
+- [ ] **[PLANNED] 依赖注入改造**:
+    - 移除全局 ACTIVE_PROCESSES 状态，使用依赖注入。
+- [ ] **[PLANNED] 插件系统基础**:
+    - 定义插件接口，支持自定义工作流扩展。
+
+## 🚀 后续愿景 (v8.0+ 智能化编排)
 - [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel 语义抓取。
 - [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型对其长代码进行结构化压缩。
 - [ ] **自愈型工作流**: 实现 Agent 驱动的本地工程自动化维护（修复 Bug、生成文档）。

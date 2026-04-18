@@ -17,6 +17,7 @@ from typing import Any
 
 from .security import PathValidator
 
+
 def _setup_logging() -> logging.Logger:
     """Setup logging with rotation."""
     logger = logging.getLogger("FileCortex")
@@ -172,7 +173,7 @@ class DataManager:
             config_file = _get_config_file()
             if os.path.exists(config_file):
                 try:
-                    with open(config_file, "r", encoding="utf-8") as f:
+                    with open(config_file, encoding="utf-8") as f:
                         loaded = json.load(f)
                     self.data["last_directory"] = loaded.get("last_directory", "")
                     if "projects" in loaded:

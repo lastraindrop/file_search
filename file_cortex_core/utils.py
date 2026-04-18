@@ -275,7 +275,7 @@ class FileUtils:
         lines = []
         if gitignore_path.exists():
             try:
-                with open(gitignore_path, "r", encoding="utf-8") as f:
+                with open(gitignore_path, encoding="utf-8") as f:
                     lines = f.readlines()
             except Exception as e:
                 logger.warning(f"Failed to read gitignore at {gitignore_path}: {e}")
@@ -446,7 +446,7 @@ class FileUtils:
                         ):
                             unique_files.add(str(f_path))
 
-        return sorted(list(unique_files))
+        return sorted(unique_files)
 
     @staticmethod
     def read_text_smart(file_path: pathlib.Path, max_bytes: int | None = None) -> str:

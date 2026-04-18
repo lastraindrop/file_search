@@ -1,13 +1,22 @@
-from .config import DataManager, logger, get_app_dir
-from .security import PathValidator
-from .utils import FileUtils, FormatUtils, ContextFormatter, NoiseReducer
-from .actions import FileOps, ActionBridge
-from .search import search_generator, SearchWorker
+from .actions import ActionBridge, FileOps
+from .config import DataManager, logger
 from .duplicate import DuplicateWorker
+from .search import SearchWorker, search_generator
+from .security import PathValidator
+from .utils import ContextFormatter, FileUtils, FormatUtils, NoiseReducer
 
 __all__ = [
-    "DataManager", "FileUtils", "SearchWorker", "FileOps", 
-    "ActionBridge", "PathValidator", "ContextFormatter", "FormatUtils", "DuplicateWorker",
-    "search_generator", "NoiseReducer",
-    "logger"
+    "DataManager",
+    "FileUtils",
+    "SearchWorker",
+    "FileOps",
+    "ActionBridge",
+    "PathValidator",
+    "ContextFormatter",
+    "FormatUtils",
+    "DuplicateWorker",
+    "search_generator",
+    "NoiseReducer",
+    "logger",
+    "get_app_dir",
 ]

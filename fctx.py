@@ -7,14 +7,13 @@ and executing custom tools.
 
 import argparse
 import os
-import sys
 
 from file_cortex_core import (
     ActionBridge,
     DataManager,
     FileOps,
-    logger,
     PathValidator,
+    logger,
 )
 
 

@@ -12,14 +12,14 @@ import re
 import subprocess
 import sys
 import threading
+import tkinter as tk
 from tkinter import (
     filedialog,
     messagebox,
-    simpledialog,
     scrolledtext,
+    simpledialog,
     ttk,
 )
-import tkinter as tk
 
 from file_cortex_core import (
     ActionBridge,
@@ -28,9 +28,9 @@ from file_cortex_core import (
     FileOps,
     FileUtils,
     FormatUtils,
-    logger,
     PathValidator,
     SearchWorker,
+    logger,
 )
 
 TOKEN_RATIO = 4
@@ -1082,7 +1082,7 @@ class FileCortexApp:
             col: The column identifier.
             reverse: Whether to reverse sort order.
         """
-        l = [(tree.set(k, col), k) for k in tree.get_children("")]
+        items = [(tree.set(k, col), k) for k in tree.get_children("")]
 
         if col == "size":
 
@@ -1103,11 +1103,11 @@ class FileCortexApp:
                 except Exception:
                     return 0
 
-            l.sort(key=lambda t: parse_sz(t[0]), reverse=reverse)
+            items.sort(key=lambda t: parse_sz(t[0]), reverse=reverse)
         else:
-            l.sort(reverse=reverse)
+            items.sort(reverse=reverse)
 
-        for index, (val, k) in enumerate(l):
+        for index, (_val, k) in enumerate(items):
             tree.move(k, "", index)
 
         tree.heading(col, command=lambda: self.sort_tree_column(tree, col, not reverse))
@@ -1547,7 +1547,7 @@ class FileCortexApp:
                 subprocess.run(cmd + [str(p) for p in paths], check=True)
             elif sys.platform == "darwin":
                 path_list = ",".join(
-                    [f'POSIX file "{str(p).replace('"', '\\"')}"' for p in paths]
+                    ['POSIX file "{}"'.format(str(p).replace('"', '\\"')) for p in paths]
                 )
                 script = f'tell app "Finder" to set the clipboard to {{{path_list}}}'
                 subprocess.run(["osascript", "-e", script], check=True)
@@ -1759,7 +1759,7 @@ class FileCortexApp:
             except Exception as e:
                 messagebox.showerror("错误", f"删除中断: {str(e)}")
 
-def ctx_send_to_image_splitter(self) -> None:
+    def ctx_send_to_image_splitter(self) -> None:
         """Sends selected images to the image splitter tool."""
         paths = self._get_ctx_paths()
         img_paths = [
@@ -1887,7 +1887,6 @@ def ctx_send_to_image_splitter(self) -> None:
 
     def open_duplicate_finder(self) -> None:
         """Opens the duplicate file finder window."""
-        from file_cortex_core import DuplicateWorker
 
         if not self.current_dir:
             messagebox.showwarning("提示", "请先打开一个项目目录。")

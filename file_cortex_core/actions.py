@@ -13,7 +13,8 @@ import stat
 import subprocess
 import tempfile
 import zipfile
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 from .config import DataManager, logger
 from .security import PathValidator
@@ -46,7 +47,7 @@ class FileOps:
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            raise ValueError(f"Invalid regex: {e}")
+            raise ValueError(f"Invalid regex: {e}") from e
 
         results = []
         new_names = {}
@@ -77,7 +78,8 @@ class FileOps:
                 base = new_p.stem
                 ext = new_p.suffix
                 counter = 1
-                while True:
+                max_attempts = 1000
+                while counter <= max_attempts:
                     candidate = new_p.parent / f"{base}_{counter}{ext}"
                     norm_candidate = norm_path_str(candidate)
                     if not candidate.exists() and norm_candidate not in target_norm_set:
@@ -85,6 +87,8 @@ class FileOps:
                         status = "renamed_with_suffix"
                         break
                     counter += 1
+                if counter > max_attempts:
+                    status = "failed"
 
             final_targets[old_p] = (new_p, status)
             target_norm_set.add(norm_path_str(new_p))
@@ -118,7 +122,7 @@ class FileOps:
                     raise RuntimeError(
                         f"Batch rename failed and rollback was incomplete: {e}. "
                         f"Manual fix required for: {', '.join(rollback_errors)}"
-                    )
+                    ) from e
                 raise e
 
         return results
@@ -534,15 +538,6 @@ class ActionBridge:
         if not p.exists():
             yield {"error": "Path does not exist"}
             return
-
-        context = {
-            "path": str(p),
-            "name": p.name,
-            "ext": p.suffix,
-            "root": str(project_root),
-            "parent": str(p.parent),
-            "parent_name": p.parent.name,
-        }
 
         process = None
         try:

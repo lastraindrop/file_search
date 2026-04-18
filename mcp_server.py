@@ -5,18 +5,14 @@ A Model Context Protocol server providing file search and context
 generation capabilities for AI assistants.
 """
 
-import asyncio
-import json
 import os
 import pathlib
-from typing import Optional
 
 from file_cortex_core import (
     ContextFormatter,
     DataManager,
     FileUtils,
     PathValidator,
-    logger,
     search_generator,
 )
 
@@ -174,7 +170,7 @@ async def register_workspace(
     if root:
         return f"Workspace '{project_path}' is already registered."
 
-dm = get_dm()
+    dm = get_dm()
     dm.add_to_recent(path)
     if auto_pin:
         dm.toggle_pinned(path)
@@ -294,7 +290,7 @@ def main() -> None:
         except Exception as e:
             print(f"MCP SDK run failed: {e}", file=sys.stderr)
 
-    print(f"FileCortex MCP Server initialized.")
+    print("FileCortex MCP Server initialized.")
     print(f"Available tools: {list(mcp_server._tools.keys())}")
 
     if not _MCP_SDK_AVAILABLE:
