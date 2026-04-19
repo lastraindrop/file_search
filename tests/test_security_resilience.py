@@ -28,6 +28,46 @@ def test_security_path_normalization_unification():
     p2 = "a\\c/"
     assert PathValidator.norm_path(p1) == PathValidator.norm_path(p2)
 
+def test_security_windows_path_validator_resolves_links_before_prefix_check():
+    """Windows containment checks must resolve links/junctions before allowing access."""
+    class FakeResolvedPath:
+        def __init__(self, raw):
+            self.raw = raw
+            self.parts = tuple(raw.split("\\"))
+
+        @property
+        def parents(self):
+            parts = self.parts
+            out = []
+            for i in range(len(parts) - 1, 1, -1):
+                out.append(FakeResolvedPath("\\".join(parts[:i])))
+            return out
+
+        def __truediv__(self, other):
+            return FakePath(f"{self.raw}\\{other.raw}")
+
+        def __eq__(self, other):
+            return isinstance(other, FakeResolvedPath) and self.raw.lower() == other.raw.lower()
+
+    class FakePath:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def resolve(self):
+            mapping = {
+                "C:\\proj": "C:\\proj",
+                "link\\secret.txt": "C:\\Windows\\secret.txt",
+                "C:\\proj\\link\\secret.txt": "C:\\Windows\\secret.txt",
+            }
+            return FakeResolvedPath(mapping.get(self.raw, self.raw))
+
+        def is_absolute(self):
+            return ":" in self.raw or self.raw.startswith("\\\\")
+
+    with patch("file_cortex_core.security.sys.platform", "win32"), \
+         patch("file_cortex_core.security.pathlib.Path", FakePath):
+        assert PathValidator.is_safe("link\\secret.txt", "C:\\proj") is False
+
 # -----------------------------------------------------------------------------
 # 2. Injection & Bridge Hardening
 # -----------------------------------------------------------------------------

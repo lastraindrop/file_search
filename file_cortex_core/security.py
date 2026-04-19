@@ -22,6 +22,14 @@ class PathValidator:
                 if target_raw.startswith(('\\\\', '//')):
                     return False
 
+                # On Windows hosts we must resolve links/junctions before containment checks.
+                if sys.platform == 'win32':
+                    root_resolved = pathlib.Path(root_raw).resolve()
+                    t = pathlib.Path(target_raw)
+                    target_resolved = (root_resolved / t).resolve() if not t.is_absolute() else t.resolve()
+                    return root_resolved == target_resolved or root_resolved in target_resolved.parents
+
+                # Non-Windows hosts cannot reliably resolve Windows links, so do lexical fallback.
                 root_norm = ntpath.normpath(root_raw).replace('/', '\\').lower()
                 target_norm_raw = target_raw
 
