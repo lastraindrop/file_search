@@ -50,18 +50,19 @@ def test_security_action_bridge_injection_block(tmp_path):
         
         args, kwargs = mock_popen.call_args
         cmd = args[0]
-        # In our environment, 'type' is a builtin, so is_shell will be True
-        assert kwargs.get("shell") is True
-        # Verify the malicious part is safely quoted inside the full command string
-        quoted_name = f'"{str(f)}"'
-        # Note: win_quote might escape backslashes, check for presence
-        assert ";" in cmd
-        assert "rm" in cmd
-        # The key is that they are inside the SAME token/quoted block for the builtin
-        # Or more simply, verify the command string contains the quoted malicious path
-        # Actually win_quote replaces " with \"
-        expected_part = str(f).replace('"', '\\"')
-        assert expected_part in cmd
+        # On Unix-like systems we should stay in shell=False list-mode for safety.
+        # On Windows, shell=True may be used for builtins like `type`.
+        if os.name == "nt":
+            assert kwargs.get("shell") is True
+            assert isinstance(cmd, str)
+            assert str(f).replace('"', '\\"') in cmd
+        else:
+            assert kwargs.get("shell") is False
+            assert isinstance(cmd, list)
+            assert cmd[0] == "type"
+            assert cmd[1] == str(f)
+            # Ensure malicious shell metacharacters remain data inside one arg.
+            assert ";" in cmd[1]
 
 # -----------------------------------------------------------------------------
 # 3. Resource Cleanup & Concurrency
