@@ -1,6 +1,7 @@
 import pathlib
 import os
 import sys
+import ntpath
 
 class PathValidator:
     @staticmethod
@@ -9,15 +10,35 @@ class PathValidator:
         if not root_path:
             return False
         try:
-            t = pathlib.Path(target_path)
-            r = pathlib.Path(root_path).resolve()
-            if not t.is_absolute():
-                target = (r / t).resolve()
-            else:
-                target = t.resolve()
+            target_raw = str(target_path)
+            root_raw = str(root_path)
+
+            # Handle Windows-style paths even when running on non-Windows systems.
+            is_windows_target = bool(ntpath.splitdrive(target_raw)[0]) or target_raw.startswith(('\\\\', '//'))
+            is_windows_root = bool(ntpath.splitdrive(root_raw)[0]) or root_raw.startswith(('\\\\', '//'))
+
+            if is_windows_target or is_windows_root:
+                # UNC/network paths are never considered safe.
+                if target_raw.startswith(('\\\\', '//')):
+                    return False
+
+                root_norm = ntpath.normpath(root_raw).replace('/', '\\').lower()
+                target_norm_raw = target_raw
+
+                # Resolve relative Windows-like paths against the provided root.
+                if not ntpath.isabs(target_norm_raw):
+                    target_norm_raw = ntpath.join(root_raw, target_norm_raw)
+
+                target_norm = ntpath.normpath(target_norm_raw).replace('/', '\\').lower()
+                root_prefix = root_norm.rstrip('\\') + '\\'
+                return target_norm == root_norm or target_norm.startswith(root_prefix)
+
+            t = pathlib.Path(target_raw)
+            r = pathlib.Path(root_raw).resolve()
+            target = (r / t).resolve() if not t.is_absolute() else t.resolve()
 
             if hasattr(target, 'is_relative_to'):
-                 return target.is_relative_to(r)
+                return target.is_relative_to(r)
             # Fallback for Python < 3.9
             return r == target or r in target.parents
         except Exception:
@@ -25,7 +46,7 @@ class PathValidator:
 
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
-        """Canonicalize path: absolute, platform-aware casing, posix-style, and trail-slash standardized."""
+        """Canonicalize path: absolute, platform-aware casing, posix-style, and trailing-slash standardized."""
         if not p:
             return ""
         try:
