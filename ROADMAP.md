@@ -1,118 +1,152 @@
 # FileCortex - 路线图 (ROADMAP)
 
+> **版本**: 6.2.0 | **更新日期**: 2026-04-21 | **测试**: 143 passed
+
 本文档规划了项目的短期改进目标与长期愿景，旨在保持架构一致性与功能前瞻性。
 
+---
+
 ## 📍 阶段 0：核心巩固与安全加固 (已完成)
-*   **[DONE] 安全架构重构**: 引入了 `PathValidator` 路径组件精准匹配及 Web 端 XSS 防护机制。
-*   **[DONE] ActionBridge 安全加固 (v5.1)**: 实现了跨平台命令执行安全适配。
-*   **[DONE] 并发搜索引擎**: 引入 `ThreadPoolExecutor` 并发扫描及 Tkinter UI 批次渲染。
-*   **[DONE] Schema 自动对齐与持久化**: `DataManager` 支持配置字段热补全。
-*   **[DONE] 智能分类建议引擎**: 实现基于文件模式的工具自动推荐。
-*   **[DONE] 无状态架构升级**: Web API 移除全局状态依赖。
-*   **[DONE] 性能压榨 (v5.1)**: 引入 `is_binary` Fast-path 及 `.gitignore` mtime 感知缓存。
-*   **[DONE] ActionBridge 异步流 (Streaming Output)**: 支持外部工具实时输出捕获。
-*   **[DONE] 批量操作编排 (v5.1)**: 实现了 Web 端全选、批量暂存及批量删除。
-*   **[DONE] 安全校验闭环 (v5.1)**: 完成了 API 权限校验漏洞修复。
+- [x] **安全架构重构**: PathValidator 路径组件精准匹配及 Web 端 XSS 防护机制
+- [x] **ActionBridge 安全加固**: 跨平台命令执行安全适配
+- [x] **并发搜索引擎**: ThreadPoolExecutor 并发扫描及 Tkinter UI 批次渲染
+- [x] **Schema 自动对齐与持久化**: DataManager 配置字段热补全
+- [x] **智能分类建议引擎**: 基于文件模式的工具自动推荐
+- [x] **无状态架构升级**: Web API 移除全局状态依赖
+- [x] **性能压榨**: is_binary Fast-path 及 .gitignore mtime 感知缓存
+- [x] **ActionBridge 异步流**: 支持外部工具实时输出捕获
+- [x] **批量操作编排**: Web 端全选、批量暂存及批量删除
+- [x] **安全校验闭环**: API 权限校验漏洞修复
 
 ## 📍 阶段 1：编排增强与前端优化 (已完成)
-- [x] **架构解耦 (Modernization)**: 已完成从单文件到包结构的平滑迁移。
-- [x] **AI 特色功能 (v5.2)**: 引入了 Token 计数预估、自动化 Prompt 组装模板。
-- [x] **现代化 Web UI (v5.3 PRO)**: 引入多选、状态反馈、玻璃拟态。
-- [x] **工作区配置管理 (v5.3+)**: 实现置顶项目与 LRU 历史记录。
+- [x] **架构解耦**: 从单文件到包结构的平滑迁移
+- [x] **AI 特色功能**: Token 计数预估、自动化 Prompt 组装模板
+- [x] **现代化 Web UI**: 多选、状态反馈、玻璃拟态
+- [x] **工作区配置管理**: 置顶项目与 LRU 历史记录
 
 ## 📍 阶段 2：通用功能增强与生产加固 (已完成)
-- [x] **确定性路径协议 (v5.7)**: 重构了路径归一化，解决了 Windows 驱动器号 Key 漂移 Bug。
-- [x] **递归上下文搜集 (v5.7)**: 支持文件夹自动穿透读取与全局去重。
-- [x] **标签化多重检索 (v5.5)**: 引入了 positive/negative 标签系统。
-- [x] **极速查重工具**: 引入 `DuplicateWorker`（大小预筛 + SHA256）。
-- [x] **批量正则重命名 (Regex Rename)**: 实现了基于规则的物理文件批量更名。
-- [x] **增强文件预览 (v5.7)**: 支持 Markdown、Mermaid 及超大文本编码识别。
+- [x] **确定性路径协议**: 重构路径归一化，解决 Windows 驱动器号 Key 漂移 Bug
+- [x] **递归上下文搜集**: 文件夹自动穿透读取与全局去重
+- [x] **标签化多重检索**: positive/negative 标签系统
+- [x] **极速查重工具**: DuplicateWorker 大小预筛 + SHA256
+- [x] **批量正则重命名**: 基于规则的物理文件批量更名
+- [x] **增强文件预览**: Markdown、Mermaid 及超大文本编码识别
 
-## 📍 阶段 3：工业级稳定性与 Agentic 增强 (v6.0 - 2026 Q2 达成) [x]
-- [x] **[DONE] 分类管理器 (Categorizer)**: 
-    - 实现了三栏式文件分类 UI，支持自定义相对路径映射。
-- [x] **[DONE] 50 项核心精简测试矩阵 (v6.0 Consolidation)**: 
-    - 实现五大领域驱动模块整合（API契约、核心工具、配置、搜索、安全鲁棒性），修复了 Windows 并发竞争 Bug。
-- [x] **[DONE] 全局统一配置框架 (Unified Settings)**:
-    - 引入了 `global_settings` 持久化体系，彻底消除预览上限 (Preview Limit) 的硬编码。
-- [x] **[DONE] LLM 上下文对齐 (v6.0 Innovation)**:
-    - 实现了 **XML 导出引擎**（CDATA 封装），大幅提升 LLM 对复杂代码片段的解析精度。
-    - 引入了 **Project Blueprint (项目蓝图)** 功能，一键生成项目架构 ASCII 快照。
-- [x] **[DONE] 极致 Web UX (v6.0 Polish)**:
-    - 实现 Web 端自定义右键菜单、搜索防抖 (Debounce) 和全局快捷键辅助。
-- [x] **[DONE] MCP 协议集成与 CLI 增强**: 
-    - 创建了 `mcp_server.py`，并扩展了 `fctx.py` 增加 `open` 命令，支持 headless 环境下的工作空间快速注册。
+## 📍 阶段 3：工业级稳定性与 Agentic 增强 (v6.0 - 已完成)
+- [x] **分类管理器**: 三栏式文件分类 UI，支持自定义相对路径映射
+- [x] **50 项核心精简测试矩阵**: 五大领域驱动模块整合
+- [x] **全局统一配置框架**: global_settings 持久化体系
+- [x] **LLM 上下文对齐**: XML 导出引擎 (CDATA 封装)
+- [x] **项目蓝图**: 一键生成项目架构 ASCII 快照
+- [x] **极致 Web UX**: 自定义右键菜单、搜索防抖、全局快捷键
+- [x] **MCP 协议集成**: mcp_server.py 支持 AI Agent
 
-## 📍 阶段 4：生产加固与稳定性跃迁 (v6.2.0 - 2026 Q2 达成) [x]
-- [x] **[DONE] 80 项全方位回归矩阵**:
-    - 扩展测试套件至 80 项，涵盖格式化边界、噪音消除逻辑、Web 安全端点及桌面 UI 契约。
-- [x] **[DONE] 参数对齐与类型安全 (Parameter Hardening)**:
-    - 修正了预览限制计算中的二进制单位一致性（1024^2），并强制执行类型检查以防止切片索引错误。
-- [x] **[DONE] MCP 隔离与独立化**:
-    - 重构了 `mcp_server.py`，实现 DataManager 实例化解耦，支持更灵活的无头环境部署。
-- [x] **[DONE] 全局规范化一致性**:
-    - 在 DataManager 核心层强制执行路径规范化（Norm Path），消除了 Windows 环境下由于大小写敏感性差异导致的标签与笔记丢失 Bug。
-- [x] **[DONE] CORS 与日志轮转 (v6.2.0)**:
-    - Web API 添加 CORS 中间件，允许跨域请求。
-    - 配置模块添加 RotatingFileHandler，实现日志轮转 (10MB, 5个备份)。
-- [x] **[DONE] MCP 工具扩展 (v6.2.0)**:
-    - 新增 `register_workspace` 工具：注册工作区。
-    - 新增 `get_project_blueprint` 工具：获取项目蓝图。
-    - 新增 `get_file_stats` 工具：获取文件统计信息。
+## 📍 阶段 4：生产加固与稳定性跃迁 (v6.2.0 - 已完成)
+- [x] **143 项全方位回归矩阵**: 格式化边界、噪音消除、Web 安全
+- [x] **参数对齐与类型安全**: 二进制单位一致性，类型检查
+- [x] **MCP 隔离与独立化**: DataManager 实例化解耦
+- [x] **全局规范化一致性**: 路径规范化，消除大小写敏感性 Bug
+- [x] **CORS 与日志轮转**: 跨域支持，日志轮转 (10MB, 5备份)
+- [x] **MCP 工具扩展**: register_workspace, get_project_blueprint, get_file_stats
+- [x] ** Ruff 代码规范**: 157 -> 0 errors
+- [x] **Windows 文件句柄优化**: gc.collect() 与 sleep 优化
 
-## 📍 阶段 4.5：代码规范整肃 (v6.2.x - 2026 Q2 达成) [x]
-- [x] **[DONE] Ruff 静态分析集成**:
-    - 运行 `ruff check .` 识别代码问题，修复核心模块所有可自动修复的问题。
-- [x] **[DONE] 核心模块规范修复**:
-    - 修复 `file_cortex_core/` 全部 6 个导入/类型问题。
-    - 修复 `fctx.py` 导入排序与未使用导入。
-    - 修复 `mcp_server.py` 缩进错误 (B5 BUG) 与未使用导入。
-    - 修复 `file_search.py` f-string 语法兼容性与变量命名。
-    - 修复 `web_app.py` 导入排序与异常链建议。
-- [x] **[DONE] 代码健康度深度排查**:
-    - 安全性：路径遍历、命令注入、参数注入全面检查通过。
-    - 并发：DataManager RLock、SearchWorker/DuplicateWorker 线程安全。
-    - 内存：大文件读取限制、编码检测优化。
-    - 异常：40+ try-except 块，日志记录完善。
-    - 边界：无除零错误，路径边界处理完善。
+## 📍 阶段 5：API 认证与性能监控 (v6.3.0 - 2026 Q3)
+- [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件
+- [ ] **[PLANNED] SlowAPI 监控**: 记录 >1s 的慢请求
+- [ ] **[PLANNED] 异常增强**: 改进异常日志记录
 
-## 📍 阶段 5：安全加固与 API 认证 (v6.3.0 - 2026 Q3 规划) [ ]
-- [ ] **[PLANNED] API Token 认证**:
-    - 添加环境变量 `FCTX_API_TOKEN` 进行 API 认证。
-    - 添加 `FCTX_ALLOWED_ORIGINS` 限制跨域请求。
-- [ ] **[PLANNED] 性能监控中间件**:
-    - 添加 SlowAPI 中间件，记录慢请求 (>1s)。
-- [ ] **[PLANNED] 异常链规范 (B904)**:
-    - 在 `web_app.py` 中 17 处 B904 警告处添加 `from e` 异常链。
+## 📍 阶段 6：架构解耦与插件系统 (v7.0 - 2026 Q4)
+- [ ] **[PLANNED] DataManager 重构**: 支持测试隔离，移除全局单例耦合
+- [ ] **[PLANNED] 依赖注入**: 移除全局 ACTIVE_PROCESSES 状态
+- [ ] **[PLANNED] 插件系统基础**: 定义插件接口，支持自定义工作流
 
-## 📍 阶段 6：架构解耦与插件系统 (v7.0 - 2026 Q4 规划) [ ]
-- [ ] **[PLANNED] DataManager 单例重构**:
-    - 支持测试隔离，移除全局单例耦合。
-- [ ] **[PLANNED] 依赖注入改造**:
-    - 移除全局 ACTIVE_PROCESSES 状态，使用依赖注入。
-- [ ] **[PLANNED] 插件系统基础**:
-    - 定义插件接口，支持自定义工作流扩展。
+---
 
 ## 🚀 后续愿景 (v8.0+ 智能化编排)
-- [ ] **多模态结构搜集 (Omni-Gatherer)**: 支持 PDF/Excel 语义抓取。
-- [ ] **本地智能摘要 (Semantic Compressor)**: 集成本地模型对其长代码进行结构化压缩。
-- [ ] **自愈型工作流**: 实现 Agent 驱动的本地工程自动化维护（修复 Bug、生成文档）。
 
-## ✅ v6.1 代码规范化 (2026 Q2 完成)
-- [x] **Google Python Style Guide 合规**:
-    - 完整类型注解：所有函数和方法添加完整的类型提示
-    - Docstring 规范：所有公共类和方法包含 Google 风格文档字符串
-    - 导入排序：标准库 → 第三方 → 本地模块，组间空行
-    - 命名规范：下划线命名法，私有方法用 `_` 前缀
-- [x] **文档同步更新**:
-    - README.md 更新代码规范章节
-    - DEVELOPER_GUIDE.md 添加贡献准则中的代码风格说明
-    - ROADMAP.md 新增 v6.1 阶段记录
+### 长期功能规划
+- [ ] **多模态���构搜集**: 支持 PDF/Excel 语义抓取
+- [ ] **本地智能摘要**: 集成本地模型 (Ollama) 进行结构化压缩
+- [ ] **自愈型工作流**: 实现 Agent 驱动的本地工程自动化维护
+- [ ] **语义搜索**: 基于 embedding 的文件相似性搜索
 
-## 🛡️ 架构一致性原则 (Maintenance Principles)
-*   **SSOT (Single Source of Truth)**: 所有的路径权限及配置读取必须统一经过 `DataManager`。
-*   **契约自洽性 (Contract Cohesion - v6.0 NEW)**: 
-    - **API 字段强校验**: 任何提供给前端的 API 对象（特别是搜索结果与文件元数据）**必须** 包含 UI 强依赖字段：`abs_path`, `name`, `size_fmt`, `mtime_fmt`。
-    - **逻辑动态对齐**: 类似于预览上限 (1MB) 等参数必须从 `global_settings` 动态读取，禁止在前端或后端代码中出现 `1024*1024` 类的硬编码。**特别注意：任何涉及长度、偏移或切片的操作，必须在计算后执行 `int()` 显式转换，以确保类型安全。**
-*   **测试驱动**: 核心逻辑变更**必须**伴随 `pytest` 回归测试，尤其是多参数组合 (Parametrize) 探查。
-*   **安全分发**: 所有的物理 I/O 操作必须经过 `PathValidator.is_safe` 熔断拦截。
+### 竞品对标
+| 特性 | FileCortex | VS Code | Everything | aider |
+|-----|-----------|---------|------------|-------|
+| 文件搜索 | Multi-mode | Built-in | Instant | - |
+| LLM 上下文 | XML/MD+tokens | Extensions | - | Built-in |
+| MCP 协议 | Native | Extensions | - | - |
+| 文件分类 | Built-in | - | - | - |
+| 查重工具 | SHA256 | - | - | fdupes |
+| Web UI | Built-in | code-server | - | - |
+| 本地优先 | Yes | Yes | Yes | Yes |
+| Token 预算 | CJK-weighted | - | - | Basic |
+
+---
+
+## ✅ v6.2 代码规范化验收清单 (2026 Q2 完成)
+
+### 测试验收
+- [x] **143 项测试全部通过**: 0 failures
+- [x] **测试隔离**: conftest.py 自动清理机制有效
+- [x] **Windows 并发**: 无 WinError 5 错误
+
+### 代码质量验收
+- [x] **Ruff 零错误**: `ruff check .` 返回 0 errors
+- [x] **类型注解**: 所有公共函数完整注解
+- [x] **Docstring 规范**: Google 风格文档字符串
+- [x] **导入排序**: 标准库 → 第三方 → 本地模块
+
+### 功能验收
+- [x] **Web API**: 启动无错误
+- [x] **CLI**: fctx open/stage/search 命令正常
+- [x] **MCP Server**: stdio 模式启动正常
+- [x] **安全性**: PathValidator/ActionBridge 安全检查通过
+
+### 文档验收
+- [x] **README.md**: 同步至 v6.2.0
+- [x] **DEVELOPER_GUIDE.md**: 扩充至 ~5000 字
+- [x] **ROADMAP.md**: 更新阶段 4/5/6
+- [x] **ANALYSIS_REPORT.md**: 完整分析报告
+- [x] **COMPREHENSIVE_PLAN.md**: 开发计划
+
+---
+
+## 🛡️ 架构一致性原则
+
+### 核心原则
+1. **SSOT**: 所有的路径权限及配置读取必须统一经过 DataManager
+2. **契约自洽**: API 返回对象必须包含 UI 强依赖字段
+3. **逻辑动态对齐**: 禁止硬编码参数，必须从 global_settings 读取
+4. **测试驱动**: 核心逻辑变更必须伴随回归测试
+5. **安全分发**: 所有物理 I/O 操作必须经过 PathValidator.is_safe
+
+### 代码规范
+1. **KISS 原则**: 优先使用内置库解决问题
+2. **契约自洽**: 变更 API 前必须更新前端接收逻辑
+3. **防御性编程**: 对所有外部输入进行验证
+4. **Google Style**: 遵循 Google Python Style Guide
+
+### 维护约定
+1. **版本号**: 遵循语义化版本 (Semantic Versioning)
+2. **变更日志**: 每次发布必须更新 CHANGELOG
+3. **测试覆盖**: 新功能必须包含测试用例
+4. **文档同步**: 功能变更必须同步更新文档
+
+---
+
+## 📝 版本历史
+
+| 版本 | 日期 | 重大变更 |
+|-----|------|---------|
+| 6.2.0 | 2026-04-21 | 143 测试, Ruff 0 errors, MCP 完整支持 |
+| 6.1.0 | 2026-04-15 | 80 测试, 全局配置框架, XML 导出 |
+| 6.0.0 | 2026-04-01 | MCP 协议, Categorizer, 蓝图生成 |
+| 5.8.0 | 2026-03-15 | UNC 拦截, Token 预算, 并发优化 |
+| 5.7.0 | 2026-03-01 | 路径归一化, 递归上下文 |
+
+---
+
+## 📝 许可证
+MIT License

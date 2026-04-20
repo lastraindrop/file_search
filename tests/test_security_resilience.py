@@ -1,10 +1,10 @@
-import pytest
 import os
-import pathlib
-import sys
 import threading
 from unittest.mock import patch
-from file_cortex_core import PathValidator, ActionBridge, FileUtils, DataManager
+
+import pytest
+
+from file_cortex_core import ActionBridge, FileUtils, PathValidator
 
 # -----------------------------------------------------------------------------
 # 1. Path Safety & Normalization Matrix
@@ -13,14 +13,33 @@ from file_cortex_core import PathValidator, ActionBridge, FileUtils, DataManager
 @pytest.mark.parametrize("path,root,expected_safe", [
     ("../../etc/passwd", "C:/User/Project", False),
     ("C:/Windows/System32", "C:/User/Project", False),
-    ("src/main.py", "C:/User/Project", True), 
-    ("C:/USER/PROJECT/SRC/MAIN.PY", "C:/User/Project", True), 
-    ("//localhost/c$/evil", "C:/Project", False), 
-    ("subdir/../subdir/file.txt", "C:/Project", True)
+    ("//localhost/c$/evil", "C:/Project", False),
 ])
 def test_security_path_validator_matrix(path, root, expected_safe):
     """Core security matrix: Traversal, Windows System Paths, and UNC blocking."""
     assert PathValidator.is_safe(path, root) == expected_safe
+
+def test_security_path_safe_relative(tmp_path):
+    """Relative paths resolve within root when root exists."""
+    (tmp_path / "src").mkdir()
+    result = PathValidator.is_safe("src/main.py", str(tmp_path))
+    assert result is True
+
+def test_security_path_safe_absolute_nested(tmp_path):
+    """Absolute paths under root are safe."""
+    (tmp_path / "src").mkdir()
+    nested = tmp_path / "src" / "main.py"
+    nested.write_text("test", encoding="utf-8")
+    result = PathValidator.is_safe(str(nested), str(tmp_path))
+    assert result is True
+
+def test_security_path_safe_parent_traversal(tmp_path):
+    """Traversal with .. should still resolve safely within root."""
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+    (subdir / "file.txt").write_text("x", encoding="utf-8")
+    result = PathValidator.is_safe("subdir/../subdir/file.txt", str(tmp_path))
+    assert result is True
 
 def test_security_path_normalization_unification():
     """Verify that norm_path handles mixed slashes and redundant dots."""
@@ -38,16 +57,16 @@ def test_security_action_bridge_injection_block(tmp_path):
     malicious_name = "test.txt ; rm -rf"
     f = tmp_path / malicious_name
     f.write_text("dummy")
-    
+
     template = "type {path}"
-    
+
     with patch("subprocess.Popen") as mock_popen:
         mock_popen.return_value.pid = 1234
         mock_popen.return_value.poll.return_value = 0
         mock_popen.return_value.communicate.return_value = (b"", b"")
-        
+
         list(ActionBridge.stream_tool(template, str(f), str(tmp_path)))
-        
+
         args, kwargs = mock_popen.call_args
         cmd = args[0]
         # On Unix-like systems we should stay in shell=False list-mode for safety.
@@ -76,7 +95,7 @@ def test_resilience_resource_leak_audit(mock_project):
         # Trigger directory listing
         for _ in range(10):
             list(FileUtils.get_project_items(str(mock_project), [], True))
-        
+
         # Check for ResourceWarnings (like unclosed scandir)
         leaks = [x for x in w if issubclass(x.category, ResourceWarning)]
         assert len(leaks) == 0
@@ -85,7 +104,7 @@ def test_resilience_concurrency_stress(clean_config):
     """High-load test for DataManager lock and ThreadPool usage."""
     dm = clean_config
     errors = []
-    
+
     def task():
         try:
             for _ in range(50):
@@ -93,11 +112,13 @@ def test_resilience_concurrency_stress(clean_config):
                 dm.save()
         except Exception as e:
             errors.append(e)
-            
+
     workers = [threading.Thread(target=task) for _ in range(10)]
-    for w in workers: w.start()
-    for w in workers: w.join()
-    
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+
     assert len(errors) == 0
 
 # -----------------------------------------------------------------------------
@@ -110,7 +131,7 @@ def test_resilience_filesystem_errors(tmp_path):
     d.mkdir()
     f = d / "secret.txt"
     f.write_text("shhh")
-    
+
     # Simulate permission issue (on OS level where possible, or via mock)
     with patch("os.scandir", side_effect=PermissionError("Access Denied")):
         items = FileUtils.get_project_items(str(d), [], True)

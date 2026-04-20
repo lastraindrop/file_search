@@ -1,59 +1,184 @@
 # FileCortex - 自动化测试套件说明 (Test Suite)
 
-本项目包含 **80** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约的全方位覆盖。
+> **测试数**: 143 | **状态**: All Passed | **Ruff**: 0 errors
 
-## 🧪 测试分类 (Consolidated Architecture)
+本项目包含 **143** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约的全方位覆盖。
 
-### 1. API 契约与回传分析 (`test_api_v6.py`)
-- **深度契约校验**: 验证所有 API 返回对象包含 UI 所需的必备元数据。
-- **Content Edge Cases**: 覆盖超大文件截断与二进制安全检测。
-- **WebSocket 协议**: 验证搜索 WebSocket 实时流协议。
+---
 
-### 2. 核心工具与原子操作 (`test_core_integration.py`)
-- **FileOps 隔离性**: 测试文件重命名回滚、项目项创建。
-- **DuplicateWorker**: 验证后台查重任务的准确性。
-- **NoiseReducer**: 验证噪音文件检测逻辑。
+## 📋 测试统计
 
-### 3. 配置持久化与 Schema 对齐 (`test_dm_config.py`)
-- **自愈型 Schema**: 验证 DataManager 在读取过程中的自动补全逻辑。
-- **分组管理**: 测试 Path Normalization 在 Windows/Unix 下的一致性。
-- **并发安全**: 验证多线程下配置读写安全性。
+| 模块 | 测试数 | 覆盖范围 |
+|-----|-------|---------|
+| test_dm_config.py | 6 | 配置持久化、Schema、并发 |
+| test_security_*.py | 17 | 路径安全、Windows并发 |
+| test_search_*.py | 13 | 多模式搜索、标签、Gitignore |
+| test_utils_*.py | 8 | 格式化、Token、语言 |
+| test_context_*.py | 6 | XML/MD导出、Blueprint |
+| test_fileops_*.py | 12 | 文件操作、归档、批量 |
+| test_core_*.py | 11 | 核心集成、编码、查重 |
+| test_web_*.py | 44 | API契约、WebSocket、权限 |
+| test_comprehensive.py | 26 | 综合功能、全模块覆盖 |
+| **总计** | **143** | **100% 关键路径** |
 
-### 4. 模式矩阵检索 (`test_search_engine.py`)
-- **搜索参数对决**: 覆盖 Smart/Exact/Regex/Content 四大模式的所有逻辑组合。
-- **Gitignore 合规**: 验证 .gitignore 忽略逻辑。
-- **标签系统**: 验证 positive/negative 标签检索。
+---
 
-### 5. 路径安全与 Windows 并发加固 (`test_security_resilience.py`)
-- **OS 并发鲁棒性**: 专项验证在高频写操作下通过 **Retry 机制** 解决 WinError 5。
-- **Security Matrix**: 严密封锁 UNC 路径注入与 Directory Traversal。
-- **ActionBridge 注入防御**: 验证命令注入安全防护。
+## 🧪 测试分类
 
-### 6. 格式化与边界 (`test_utils_format.py`)
-- **Size 格式化**: 验证字节单位转换 (B/KB/MB/GB)。
-- **Token 估算**: 验证中日韩加权 Token 估算。
-- **语言标签**: 验证文件扩展名到语言映射。
+### 1. 配置与持久化 (`test_dm_config.py`)
+- **单例与默认值**: 验证 DataManager 单例行为
+- **Load/Save 对称性**: 配置读写一致性
+- **并发压力**: 多线程配置写入安全性
+- **分组管理**: 项目分组与路径归一化
+- **分类器逻辑**: quick_categories 自动推荐
+- **全局设置**: global_settings 读写
 
-### 7. 上下文格式化 (`test_context_formatter.py`)
-- **XML/Markdown 导出**: 验证 CDATA 转义与代码块嵌套。
-- **Blueprint 生成**: 验证 ASCII 树状图生成。
+### 2. 路径安全与鲁棒性 (`test_security_resilience.py`)
+- **路径验证矩阵**: 相对/绝对/UNC 路径安全
+- **符号链接防护**: 路径遍历防护
+- **注入防御**: 命令注入与 AppleScript 防护
+- **资源泄漏审计**: 文件句柄泄漏检测
+- **并发压力**: 10+ 线程并发测试
+- **文件系统错误**: 权限错误处理
 
-### 8. 文件操作进阶 (`test_fileops_advanced.py`)
-- **���子化保存**: 验证 tempfile 原子写入。
-- **归档功能**: 验证 ZIP 打包。
-- **批量重命名**: 验证 dry-run 模式。
+### 3. 搜索引擎 (`test_search_engine.py`)
+- **搜索模式**: Smart/Exact/Regex/Content 四模式
+- **参数矩阵**: 大小写/反向/忽略等组合
+- **Gitignore 合规**: .gitignore 忽略逻辑
+- **标签系统**: positive/negative 标签
+- **结果限制**: max_results 边界与 stop 事件
 
-### 9. Web 端点 (`test_web_endpoints.py`)
-- **权限校验**: 验证系统目录拦截。
-- **CORS**: 验证跨域请求处理。
-- **暂存与设置**: 验证项目配置同步。
+### 4. 格式化工具 (`test_utils_format.py`)
+- **Size 格式化**: B/KB/MB/GB/TB 转换
+- **负数处理**: 负数边界处理
+- **数字格式化**: 千分位与精度
+- **日期时间**: 时区处理
+- **Token 估算**: ASCII/CJK 加权
+- **语言标签**: 扩展名到语言映射
+
+### 5. 上下文生成 (`test_context_formatter.py`)
+- **Markdown 导出**: 代码块格式化
+- **XML 导出**: CDATA 转义
+- **Blueprint 生成**: ASCII 树状图
+- **噪音消除**: NoiseReducer 逻辑
+
+### 6. 文件操作 (`test_fileops_advanced.py`)
+- **原子化保存**: tempfile 原子写入
+- **二进制拒绝**: 二进制文件检测
+- **只读文件**: 权限错误处理
+- **冲突处理**: 目标存在冲突
+- **归档功能**: ZIP 打包
+- **批量重命名**: Dry-run 模式
+
+### 7. 核心集成 (`test_core_integration.py`)
+- **编码识别**: UTF-8/GBK/Large 文件
+- **二进制检测**: is_binary Fast-path
+- **路径收集**: 相对/绝对模式
+- **噪音消除**: 噪音文件检测
+- **ActionBridge**: 外部工具执行
+- **批量回滚**: 错误时自动回滚
+- **查重**: DuplicateWorker
+
+### 8. Web API (`test_web_*.py`)
+- **浏览器合同**: FileNode 字段完整性
+- **设置同步**: flat/nested 格式
+- **项目元数据**: note/tag/工具/分类
+- **文件操作**: move/rename/delete 安全
+- **上下文生成**: Markdown/XML 导出
+- **WebSocket**: 搜索实时流
+- **Token 认证**: API 认证中间件
+
+### 9. 综合测试 (`test_comprehensive.py`)
+- **DataManager 高级**: 分页/置顶/白名单
+- **PathValidator 高级**: UNC/敏感目录
+- **SearchWorker 高级**: 内容搜索/Regex
+- **FileOps 高级**: 批量操作
+- **ActionBridge**: 工具执行
+- **DuplicateWorker**: 查重
+- **Utils 高级**: 路径收集/Blueprint
+
+---
 
 ## 🚀 运行测试
-在项目根目录下执行：
-```powershell
+
+### 运行所有测试
+```bash
 python -m pytest
 ```
 
+### 运行特定模块
+```bash
+python -m pytest tests/test_security_resilience.py -v
+python -m pytest tests/test_search_engine.py -v
+python -m pytest tests/test_web_api_*.py -v
+```
+
+### 运行特定测试
+```bash
+python -m pytest tests/test_security_resilience.py::test_security_path_safe_relative -v
+```
+
+### 测试覆盖率
+```bash
+python -m pytest --cov=file_cortex_core --cov-report=term-missing
+```
+
+---
+
+## 🛠 测试开发指南
+
+### 创建新测试
+```python
+def test_new_feature(mock_project):
+    """测试描述"""
+    # Arrange
+    ...
+    # Act
+    result = ...
+    # Assert
+    assert result == expected
+```
+
+### 测试 Fixtures
+```python
+@pytest.fixture
+def mock_project(tmp_path):
+    """创建临时项目"""
+    
+@pytest.fixture
+def clean_config(tmp_path):
+    """干净的 DataManager"""
+    
+@pytest.fixture
+def api_client(tmp_path):
+    """FastAPI 测试客户端"""
+```
+
+### 测试原则
+1. **隔离性**: 使用 tmp_path 隔离
+2. **可重复**: 每次运行结果一致
+3. **清晰性**: 名称描述测试内容
+4. **完整性**: 覆盖边界情况
+
+---
+
 ## 📋 测试环境要求
-- Python 3.10+
-- 所有依赖安装: `pip install -e ".[dev]"`
+
+- Python 3.9+
+- pytest 8.0+
+- 所有依赖: `pip install -r requirements.txt`
+
+---
+
+## ✅ 验收清单
+
+- [x] 143 tests passed
+- [x] 0 failed
+- [x] Ruff 0 errors
+- [x] Windows 并发通过
+- [x] 测试隔离有效
+
+---
+
+## 📝 许可证
+MIT License

@@ -1,9 +1,10 @@
-import pytest
-import pathlib
 import os
 import sys
 from unittest.mock import patch
-from file_cortex_core import FileUtils, FormatUtils, FileOps, ActionBridge, NoiseReducer
+
+import pytest
+
+from file_cortex_core import ActionBridge, FileOps, FileUtils, FormatUtils, NoiseReducer
 
 # -----------------------------------------------------------------------------
 # 1. File Utility & Smart Read
@@ -11,7 +12,7 @@ from file_cortex_core import FileUtils, FormatUtils, FileOps, ActionBridge, Nois
 
 @pytest.mark.parametrize("content_type,content", [
     ("utf8", "Standard UTF8 文本内容"),
-    ("gbk", b"\xb2\xe2\xca\xd4\xc4\xda\xc8\xdd"), 
+    ("gbk", b"\xb2\xe2\xca\xd4\xc4\xda\xc8\xdd"),
     ("large", "A" * 10000) # 10KB is enough for truncation test
 ])
 def test_core_read_text_resilience(tmp_path, content_type, content):
@@ -21,14 +22,15 @@ def test_core_read_text_resilience(tmp_path, content_type, content):
         f.write_bytes(content)
     else:
         f.write_text(content, encoding='utf-8')
-    
+
     # 1. Smart Read with encoding detection
     read_data = FileUtils.read_text_smart(f, max_bytes=1000000 if content_type == "large" else None)
-    
+
     if content_type == "large":
         assert len(read_data) <= 1000100
     elif content_type == "gbk":
-        assert "测试" in read_data or content_type == "gbk" # Check successful decode
+        assert len(read_data) > 0
+        assert "测试" in read_data or len(read_data) >= 4
     else:
         assert content in read_data
 
@@ -55,7 +57,7 @@ def test_core_path_collection_formatting(mock_project):
     # Test different modes
     out_rel = FormatUtils.collect_paths(files, mode='relative', root_dir=str(mock_project))
     assert "src/main.py" in out_rel.replace("\\", "/") or "src/main.py" in out_rel.lower().replace("\\", "/")
-    
+
     out_abs = FormatUtils.collect_paths(files, mode='absolute')
     assert str(mock_project) in out_abs
 
@@ -65,7 +67,7 @@ def test_core_path_collection_formatting(mock_project):
 
 def test_core_noise_reducer_logic():
     """Verify heuristic detection of high-noise/minified files."""
-    minified = "var a=1;" + "b=2;" * 1000 
+    minified = "var a=1;" + "b=2;" * 1000
     cleaned = NoiseReducer.clean(minified, max_line_length=100)
     assert "skipped" in cleaned
 
@@ -93,18 +95,19 @@ def test_core_ops_batch_rename_rollback(tmp_path):
         f = tmp_path / f"file_{i}.txt"
         f.write_text(f"content {i}")
         files.append(str(f))
-        
+
     # Trigger failure on the 3rd file
     from pathlib import Path
     real_rename = Path.rename
     def faulty_rename(self, target):
-        if "file_2" in str(self): raise PermissionError("Atomicity Test")
+        if "file_2" in str(self):
+            raise PermissionError("Atomicity Test")
         return real_rename(self, target)
-        
+
     with patch.object(Path, "rename", faulty_rename):
         with pytest.raises(PermissionError):
             FileOps.batch_rename(str(tmp_path), files, "file_(.*)", "new_\\1", dry_run=False)
-            
+
     # Rollback check: none should be renamed
     assert (tmp_path / "file_0.txt").exists()
     assert not (tmp_path / "new_0.txt").exists()
@@ -124,23 +127,24 @@ def test_core_duplicate_worker(tmp_path):
     """Verify background duplicate hashing and group identification."""
     import queue
     from threading import Event
+
     from file_cortex_core import DuplicateWorker
-    
+
     # Setup: 2 identical, 1 unique
     (tmp_path / "a.txt").write_text("SAME")
     (tmp_path / "b.txt").write_text("SAME")
     (tmp_path / "c.txt").write_text("DIFF")
-    
+
     q = queue.Queue()
     stop = Event()
     worker = DuplicateWorker(str(tmp_path), "", True, q, stop)
     worker.run() # Run synchronous for test predictability
-    
+
     results = []
     while not q.empty():
         item = q.get()
         if isinstance(item, dict):
             results.append(item)
-            
+
     assert len(results) == 1 # Only one group of duplicates
     assert len(results[0]["paths"]) == 2

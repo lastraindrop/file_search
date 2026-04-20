@@ -474,11 +474,11 @@ def open_project(req: ProjectOpenRequest) -> dict[str, Any]:
         root_node = get_node_info(p, p)
         return root_node
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/children")
@@ -537,7 +537,7 @@ def get_content(path: str) -> dict[str, Any]:
             >= max_preview,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading file: {e}") from e
 
 
 @app.post("/api/generate")
@@ -606,7 +606,7 @@ def rename_file(req: FileRenameRequest) -> dict[str, Any]:
         new_path = FileOps.rename_file(req.path, req.new_name)
         return {"status": "ok", "new_path": new_path}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/batch_rename")
@@ -641,9 +641,9 @@ def api_batch_rename(req: BatchRenameRequest) -> dict[str, Any]:
         )
         return {"status": "ok", "results": results}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/fs/delete")
@@ -671,7 +671,7 @@ def delete_files(req: FileDeleteRequest) -> dict[str, str]:
             FileOps.delete_file(p)
         return {"status": "ok"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/move")
@@ -720,7 +720,7 @@ def api_move(req: FileMoveRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/save")
@@ -744,7 +744,7 @@ def api_save(req: FileSaveRequest) -> dict[str, str]:
         raise
     except Exception as e:
         logger.error(f"Save error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/create")
@@ -769,7 +769,7 @@ def api_create(req: FileCreateRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/config/global")
@@ -837,7 +837,7 @@ def api_archive(req: FileArchiveRequest) -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/project/config")
@@ -1012,7 +1012,7 @@ def update_tools(req: ToolsUpdateRequest) -> dict[str, str]:
         _get_dm().update_custom_tools(req.project_path, req.tools)
         return {"status": "ok"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/project/stats")
@@ -1065,7 +1065,7 @@ def update_categories(req: CategoriesUpdateRequest) -> dict[str, str]:
         _get_dm().update_quick_categories(req.project_path, req.categories)
         return {"status": "ok"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/global/settings")
@@ -1123,7 +1123,7 @@ def api_stage_all(req: StageAllRequest) -> dict[str, Any]:
         return {"status": "ok", "added_count": added}
     except Exception as e:
         logger.error(f"Stage All failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/actions/categorize")
@@ -1147,7 +1147,7 @@ def api_categorize(req: CategorizeRequest) -> dict[str, Any]:
         moved = FileOps.batch_categorize(req.project_path, req.paths, req.category_name)
         return {"status": "ok", "moved_count": len(moved), "paths": moved}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/actions/execute")
@@ -1221,7 +1221,7 @@ def api_execute_tool(req: ToolExecuteRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/fs/collect_paths")
@@ -1250,7 +1250,7 @@ def collect_paths_api(req: PathCollectionRequest) -> dict[str, str]:
         return {"result": res}
     except Exception as e:
         logger.error(f"Path collection error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/actions/terminate")

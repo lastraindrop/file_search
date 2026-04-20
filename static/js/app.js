@@ -272,9 +272,11 @@ const App = {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     project_path: App.state.projectPath,
-                    excludes: document.getElementById('excludeInput').value,
-                    search_settings: {
-                        mode: document.getElementById('searchMode').value
+                    settings: {
+                        excludes: document.getElementById('excludeInput').value,
+                        search_settings: {
+                            mode: document.getElementById('searchMode').value
+                        }
                     }
                 })
             });
@@ -445,8 +447,16 @@ const App = {
     updateFileMetaUI: (path) => {
         const tagContainer = document.getElementById('fileTags');
         tagContainer.innerHTML = '';
-        const tags = App.state.projConfig.tags[path] || [];
-        tags.forEach(tag => {
+        const tags = App.state.projConfig.tags || {};
+        const matchedTags = tags[path] || [];
+        if (matchedTags.length === 0) {
+            Object.entries(tags).forEach(([key, val]) => {
+                if (path && key && path.endsWith(key.split('/').pop())) {
+                    matchedTags.push(...val);
+                }
+            });
+        }
+        matchedTags.forEach(tag => {
             const span = document.createElement('span');
             span.className = 'badge bg-info text-dark small';
             span.innerText = tag;
@@ -456,7 +466,14 @@ const App = {
 
     showFileNote: () => {
         if (!App.state.currentFile) return;
-        const note = App.state.projConfig.notes[App.state.currentFile] || "";
+        const notes = App.state.projConfig.notes || {};
+        let note = notes[App.state.currentFile] || "";
+        if (!note) {
+            const fileName = App.state.currentFile.split(/[\\\/]/).pop();
+            Object.entries(notes).forEach(([key, val]) => {
+                if (key.endsWith(fileName)) note = val;
+            });
+        }
         document.getElementById('noteInput').value = note;
         document.getElementById('noteOverlay').style.display = 'block';
     },
@@ -649,11 +666,27 @@ const App = {
         App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };
         App.state.socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.status === "DONE") return App.state.socket.close();
+            if (data.status === "DONE") {
+                const count = resultsDiv.querySelectorAll('[data-path]').length;
+                if (count === 0) {
+                    resultsDiv.innerHTML = '<div class="text-center p-3 text-muted">No results found.</div>';
+                } else {
+                    const footer = document.createElement('div');
+                    footer.className = 'text-center p-2 text-muted x-small border-top';
+                    footer.innerText = `${count} results found`;
+                    resultsDiv.appendChild(footer);
+                }
+                return App.state.socket.close();
+            }
+            if (data.status === "ERROR") {
+                resultsDiv.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
+                return App.state.socket.close();
+            }
             App.renderSearchResultItem(data);
-            
-            // Auto-scroll to keep bottom visible
             resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        };
+        App.state.socket.onerror = () => {
+            resultsDiv.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
         };
     },
 
@@ -812,7 +845,8 @@ const App = {
                                    <pre id="${logId}" class="m-0 p-3" style="background:#000; color:#0f0; font-family:monospace; min-height:150px; white-space:pre-wrap; font-size: 12px;"></pre>`;
             
             const outputDiv = document.getElementById(logId);
-            const wsUrl = `ws://${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
+            const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProto}//${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
             
             return new Promise((resolve) => {
                 const socket = new WebSocket(wsUrl);
@@ -1188,6 +1222,24 @@ const App = {
         App.showToast("Staging cleared");
     },
 
+    stageAll: async () => {
+        if (!App.state.projectPath) return;
+        try {
+            const res = await App._fetch('/api/actions/stage_all', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    mode: 'files',
+                    apply_excludes: true
+                })
+            });
+            const data = await res.json();
+            await App.refreshProject();
+            App.showToast(`Staged ${data.added_count} files`);
+        } catch (e) { App.showToast("Stage All failed: " + e.message, 'danger'); }
+    },
+
     // --- Path Collection ---
     showPathCollector: (paths = null) => {
         App._currentCollectionPaths = paths || Array.from(App.state.staging);
@@ -1264,27 +1316,31 @@ const App = {
         
         switch (action) {
             case 'stage': 
-                App.state.staging.add(path); App.renderStaging(); App.updateStats(); 
+                App.state.staging.add(path);
+                App.renderStaging();
+                App.syncStagingToBackend();
                 App.showToast("Added to Staging");
                 break;
             case 'fav': 
-                // We fake currentPath selection for existing methods
-                const oldPath = App.state.currentPath;
-                App.state.currentPath = path; 
-                App.addToFavorites();
-                App.state.currentPath = oldPath;
+                const savedFile = App.state.currentFile;
+                App.state.currentFile = path;
+                await App.addToFavorites();
+                App.state.currentFile = savedFile;
                 break;
             case 'copyPath':
-                navigator.clipboard.writeText(path); App.showToast("Path Copied");
+                try {
+                    await navigator.clipboard.writeText(path);
+                    App.showToast("Path Copied");
+                } catch (_) { App.showToast("Copy failed", 'danger'); }
                 break;
             case 'openOs':
-                App.openInExplorer(path); 
+                App.openInExplorer(path);
                 break;
             case 'delete':
-                const delPath = App.state.currentPath;
-                App.state.currentPath = path;
+                const savedCurrent = App.state.currentFile;
+                App.state.currentFile = path;
                 await App.deleteFile();
-                App.state.currentPath = delPath;
+                App.state.currentFile = savedCurrent;
                 break;
         }
         App.hideContextMenu();

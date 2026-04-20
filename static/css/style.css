@@ -207,3 +207,33 @@ body {
     background: var(--border);
     margin: 4px 0;
 }
+
+.hover-bg:hover {
+    background: rgba(56, 189, 248, 0.06);
+}
+
+.btn-xs {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+}
+
+.search-result-item:hover {
+    background: rgba(56, 189, 248, 0.06);
+    cursor: pointer;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.empty-state-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.drag-over {
+    border: 2px dashed var(--accent) !important;
+    background: var(--accent-dim) !important;
+}

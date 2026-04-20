@@ -1,5 +1,5 @@
-import pytest
 from file_cortex_core import FormatUtils
+
 
 def test_format_size_boundaries():
     """Verify size formatting across scales and boundaries."""
@@ -12,9 +12,8 @@ def test_format_size_boundaries():
     assert FormatUtils.format_size(10.5 * 1024 * 1024) == "10.5 MB"
 
 def test_format_size_negative():
-    """Negative sizes should return 0 B or similar safety."""
-    # implementation doesn't clamp to 0
-    assert FormatUtils.format_size(-100) == "-100 B"
+    """Negative sizes should be clamped to 0 B."""
+    assert FormatUtils.format_size(-100) == "0 B"
 
 def test_format_number_edge_cases():
     """Verify number formatting with thousands separators."""
@@ -34,13 +33,13 @@ def test_estimate_tokens_cjk_weighting():
     """Verify CJK weighting in token estimation."""
     pure_ascii = "Hello world" # 11 chars
     cjk_text = "你好世界" # 4 chars
-    
-    # ASCII usually 1:4 or 1:1 depending on model, 
+
+    # ASCII usually 1:4 or 1:1 depending on model,
     # but our implementation uses TOKEN_RATIO (4) if simple
-    # Let's check the core logic: len(text) / TOKEN_RATIO for simple, 
+    # Let's check the core logic: len(text) / TOKEN_RATIO for simple,
     # or specific CJK logic if implemented.
     # Current core uses: len(content) // 4 (approx)
-    
+
     # We want to ensure it doesn't return 0 for non-empty
     assert FormatUtils.estimate_tokens(pure_ascii) > 0
     assert FormatUtils.estimate_tokens(cjk_text) > 0

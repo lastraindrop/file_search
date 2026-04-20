@@ -41,7 +41,10 @@ except ImportError:
 
         def run(self, host: str = None, port: int = None):
             if host or port:
-                print(f"MCP Server would run on {host}:{port} with these tools: {list(self._tools.keys())}")
+                print(
+                    f"MCP Server would run on {host}:{port} "
+                    f"with tools: {list(self._tools.keys())}"
+                )
             else:
                 print(f"MCP Server initialized with tools: {list(self._tools.keys())}")
 

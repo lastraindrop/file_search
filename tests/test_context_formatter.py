@@ -1,5 +1,5 @@
-import pytest
 from file_cortex_core import ContextFormatter, NoiseReducer
+
 
 def test_to_markdown_with_prompt(mock_project):
     """Verify Markdown export with prompt prefix injection."""
@@ -15,18 +15,19 @@ def test_to_xml_cdata_escaping(mock_project):
     # Create file with ]]> which is a CDATA end marker
     malicious_f = mock_project / "evil.txt"
     malicious_f.write_text("Look at this: ]]> oh no", encoding="utf-8")
-    
+
     files = [str(malicious_f)]
     res = ContextFormatter.to_xml(files, root_dir=str(mock_project))
     assert "<context>" in res
     # The ]]> should be handled by replacing with ]]] ]><![CDATA[>
     assert "]]]]><![CDATA[>" in res
 
-def test_to_xml_empty_files():
-    """Empty file list should produce empty context or valid empty XML."""
-    res = ContextFormatter.to_xml([], root_dir="C:/")
+def test_to_xml_empty_files(tmp_path):
+    """Empty file list should produce valid empty XML."""
+    res = ContextFormatter.to_xml([], root_dir=str(tmp_path))
     assert "<context>" in res
     assert "</context>" in res
+    assert "<file " not in res
 
 def test_blueprint_depth_limit(stress_project):
     from file_cortex_core import FileUtils

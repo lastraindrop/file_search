@@ -5,9 +5,13 @@ Provides path validation and security checks to prevent unauthorized
 file system access.
 """
 
+import ntpath
 import os
 import pathlib
 import sys
+
+UNC_PREFIXES = ('\\\\', '//')
+
 
 class PathValidator:
     """Validates paths to prevent path traversal attacks."""
@@ -29,40 +33,65 @@ class PathValidator:
             target_raw = str(target_path)
             root_raw = str(root_path)
 
-            # Handle Windows-style paths even when running on non-Windows systems.
-            is_windows_target = bool(ntpath.splitdrive(target_raw)[0]) or target_raw.startswith(('\\\\', '//'))
-            is_windows_root = bool(ntpath.splitdrive(root_raw)[0]) or root_raw.startswith(('\\\\', '//'))
+            is_windows_target = (
+                bool(ntpath.splitdrive(target_raw)[0])
+                or target_raw.startswith(UNC_PREFIXES)
+            )
+            is_windows_root = (
+                bool(ntpath.splitdrive(root_raw)[0])
+                or root_raw.startswith(UNC_PREFIXES)
+            )
 
             if is_windows_target or is_windows_root:
-                # UNC/network paths are never considered safe.
-                if target_raw.startswith(('\\\\', '//')):
+                if target_raw.startswith(UNC_PREFIXES):
                     return False
 
-                root_norm = ntpath.normpath(root_raw).replace('/', '\\').lower()
+                root_norm = ntpath.normpath(root_raw).replace(
+                    '/', '\\'
+                ).lower()
                 target_norm_raw = target_raw
 
-                # Resolve relative Windows-like paths against the provided root.
                 if not ntpath.isabs(target_norm_raw):
                     target_norm_raw = ntpath.join(root_raw, target_norm_raw)
 
-                target_norm = ntpath.normpath(target_norm_raw).replace('/', '\\').lower()
+                target_norm = ntpath.normpath(target_norm_raw).replace(
+                    '/', '\\'
+                ).lower()
                 root_prefix = root_norm.rstrip('\\') + '\\'
-                return target_norm == root_norm or target_norm.startswith(root_prefix)
+                return (target_norm == root_norm
+                        or target_norm.startswith(root_prefix))
 
             t = pathlib.Path(target_raw)
-            r = pathlib.Path(root_raw).resolve()
-            target = (r / t).resolve() if not t.is_absolute() else t.resolve()
+            r = pathlib.Path(root_raw)
+
+            try:
+                r_resolved = r.resolve()
+            except Exception:
+                r_resolved = r
+
+            if t.is_absolute():
+                try:
+                    target = t.resolve()
+                except Exception:
+                    target = t
+            else:
+                try:
+                    target = (r_resolved / t).resolve()
+                except Exception:
+                    target = r_resolved / t
 
             if hasattr(target, 'is_relative_to'):
-                 return target.is_relative_to(r)
-            # Fallback for Python < 3.9
-            return r == target or r in target.parents
+                return target.is_relative_to(r_resolved)
+            return r_resolved == target or r_resolved in target.parents
         except Exception:
             return False
 
     @staticmethod
     def norm_path(p: str | pathlib.Path | None) -> str:
-        """Canonicalize path: absolute, platform-aware casing, posix-style, and trail-slash standardized."""
+        """Canonicalize path: absolute, platform-aware casing, posix-style.
+
+        Also standardizes trailing slashes.
+        """
         if not p:
             return ""
         try:

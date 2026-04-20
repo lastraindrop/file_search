@@ -44,6 +44,8 @@ class FormatUtils:
         Returns:
             Formatted size string (B, KB, MB, GB).
         """
+        if size_bytes < 0:
+            return "0 B"
         if size_bytes < 1024:
             return f"{size_bytes} B"
         elif size_bytes < 1024 * 1024:

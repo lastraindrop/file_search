@@ -1,6 +1,7 @@
+
 import pytest
-import pathlib
-from file_cortex_core import search_generator, FileUtils
+
+from file_cortex_core import search_generator
 
 # -----------------------------------------------------------------------------
 # 1. Search Mode Matrix
@@ -33,12 +34,12 @@ def test_search_parameters_matrix(mock_project, case_sensitive, is_inverse, use_
     # query that matches main.py
     query = "MAIN" if not case_sensitive else "main"
     results = list(search_generator(
-        str(mock_project), query, "smart", "", 
+        str(mock_project), query, "smart", "",
         case_sensitive=case_sensitive, is_inverse=is_inverse, use_gitignore=use_gitignore
     ))
-    
+
     has_main = any("main.py" in r["path"] for r in results)
-    
+
     if is_inverse:
         assert not has_main
     else:
@@ -52,11 +53,11 @@ def test_search_gitignore_compliance(mock_project):
     """Verify that ignored files are indeed ignored unless use_gitignore=False."""
     # error.log is in .gitignore
     ignored_q = "error.log"
-    
+
     # 1. Normal (Ignored)
     res_normal = list(search_generator(str(mock_project), ignored_q, "smart", "", use_gitignore=True))
     assert not any("error.log" in r["path"] for r in res_normal)
-    
+
     # 2. Override (Found)
     res_override = list(search_generator(str(mock_project), ignored_q, "smart", "", use_gitignore=False))
     assert any("error.log" in r["path"] for r in res_override)
@@ -69,14 +70,14 @@ def test_search_tags_complex(mock_project):
     """Verify positive, negative, and regex-style tags."""
     # Find all .py files but NOT those containing 'main'
     results = list(search_generator(
-        str(mock_project), 
-        search_text="", 
-        search_mode="smart", 
+        str(mock_project),
+        search_text="",
+        search_mode="smart",
         manual_excludes="",
         positive_tags=["/.py$/"], # Regex tag
         negative_tags=["main"]
     ))
-    
+
     paths = [r["path"] for r in results]
     # Should have other .py if any, but NOT main.py
     assert not any("main.py" in p for p in paths)
@@ -89,11 +90,11 @@ def test_search_limits_and_stop_event(stress_project):
     """Verify max_results and stop_event interruption."""
     import threading
     stop_event = threading.Event()
-    
+
     # 1. Max Results
     results = list(search_generator(str(stress_project), "file", "smart", "", max_results=50))
     assert len(results) == 50
-    
+
     # 2. Early Stop
     stop_event.set()
     results_stopped = list(search_generator(str(stress_project), "file", "smart", "", stop_event=stop_event))
