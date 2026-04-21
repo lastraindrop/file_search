@@ -1,8 +1,8 @@
 # FileCortex - 自动化测试套件说明 (Test Suite)
 
-> **测试数**: 143 | **状态**: All Passed | **Ruff**: 0 errors
+> **测试数**: 160 | **状态**: All Passed | **Ruff**: 0 errors
 
-本项目包含 **143** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约的全方位覆盖。
+本项目包含 **160** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约与桌面 GUI 动作约束的全方位覆盖。
 
 ---
 
@@ -10,16 +10,20 @@
 
 | 模块 | 测试数 | 覆盖范围 |
 |-----|-------|---------|
-| test_dm_config.py | 6 | 配置持久化、Schema、并发 |
-| test_security_*.py | 17 | 路径安全、Windows并发 |
-| test_search_*.py | 13 | 多模式搜索、标签、Gitignore |
-| test_utils_*.py | 8 | 格式化、Token、语言 |
-| test_context_*.py | 6 | XML/MD导出、Blueprint |
-| test_fileops_*.py | 12 | 文件操作、归档、批量 |
-| test_core_*.py | 11 | 核心集成、编码、查重 |
-| test_web_*.py | 44 | API契约、WebSocket、权限 |
-| test_comprehensive.py | 26 | 综合功能、全模块覆盖 |
-| **总计** | **143** | **100% 关键路径** |
+| test_api_v6.py | 12 | 浏览器契约、生成流程、WebSocket 协议 |
+| test_comprehensive.py | 46 | 综合功能、参数边界、跨模块行为 |
+| test_context_formatter.py | 6 | XML/MD 导出、Blueprint |
+| test_core_integration.py | 11 | 核心集成、编码、查重 |
+| test_dm_config.py | 7 | 配置持久化、Schema、并发 |
+| test_fileops_advanced.py | 9 | 文件操作、归档、批量 |
+| test_frontend_contract.py | 7 | 前端契约、目录树交互、GUI 动作约束 |
+| test_mcp_server.py | 3 | MCP 工作区注册、上下文、统计 |
+| test_search_engine.py | 10 | 多模式搜索、标签、Gitignore |
+| test_security_resilience.py | 11 | 路径安全、注入防护、并发鲁棒性 |
+| test_utils_format.py | 8 | 格式化、Token、语言 |
+| test_web_api_advanced.py | 21 | API 契约、安全语义、全局设置 |
+| test_web_endpoints.py | 9 | 端点边界与工作区行为 |
+| **总计** | **160** | **100% 关键路径** |
 
 ---
 
@@ -87,6 +91,12 @@
 - **上下文生成**: Markdown/XML 导出
 - **WebSocket**: 搜索实时流
 - **Token 认证**: API 认证中间件
+
+### 8.1 前端契约与 GUI 约束 (`test_frontend_contract.py`)
+- **目录树交互**: 工作区打开后首层目录自动加载，保留深层懒加载
+- **参数矩阵**: `include_dirs` / `case_sensitive` / `inverse` 等搜索参数保持前后端一致
+- **OS 打开路径**: `/api/fs/open_os` 与前端调用保持一致
+- **GUI 动作约束**: 桌面端必须允许从文件树直接添加到清单，禁止回退到硬编码图像处理器入口
 
 ### 9. 综合测试 (`test_comprehensive.py`)
 - **DataManager 高级**: 分页/置顶/白名单
@@ -164,7 +174,7 @@ def api_client(tmp_path):
 
 ## 📋 测试环境要求
 
-- Python 3.9+
+- Python 3.10+
 - pytest 8.0+
 - 所有依赖: `pip install -r requirements.txt`
 
@@ -172,7 +182,7 @@ def api_client(tmp_path):
 
 ## ✅ 验收清单
 
-- [x] 143 tests passed
+- [x] 160 tests passed
 - [x] 0 failed
 - [x] Ruff 0 errors
 - [x] Windows 并发通过

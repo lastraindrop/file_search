@@ -175,8 +175,10 @@ async def register_workspace(
 
     dm = get_dm()
     dm.add_to_recent(path)
+    dm.get_project_data(path)
     if auto_pin:
         dm.toggle_pinned(path)
+    dm.save()
 
     return f"Workspace '{path}' registered successfully."
 

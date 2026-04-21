@@ -25,6 +25,16 @@ class FileOps:
     """File operation utilities."""
 
     @staticmethod
+    def _validate_item_name(name: str) -> None:
+        """Validates a single path segment used for create/rename operations."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Name must be a non-empty string.")
+        if name in {".", ".."}:
+            raise ValueError("Reserved relative names are not allowed.")
+        if any(sep in name for sep in ("/", "\\")):
+            raise ValueError("Path separators are not allowed in item names.")
+
+    @staticmethod
     def batch_rename(
         project_path: str,
         paths: list[str],
@@ -138,6 +148,7 @@ class FileOps:
         Returns:
             New file path.
         """
+        FileOps._validate_item_name(new_name)
         old_path = pathlib.Path(old_path_str)
         if not old_path.exists():
             raise FileNotFoundError("Target path does not exist.")
@@ -245,6 +256,7 @@ class FileOps:
         Returns:
             Created item path.
         """
+        FileOps._validate_item_name(name)
         parent_path = pathlib.Path(parent_path_str)
         if not parent_path.exists() or not parent_path.is_dir():
             raise FileNotFoundError("Parent directory does not exist.")

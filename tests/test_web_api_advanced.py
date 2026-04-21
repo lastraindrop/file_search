@@ -1,4 +1,8 @@
 
+import importlib
+
+from fastapi.testclient import TestClient
+
 
 class TestWebAPIAdvanced:
     """Advanced web API endpoint tests covering untested routes."""
@@ -31,6 +35,15 @@ class TestWebAPIAdvanced:
             "is_dir": False,
         })
         assert res.status_code in (400, 500)
+
+    def test_api_create_traversal_rejected(self, project_client, mock_project):
+        """Creating an item with path traversal in the name is rejected."""
+        res = project_client.post("/api/fs/create", json={
+            "parent_path": str(mock_project),
+            "name": "../escape.txt",
+            "is_dir": False,
+        })
+        assert res.status_code == 400
 
     def test_api_archive(self, project_client, mock_project):
         """Verify archive creation via API."""
@@ -107,6 +120,15 @@ class TestWebAPIAdvanced:
         })
         assert res.status_code == 200
         assert "@" in res.json()["result"]
+
+    def test_api_collect_paths_unauthorized_root_returns_403(self, api_client, tmp_path):
+        """Unauthorized collect_paths request should preserve 403 semantics."""
+        res = api_client.post("/api/fs/collect_paths", json={
+            "paths": [str(tmp_path / "ghost.txt")],
+            "project_root": str(tmp_path),
+            "mode": "relative",
+        })
+        assert res.status_code == 403
 
     def test_api_prompt_templates(self, project_client, mock_project):
         """Verify prompt templates endpoint."""
@@ -238,3 +260,36 @@ class TestAPITokenMiddleware:
             assert res3.status_code == 200
         finally:
             web_app.API_TOKEN = original_token
+
+    def test_cors_respects_allowed_origins_env(self, monkeypatch):
+        """CORS middleware should reflect configured allowlist instead of wildcard."""
+        monkeypatch.setenv("FCTX_ALLOWED_ORIGINS", "https://allowed.example")
+        import web_app
+
+        reloaded = importlib.reload(web_app)
+        client = TestClient(reloaded.app)
+
+        try:
+            allowed = client.options(
+                "/api/config/global",
+                headers={
+                    "Origin": "https://allowed.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            assert allowed.headers.get("access-control-allow-origin") == (
+                "https://allowed.example"
+            )
+
+            blocked = client.options(
+                "/api/config/global",
+                headers={
+                    "Origin": "https://blocked.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            assert blocked.status_code == 400
+            assert blocked.headers.get("access-control-allow-origin") is None
+        finally:
+            monkeypatch.delenv("FCTX_ALLOWED_ORIGINS", raising=False)
+            importlib.reload(web_app)

@@ -603,6 +603,10 @@ class FileCortexApp:
             command=self.ctx_collect_paths,
         )
         self.context_menu.add_separator()
+        self.context_menu.add_command(
+            label="➕ 添加到清单", command=self.ctx_add_to_staging
+        )
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="✏️ 重命名", command=self.ctx_rename_file)
         self.context_menu.add_command(label="✂️ 移动至...", command=self.ctx_move_file)
         self.context_menu.add_separator()
@@ -610,12 +614,12 @@ class FileCortexApp:
             label="⭐ 收藏至当前组", command=self.ctx_add_to_favorites
         )
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="🗑️ 删除", command=self.ctx_delete_file)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(
-            label="🖼️ 发送至图像处理器",
-            command=self.ctx_send_to_image_splitter,
+        self.context_tool_menu = tk.Menu(self.context_menu, tearoff=0)
+        self.context_menu.add_cascade(
+            label="🛠️ 执行自定义工具", menu=self.context_tool_menu
         )
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="🗑️ 删除", command=self.ctx_delete_file)
         for t in [
             self.tree_search,
             self.tree_fav,
@@ -623,6 +627,20 @@ class FileCortexApp:
             self.tree_proj,
         ]:
             t.bind("<Button-3>", self.show_context_menu)
+
+    def refresh_context_tools_menu(self) -> None:
+        """Refreshes the context-menu tool submenu from project configuration."""
+        self.context_tool_menu.delete(0, tk.END)
+        tools = (self.current_proj_config or {}).get("custom_tools", {})
+        if not tools:
+            self.context_tool_menu.add_command(label="(无可用工具)", state=tk.DISABLED)
+            return
+
+        for tool_name in sorted(tools):
+            self.context_tool_menu.add_command(
+                label=tool_name,
+                command=lambda name=tool_name: self.ctx_execute_custom_tool(name),
+            )
 
     def on_browse(self, fixed_path: str | None = None) -> None:
         """Opens a directory browser dialog.
@@ -692,6 +710,7 @@ class FileCortexApp:
 
         self.refresh_fav_tree()
         self.refresh_tools_ui()
+        self.refresh_context_tools_menu()
         self.refresh_staging_ui()
         self.refresh_template_combo()
         self._refresh_tree()
@@ -789,15 +808,28 @@ class FileCortexApp:
             messagebox.showwarning("提示", "执行工具前，请先添加文件到清单。")
             return
 
+        self.execute_tool_on_paths(
+            tool_name, [pathlib.Path(p_str) for p_str in self.staging_files]
+        )
+
+    def execute_tool_on_paths(
+        self, tool_name: str, paths: list[pathlib.Path]
+    ) -> None:
+        """Executes a configured custom tool on the provided paths."""
+        if not self.current_dir or not paths:
+            return
+
         template = self.current_proj_config.get("custom_tools", {}).get(tool_name)
         if not template:
             return
 
         self.tools_scroll.config(state=tk.NORMAL)
         self.tools_scroll.insert(tk.END, f"\n> 执行: {tool_name}\n", "cyan")
-        for p_str in self.staging_files:
-            file_name = pathlib.Path(p_str).name
-            res = ActionBridge.execute_tool(template, p_str, str(self.current_dir))
+        for path_obj in paths:
+            file_name = path_obj.name
+            res = ActionBridge.execute_tool(
+                template, str(path_obj), str(self.current_dir)
+            )
             if "error" in res:
                 self.tools_scroll.insert(
                     tk.END,
@@ -814,11 +846,19 @@ class FileCortexApp:
                 if res["stdout"]:
                     out_text = res["stdout"][:200]
                     self.tools_scroll.insert(
-                        tk.END, f"  └ {out_text.strip()}\n", "yellow"
+                        tk.END, f"  - {out_text.strip()}\n", "yellow"
                     )
 
         self.tools_scroll.config(state=tk.DISABLED)
         self.tools_scroll.see(tk.END)
+
+    def ctx_execute_custom_tool(self, tool_name: str) -> None:
+        """Executes a custom tool for the current context-menu selection."""
+        paths = self._get_ctx_paths()
+        if not paths:
+            return
+        self.execute_tool_on_paths(tool_name, paths)
+        self.show_status(f"已对 {len(paths)} 个项目执行工具: {tool_name}")
 
     def _refresh_tree(self) -> None:
         """Refreshes the project directory tree view."""
@@ -1355,6 +1395,14 @@ class FileCortexApp:
             ]
         )
 
+    def ctx_add_to_staging(self) -> None:
+        """Adds the current context-menu selection to the staging list."""
+        paths = self._get_ctx_paths()
+        if not paths:
+            return
+        self._add_paths_to_staging([str(path) for path in paths])
+        self.show_status(f"已添加 {len(paths)} 个项目到清单")
+
     def on_tree_double_click(self, event: tk.Event) -> None:
         """Handles double-click on tree to add path to staging.
 
@@ -1493,6 +1541,7 @@ class FileCortexApp:
         if i:
             if i not in self.active_tree.selection():
                 self.active_tree.selection_set(i)
+            self.refresh_context_tools_menu()
             self.context_menu.post(event.x_root, event.y_root)
 
     def _get_ctx_paths(self) -> list[pathlib.Path]:
@@ -1758,35 +1807,6 @@ class FileCortexApp:
                 self.load_project(str(self.current_dir))
             except Exception as e:
                 messagebox.showerror("错误", f"删除中断: {str(e)}")
-
-    def ctx_send_to_image_splitter(self) -> None:
-        """Sends selected images to the image splitter tool."""
-        paths = self._get_ctx_paths()
-        img_paths = [
-            str(p)
-            for p in paths
-            if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp", "bmp"]
-        ]
-        if not img_paths:
-            return
-
-        config = self.data_mgr.data.get("external_tools", {})
-        gui_path_str = config.get("image_splitter_path")
-
-        if gui_path_str:
-            gui_path = pathlib.Path(gui_path_str)
-        else:
-            gui_path = (
-                pathlib.Path(__file__).parent.parent
-                / "image_process"
-                / "image_splitter"
-                / "gui.py"
-            )
-
-        if gui_path.exists() and gui_path.is_file():
-            subprocess.Popen([sys.executable, str(gui_path)] + img_paths)
-        else:
-            self.show_status("图像处理器未配置或不存在，请在设置中配置路径", is_error=True)
 
     def ctx_move_file(self) -> None:
         """Moves the selected file(s) to another directory."""

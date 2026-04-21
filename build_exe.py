@@ -1,7 +1,10 @@
 try:
     import PyInstaller.__main__
 except ImportError:
-    print("Error: PyInstaller is not installed. Please run 'pip install pyinstaller' to use this build script.")
+    print(
+        "Error: PyInstaller is not installed. "
+        "Run 'pip install .[build]' or 'pip install pyinstaller' first."
+    )
     import sys
     sys.exit(1)
 import os

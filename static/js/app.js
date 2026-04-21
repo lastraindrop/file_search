@@ -1,4 +1,33 @@
 const App = {
+    config: {
+        storageKeys: {
+            excludes: 'searchExcludes',
+            mode: 'searchMode',
+            includeDirs: 'searchIncludeDirs',
+            caseSensitive: 'searchCaseSensitive',
+            inverse: 'searchInverse',
+            sidebarExpanded: 'sidebarExpanded',
+            lastProjectPath: 'lastProjectPath'
+        },
+        ui: {
+            searchDebounceMs: 400,
+            sidebarWidths: {
+                collapsed: '60px',
+                expanded: '210px'
+            }
+        },
+        defaults: {
+            archiveName: 'context_backup.zip',
+            tokenThreshold: 128000,
+            tokenRatio: 4
+        },
+        endpoints: {
+            workspaces: '/api/workspaces',
+            openProject: '/api/open',
+            openPathInOs: '/api/fs/open_os'
+        }
+    },
+
     state: {
         projectPath: "",
         staging: new Set(),
@@ -11,7 +40,9 @@ const App = {
         projConfig: {},
         collectionProfiles: {},
         isSidebarExpanded: false,
-        activePid: null
+        activePid: null,
+        actionModalHandler: null,
+        globalSettings: {}
     },
 
     escapeHtml: (str) => {
@@ -69,7 +100,10 @@ const App = {
         let searchTimer;
         searchInput.addEventListener('input', (e) => {
             clearTimeout(searchTimer);
-            searchTimer = setTimeout(() => App.startSearch(), 400);
+            searchTimer = setTimeout(
+                () => App.startSearch(),
+                App.config.ui.searchDebounceMs
+            );
         });
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
@@ -127,35 +161,63 @@ const App = {
         });
 
         // Restore search settings from localStorage
-        const savedExcludes = localStorage.getItem('searchExcludes');
+        const savedExcludes = localStorage.getItem(App.config.storageKeys.excludes);
         const excludeIn = document.getElementById('excludeInput');
         if (savedExcludes && excludeIn) excludeIn.value = savedExcludes;
-        const savedMode = localStorage.getItem('searchMode');
+        const savedMode = localStorage.getItem(App.config.storageKeys.mode);
         if (savedMode) document.getElementById('searchMode').value = savedMode;
+        App.restoreSearchUiState();
+        ['searchMode', 'searchIncludeDirs', 'searchCaseSensitive', 'searchInverse', 'excludeInput']
+            .forEach((id) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('change', () => {
+                    App.persistSearchUiState();
+                    App.updateWorkspaceSummary();
+                });
+            });
         
         // Restore sidebar state
-        const sidebarState = localStorage.getItem('sidebarExpanded');
+        const sidebarState = localStorage.getItem(App.config.storageKeys.sidebarExpanded);
         if (sidebarState === 'true') App.toggleSidebar();
         
         // Auto-load last project if exists
-        const lastProj = localStorage.getItem('lastProjectPath');
+        const lastProj = localStorage.getItem(App.config.storageKeys.lastProjectPath);
         if (lastProj) {
             document.getElementById('projectPath').value = lastProj;
             App.openProject();
         }
+        const actionConfirm = document.getElementById('actionModalConfirm');
+        if (actionConfirm) {
+            actionConfirm.addEventListener('click', async () => {
+                if (!App.state.actionModalHandler) return;
+                actionConfirm.disabled = true;
+                try {
+                    await App.state.actionModalHandler();
+                } finally {
+                    actionConfirm.disabled = false;
+                }
+            });
+        }
+        App.updateWorkspaceSummary();
     },
 
     // --- Workspace Logic ---
     toggleSidebar: () => {
         const sb = document.getElementById('workspaceSidebar');
         App.state.isSidebarExpanded = !App.state.isSidebarExpanded;
-        sb.style.width = App.state.isSidebarExpanded ? '210px' : '60px';
-        localStorage.setItem('sidebarExpanded', App.state.isSidebarExpanded);
+        sb.style.width = App.state.isSidebarExpanded
+            ? App.config.ui.sidebarWidths.expanded
+            : App.config.ui.sidebarWidths.collapsed;
+        localStorage.setItem(
+            App.config.storageKeys.sidebarExpanded,
+            App.state.isSidebarExpanded
+        );
     },
 
     loadWorkspaces: async () => {
         try {
-            const res = await App._fetch('/api/workspaces');
+            const res = await App._fetch(App.config.endpoints.workspaces);
             const data = await res.json();
             App.renderWorkspaces(data);
         } catch (e) { 
@@ -1344,6 +1406,859 @@ const App = {
                 break;
         }
         App.hideContextMenu();
+    },
+
+    updatePinUI: (isPinned) => {
+        const btn = document.getElementById('btnPin');
+        if (!btn) return;
+        btn.innerText = isPinned ? 'Pinned' : 'Pin';
+        btn.classList.toggle('btn-warning', isPinned);
+        btn.classList.toggle('btn-outline-warning', !isPinned);
+    },
+
+    persistSearchUiState: () => {
+        const settings = App.getSearchUiSettings();
+        localStorage.setItem(App.config.storageKeys.excludes, settings.excludes || '');
+        localStorage.setItem(App.config.storageKeys.mode, settings.mode);
+        localStorage.setItem(App.config.storageKeys.includeDirs, settings.includeDirs);
+        localStorage.setItem(App.config.storageKeys.caseSensitive, settings.caseSensitive);
+        localStorage.setItem(App.config.storageKeys.inverse, settings.inverse);
+    },
+
+    restoreSearchUiState: () => {
+        const assignBool = (id, key) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = localStorage.getItem(key) === 'true';
+        };
+        assignBool('searchIncludeDirs', App.config.storageKeys.includeDirs);
+        assignBool('searchCaseSensitive', App.config.storageKeys.caseSensitive);
+        assignBool('searchInverse', App.config.storageKeys.inverse);
+    },
+
+    getSearchUiSettings: () => ({
+        mode: document.getElementById('searchMode').value,
+        includeDirs: document.getElementById('searchIncludeDirs').checked,
+        caseSensitive: document.getElementById('searchCaseSensitive').checked,
+        inverse: document.getElementById('searchInverse').checked,
+        excludes: document.getElementById('excludeInput').value
+    }),
+
+    updateWorkspaceSummary: () => {
+        const projectPath = App.state.projectPath;
+        const projectName = document.getElementById('summaryProjectName');
+        const searchState = document.getElementById('summarySearchState');
+        const stageCount = document.getElementById('summaryStageCount');
+        const favoriteCount = document.getElementById('summaryFavoriteCount');
+        const categoryCount = document.getElementById('summaryCategoryCount');
+        const toolCount = document.getElementById('summaryToolCount');
+
+        if (projectName) {
+            projectName.innerText = projectPath
+                ? projectPath.split(/[\\\/]/).pop()
+                : 'No workspace loaded';
+        }
+
+        if (searchState) {
+            const searchSettings = App.getSearchUiSettings();
+            const parts = [searchSettings.mode];
+            if (searchSettings.includeDirs) parts.push('dirs');
+            if (searchSettings.caseSensitive) parts.push('case');
+            if (searchSettings.inverse) parts.push('inverse');
+            searchState.innerText = projectPath ? parts.join(' | ') : 'Search disabled';
+        }
+
+        if (stageCount) stageCount.innerText = `${App.state.staging.size} staged`;
+
+        const groups = App.state.projConfig.groups || {};
+        const favoriteTotal = Object.values(groups).reduce((acc, items) => acc + items.length, 0);
+        if (favoriteCount) favoriteCount.innerText = `${favoriteTotal} favorites`;
+        if (categoryCount) categoryCount.innerText = `${Object.keys(App.state.projConfig.quick_categories || {}).length} categories`;
+        if (toolCount) toolCount.innerText = `${Object.keys(App.state.projConfig.custom_tools || {}).length} tools`;
+    },
+
+    showActionModal: ({ title, bodyHtml, confirmText = 'Confirm', onConfirm }) => {
+        document.getElementById('actionModalTitle').innerText = title;
+        document.getElementById('actionModalBody').innerHTML = bodyHtml;
+        document.getElementById('actionModalConfirm').innerText = confirmText;
+        App.state.actionModalHandler = onConfirm;
+        new bootstrap.Modal(document.getElementById('actionModal')).show();
+    },
+
+    closeActionModal: () => {
+        const modalEl = document.getElementById('actionModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+        App.state.actionModalHandler = null;
+    },
+
+    loadTreeChildren: async (node, childrenContainer) => {
+        const res = await App._fetch('/api/fs/children', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ path: node.path })
+        });
+        const data = await res.json();
+        childrenContainer.innerHTML = '';
+
+        if (!data.children || data.children.length === 0) {
+            childrenContainer.innerHTML = `
+                <div class="empty-state py-2">
+                    <div class="small text-muted">Empty folder</div>
+                </div>
+            `;
+            return;
+        }
+
+        data.children.forEach((child) => {
+            childrenContainer.appendChild(App.renderTree(child));
+        });
+    },
+
+    renderTree: (node, options = {}) => {
+        const { initialExpand = false } = options;
+        const container = document.createElement('div');
+        container.className = 'ms-1';
+
+        const header = document.createElement('div');
+        header.className = 'tree-node d-flex align-items-center text-truncate animate-in';
+        header.setAttribute('data-path', node.path);
+
+        if (node.type === 'file') {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input me-2 x-small';
+            cb.style.width = '0.8rem';
+            cb.style.height = '0.8rem';
+            cb.checked = App.state.selectedFiles.has(node.path);
+            cb.onclick = (e) => {
+                e.stopPropagation();
+                if (cb.checked) App.state.selectedFiles.add(node.path);
+                else App.state.selectedFiles.delete(node.path);
+                App.updateBulkUI();
+            };
+            header.appendChild(cb);
+        } else {
+            const toggle = document.createElement(node.has_children ? 'button' : 'span');
+            toggle.className = node.has_children ? 'tree-toggle' : 'tree-toggle-spacer';
+            toggle.textContent = node.has_children ? (initialExpand ? '▾' : '▸') : '•';
+            if (node.has_children) {
+                toggle.type = 'button';
+                toggle.tabIndex = -1;
+            }
+            header.appendChild(toggle);
+        }
+
+        const icon = node.type === 'dir' ? 'Folder' : 'File';
+        const metaInfo = node.type === 'file' ? ` (${node.size_fmt})` : '';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'flex-grow-1 text-truncate';
+        nameSpan.innerHTML = `
+            <span class="me-2 text-info-emphasis">${icon}</span>
+            <span>${App.escapeHtml(node.name)}</span>
+            <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}${metaInfo}</span>
+        `;
+        header.appendChild(nameSpan);
+        container.appendChild(header);
+
+        if (node.type === 'dir') {
+            const childrenContainer = document.createElement('div');
+            childrenContainer.className = 'tree-children';
+            childrenContainer.style.display = initialExpand ? 'block' : 'none';
+            if (initialExpand) {
+                childrenContainer.innerHTML = '<div class="small text-muted px-2 py-1">Loading...</div>';
+            }
+            container.appendChild(childrenContainer);
+
+            let loaded = false;
+            const toggleEl = header.querySelector('.tree-toggle');
+            const setExpandedState = (expanded) => {
+                childrenContainer.style.display = expanded ? 'block' : 'none';
+                if (toggleEl) toggleEl.textContent = expanded ? '▾' : '▸';
+            };
+
+            const expandDirectory = async () => {
+                const isHidden = childrenContainer.style.display === 'none';
+                if (isHidden && !loaded) {
+                    try {
+                        await App.loadTreeChildren(node, childrenContainer);
+                        loaded = true;
+                    } catch (err) {
+                        childrenContainer.innerHTML = '<div class="small text-danger px-2 py-1">Failed to load folder.</div>';
+                        App.showToast("Failed to expand directory: " + err.message, 'danger');
+                    }
+                }
+                setExpandedState(isHidden);
+            };
+
+            header.onclick = async (e) => {
+                e.stopPropagation();
+                await expandDirectory();
+            };
+
+            if (initialExpand) {
+                Promise.resolve().then(async () => {
+                    try {
+                        await App.loadTreeChildren(node, childrenContainer);
+                        loaded = true;
+                        setExpandedState(true);
+                    } catch (err) {
+                        childrenContainer.innerHTML = '<div class="small text-danger px-2 py-1">Failed to load folder.</div>';
+                        App.showToast("Failed to load workspace tree: " + err.message, 'danger');
+                    }
+                });
+            }
+        } else {
+            header.onclick = (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+                header.classList.add('active');
+                App.previewFile(node.path);
+            };
+        }
+
+        return container;
+    },
+
+    openProject: async (path = null) => {
+        const p = path || document.getElementById('projectPath').value.trim();
+        if (!p) return;
+
+        try {
+            const res = await App._fetch(App.config.endpoints.openProject, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ path: p })
+            });
+            const data = await res.json();
+
+            App.state.projectPath = p;
+            document.getElementById('projectPath').value = p;
+            localStorage.setItem(App.config.storageKeys.lastProjectPath, p);
+
+            const configRes = await App._fetch(`/api/project/config?path=${encodeURIComponent(p)}`);
+            App.state.projConfig = await configRes.json();
+            App.state.collectionProfiles = App.state.projConfig.collection_profiles || {};
+
+            if (App.state.projConfig.excludes) {
+                document.getElementById('excludeInput').value = App.state.projConfig.excludes;
+            }
+            if (App.state.projConfig.search_settings) {
+                const searchSettings = App.state.projConfig.search_settings;
+                document.getElementById('searchMode').value = searchSettings.mode || 'smart';
+                document.getElementById('searchCaseSensitive').checked = Boolean(searchSettings.case_sensitive);
+                document.getElementById('searchInverse').checked = Boolean(searchSettings.inverse);
+                document.getElementById('searchIncludeDirs').checked = Boolean(searchSettings.include_dirs);
+            }
+            App.persistSearchUiState();
+
+            App.updateTemplateList();
+            App.updateProfileList();
+            App.state.staging = new Set(App.state.projConfig.staging_list || []);
+
+            const rootContainer = document.getElementById('fileTreeRoot');
+            rootContainer.innerHTML = '<div class="small text-muted px-2 py-1">Loading workspace tree...</div>';
+            const rootTree = App.renderTree(data, { initialExpand: true });
+            rootContainer.innerHTML = '';
+            rootContainer.appendChild(rootTree);
+            App.renderStaging();
+            App.renderFavorites();
+            App.renderActions();
+            await App.loadWorkspaces();
+            App.updateWorkspaceSummary();
+
+            App.showToast(`Opened project: ${data.name}`);
+        } catch (e) {
+            App.showToast("Error: " + e.message, 'danger');
+        }
+    },
+
+    saveSettings: async () => {
+        if (!App.state.projectPath) return;
+        try {
+            const searchSettings = App.getSearchUiSettings();
+            await App._fetch('/api/project/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    settings: {
+                        excludes: searchSettings.excludes,
+                        search_settings: {
+                            mode: searchSettings.mode,
+                            case_sensitive: searchSettings.caseSensitive,
+                            inverse: searchSettings.inverse,
+                            include_dirs: searchSettings.includeDirs
+                        }
+                    }
+                })
+            });
+            App.persistSearchUiState();
+        } catch (e) {
+            console.warn("Auto-save settings failed", e);
+        }
+    },
+
+    loadGlobalSettings: async () => {
+        try {
+            const res = await App._fetch('/api/config/global');
+            App.state.globalSettings = await res.json();
+        } catch (e) {
+            console.error("Failed to load global settings", e);
+        }
+    },
+
+    showGlobalSettings: async () => {
+        await App.loadGlobalSettings();
+        const s = App.state.globalSettings || {};
+        document.getElementById('set-preview-limit').value = s.preview_limit_mb || 1;
+        document.getElementById('set-token-threshold').value = s.token_threshold || App.config.defaults.tokenThreshold;
+        document.getElementById('set-token-ratio').value = s.token_ratio || App.config.defaults.tokenRatio;
+        document.getElementById('set-allowed-exts').value = s.allowed_extensions || "";
+        document.getElementById('set-noise-reducer').checked = Boolean(s.enable_noise_reducer);
+        new bootstrap.Modal(document.getElementById('settingsModal')).show();
+    },
+
+    saveGlobalSettings: async () => {
+        const body = {
+            preview_limit_mb: parseFloat(document.getElementById('set-preview-limit').value),
+            token_threshold: parseInt(document.getElementById('set-token-threshold').value || App.config.defaults.tokenThreshold, 10),
+            token_ratio: parseFloat(document.getElementById('set-token-ratio').value || App.config.defaults.tokenRatio),
+            allowed_extensions: document.getElementById('set-allowed-exts').value,
+            enable_noise_reducer: document.getElementById('set-noise-reducer').checked
+        };
+        try {
+            await App._fetch('/api/config/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            App.state.globalSettings = { ...App.state.globalSettings, ...body };
+            App.updateStats();
+            App.showToast("Global settings saved successfully");
+            bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+        } catch (e) {
+            App.showToast("Failed to save settings: " + e.message, 'danger');
+        }
+    },
+
+    saveFileNote: async () => {
+        const note = document.getElementById('noteInput').value.trim();
+        try {
+            await App._fetch('/api/project/note', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    file_path: App.state.currentFile,
+                    note: note
+                })
+            });
+            App.state.projConfig.notes[App.state.currentFile] = note;
+            App.hideFileNote();
+            App.showToast("Note saved", 'success');
+        } catch (e) {
+            App.showToast("Save failed: " + e.message, 'danger');
+        }
+    },
+
+    copyPath: async () => {
+        if (!App.state.currentFile) return;
+        try {
+            await navigator.clipboard.writeText(App.state.currentFile);
+            const btn = document.getElementById('btnCopyPath');
+            const originalText = btn ? btn.innerText : 'Copy Path';
+            if (btn) btn.innerText = 'Copied';
+            setTimeout(() => {
+                if (btn) btn.innerText = originalText;
+            }, 1000);
+            App.showToast("Path copied", 'success');
+        } catch (e) {
+            App.showToast("Failed to copy path", 'danger');
+        }
+    },
+
+    renderStaging: () => {
+        const list = document.getElementById('stagingList');
+        list.innerHTML = '';
+        if (App.state.staging.size === 0) {
+            list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">+</div><div>No staged files yet.</div></div>';
+            App.updateStats();
+            App.updateWorkspaceSummary();
+            return;
+        }
+        App.state.staging.forEach(path => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex justify-content-between p-1 bg-transparent border-0 text-white animate-in';
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'text-truncate small cursor-pointer';
+            nameSpan.title = path;
+            nameSpan.innerText = path.split(/[\\\/]/).pop();
+            nameSpan.onclick = () => App.previewFile(path);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-sm btn-link text-danger p-0 ms-2';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = (e) => { e.stopPropagation(); App.removeFromStaging(path); };
+
+            item.appendChild(nameSpan);
+            item.appendChild(removeBtn);
+            list.appendChild(item);
+        });
+        App.updateStats();
+        App.updateWorkspaceSummary();
+    },
+
+    renderFavorites: () => {
+        const list = document.getElementById('favoritesList');
+        const select = document.getElementById('favGroupSelect');
+        list.innerHTML = '';
+        select.innerHTML = '';
+
+        if (!App.state.projConfig || !App.state.projConfig.groups) {
+            App.updateWorkspaceSummary();
+            return;
+        }
+
+        const groups = Object.keys(App.state.projConfig.groups);
+        groups.forEach((g) => {
+            const opt = document.createElement('option');
+            opt.value = g;
+            opt.innerText = g;
+            select.appendChild(opt);
+        });
+        select.value = App.state.projConfig.current_group || groups[0] || "Default";
+
+        const currentGroup = select.value || "Default";
+        const files = App.state.projConfig.groups[currentGroup] || [];
+        if (files.length === 0) {
+            list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">*</div><div>No favorites in this group.</div></div>';
+            App.updateWorkspaceSummary();
+            return;
+        }
+
+        files.forEach(path => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item bg-transparent text-white border-0 p-2 cursor-pointer hover-bg d-flex justify-content-between align-items-center';
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'text-truncate flex-grow-1';
+            infoDiv.innerHTML = `
+                <div class="fw-bold text-info small">${App.escapeHtml(path.split(/[\\\/]/).pop())}</div>
+                <div class="text-muted" style="font-size:0.75rem">${App.escapeHtml(path)}</div>
+            `;
+            infoDiv.onclick = () => App.previewFile(path);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-sm btn-link text-danger p-0';
+            removeBtn.title = 'Unfavorite';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = (e) => { e.stopPropagation(); App.toggleFavorite(path, 'remove'); };
+
+            item.appendChild(infoDiv);
+            item.appendChild(removeBtn);
+            list.appendChild(item);
+        });
+        App.updateWorkspaceSummary();
+    },
+
+    renderActions: () => {
+        const catContainer = document.getElementById('categoriesContainer');
+        const toolContainer = document.getElementById('toolsContainer');
+        const section = document.getElementById('quickActionsSection');
+
+        catContainer.innerHTML = '';
+        toolContainer.innerHTML = '';
+
+        const cats = App.state.projConfig.quick_categories || {};
+        const tools = App.state.projConfig.custom_tools || {};
+        const catKeys = Object.keys(cats);
+        const toolKeys = Object.keys(tools);
+
+        if (catKeys.length === 0 && toolKeys.length === 0) {
+            section.style.display = 'none';
+            App.updateWorkspaceSummary();
+            return;
+        }
+
+        section.style.display = 'block';
+        catKeys.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-info btn-xs py-0 px-1 x-small';
+            btn.innerText = name;
+            btn.onclick = () => App.categorizeStaged(name);
+            catContainer.appendChild(btn);
+        });
+        toolKeys.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-warning btn-xs py-0 px-1 x-small';
+            btn.innerText = name;
+            btn.onclick = () => App.executeToolOnStaged(name);
+            toolContainer.appendChild(btn);
+        });
+        App.updateWorkspaceSummary();
+    },
+
+    updateStats: async () => {
+        if (App._statsTimer) clearTimeout(App._statsTimer);
+        App._statsTimer = setTimeout(App._updateStatsImpl, 300);
+        App.updateWorkspaceSummary();
+    },
+
+    _updateStatsImpl: async () => {
+        const count = App.state.staging.size;
+        const label = document.getElementById('tokenEstimate');
+        if (!label) return;
+
+        if (count === 0) {
+            label.innerText = "0 Tokens";
+            label.classList.remove('pulse-warning', 'bg-warning', 'bg-danger', 'text-dark');
+            label.classList.add('bg-info');
+            return;
+        }
+
+        try {
+            const res = await App._fetch('/api/project/stats', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paths: Array.from(App.state.staging),
+                    project_path: App.state.projectPath
+                })
+            });
+            const data = await res.json();
+            const threshold = (App.state.globalSettings && App.state.globalSettings.token_threshold)
+                || App.config.defaults.tokenThreshold;
+            label.innerText = `${data.file_count} Files | ${data.total_tokens.toLocaleString()} Tokens`;
+            label.classList.remove('bg-info', 'bg-warning', 'bg-danger', 'pulse-warning', 'text-dark');
+
+            if (data.total_tokens > threshold) {
+                label.classList.add('bg-danger', 'pulse-warning');
+                label.title = "CRITICAL: Token Count Exceeds Budget!";
+            } else if (data.total_tokens > threshold * 0.7) {
+                label.classList.add('bg-warning', 'text-dark');
+                label.title = "Warning: High Token Count";
+            } else {
+                label.classList.add('bg-info');
+                label.title = "Tokens within budget";
+            }
+        } catch (e) {
+            label.innerText = `${count} Items`;
+            label.classList.remove('pulse-warning');
+        }
+    },
+
+    archiveStaging: async () => {
+        if (App.state.staging.size === 0) {
+            App.showToast("Select files first.", 'warning');
+            return;
+        }
+
+        App.showActionModal({
+            title: 'Archive staged files',
+            confirmText: 'Archive',
+            bodyHtml: `
+                <label class="form-label small text-muted">Archive name</label>
+                <input type="text" id="archiveNameInput" class="form-control bg-dark text-white border-secondary"
+                    value="${App.config.defaults.archiveName}">
+            `,
+            onConfirm: async () => {
+                const name = document.getElementById('archiveNameInput').value.trim();
+                if (!name) {
+                    App.showToast("Archive name is required", 'warning');
+                    return;
+                }
+                try {
+                    const btn = document.getElementById('btnArchiveSelection');
+                    const originalText = btn.innerText;
+                    btn.innerText = 'Archiving...';
+                    btn.disabled = true;
+                    await App._fetch('/api/fs/archive', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            paths: Array.from(App.state.staging),
+                            output_name: name,
+                            project_root: App.state.projectPath
+                        })
+                    });
+                    App.closeActionModal();
+                    App.showToast(`Archived to ${name}`, 'success');
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                } catch (e) {
+                    App.showToast(e.message, 'danger');
+                }
+            }
+        });
+    },
+
+    renameFile: async () => {
+        if (!App.state.currentFile) return;
+        const oldName = App.state.currentFile.split(/[\\\/]/).pop();
+        App.showActionModal({
+            title: 'Rename file',
+            confirmText: 'Rename',
+            bodyHtml: `
+                <label class="form-label small text-muted">New name</label>
+                <input type="text" id="renameFileInput" class="form-control bg-dark text-white border-secondary"
+                    value="${App.escapeHtml(oldName)}">
+            `,
+            onConfirm: async () => {
+                const newName = document.getElementById('renameFileInput').value.trim();
+                if (!newName || newName === oldName) {
+                    App.closeActionModal();
+                    return;
+                }
+                try {
+                    await App._fetch('/api/fs/rename', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            project_path: App.state.projectPath,
+                            path: App.state.currentFile,
+                            new_name: newName
+                        })
+                    });
+                    App.closeActionModal();
+                    App.showToast("Renamed successfully");
+                    App.openProject();
+                    App.state.currentFile = null;
+                    document.getElementById('fileControls').style.display = 'none';
+                } catch (e) {
+                    App.showToast("Rename failed: " + e.message, 'danger');
+                }
+            }
+        });
+    },
+
+    deleteFile: async () => {
+        if (!App.state.currentFile) return;
+        App.showActionModal({
+            title: 'Delete file',
+            confirmText: 'Delete',
+            bodyHtml: `<p class="mb-0">Delete <strong>${App.escapeHtml(App.state.currentFile.split(/[\\\/]/).pop())}</strong>? This cannot be undone.</p>`,
+            onConfirm: async () => {
+                try {
+                    await App._fetch('/api/fs/delete', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            project_path: App.state.projectPath,
+                            paths: [App.state.currentFile]
+                        })
+                    });
+                    App.closeActionModal();
+                    App.openProject();
+                    App.state.currentFile = null;
+                    document.getElementById('fileControls').style.display = 'none';
+                    App.showToast("File deleted", 'success');
+                } catch (e) {
+                    App.showToast("Delete failed: " + e.message, 'danger');
+                }
+            }
+        });
+    },
+
+    batchRename: async () => {
+        const files = Array.from(App.state.selectedFiles);
+        if (files.length === 0) return App.showToast("Select files first", 'warning');
+
+        App.showActionModal({
+            title: 'Batch rename',
+            confirmText: 'Preview',
+            bodyHtml: `
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Regex pattern</label>
+                    <input type="text" id="batchRenamePattern" class="form-control bg-dark text-white border-secondary"
+                        placeholder="e.g. ^IMG_(\\d+)">
+                </div>
+                <div class="mb-0">
+                    <label class="form-label small text-muted">Replacement</label>
+                    <input type="text" id="batchRenameReplacement" class="form-control bg-dark text-white border-secondary"
+                        placeholder="e.g. Photo_$1">
+                </div>
+            `,
+            onConfirm: async () => {
+                const pattern = document.getElementById('batchRenamePattern').value;
+                const replacement = document.getElementById('batchRenameReplacement').value;
+                if (!pattern) {
+                    App.showToast("Pattern is required", 'warning');
+                    return;
+                }
+
+                try {
+                    const dryRes = await App._fetch('/api/fs/batch_rename', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            project_path: App.state.projectPath,
+                            paths: files,
+                            pattern,
+                            replacement,
+                            dry_run: true
+                        })
+                    });
+                    const dryData = await dryRes.json();
+                    const previewHtml = dryData.results.map(
+                        (r) => `<div class="small mb-1">${App.escapeHtml(r.old.split(/[\\\/]/).pop())} &rarr; ${App.escapeHtml(r.new.split(/[\\\/]/).pop())} <span class="text-muted">[${App.escapeHtml(r.status)}]</span></div>`
+                    ).join('');
+                    App.showActionModal({
+                        title: 'Confirm batch rename',
+                        confirmText: 'Rename',
+                        bodyHtml: `<div class="small text-muted mb-2">Preview of changes</div>${previewHtml || '<div class="small">No matching files.</div>'}`,
+                        onConfirm: async () => {
+                            await App._fetch('/api/fs/batch_rename', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({
+                                    project_path: App.state.projectPath,
+                                    paths: files,
+                                    pattern,
+                                    replacement,
+                                    dry_run: false
+                                })
+                            });
+                            App.closeActionModal();
+                            App.showToast("Batch rename completed!");
+                            App.state.selectedFiles.clear();
+                            App.updateBulkUI();
+                            App.refreshProject();
+                        }
+                    });
+                } catch (e) {
+                    App.showToast("Batch rename failed: " + e.message, 'danger');
+                }
+            }
+        });
+    },
+
+    startSearch: () => {
+        if (!App.state.projectPath) return;
+        const settings = App.getSearchUiSettings();
+        App.persistSearchUiState();
+        App.updateWorkspaceSummary();
+        const query = document.getElementById('searchInput').value;
+        const tab = new bootstrap.Tab(document.getElementById('tab-search'));
+        tab.show();
+
+        const resultsDiv = document.getElementById('searchResultsList');
+        resultsDiv.innerHTML = '<div class="text-center p-3">Searching...</div>';
+
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${settings.mode}&inverse=${settings.inverse}&case_sensitive=${settings.caseSensitive}&include_dirs=${settings.includeDirs}`;
+
+        App.state.socket = new WebSocket(wsUrl);
+        App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };
+        App.state.socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.status === "DONE") {
+                const count = resultsDiv.querySelectorAll('[data-path]').length;
+                if (count === 0) {
+                    resultsDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">?</div><div>No results found.</div></div>';
+                } else {
+                    const footer = document.createElement('div');
+                    footer.className = 'text-center p-2 text-muted x-small border-top';
+                    footer.innerText = `${count} results found`;
+                    resultsDiv.appendChild(footer);
+                }
+                return App.state.socket.close();
+            }
+            if (data.status === "ERROR") {
+                resultsDiv.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
+                return App.state.socket.close();
+            }
+            App.renderSearchResultItem(data);
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        };
+        App.state.socket.onerror = () => {
+            resultsDiv.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
+        };
+    },
+
+    bulkMove: async () => {
+        if (App.state.selectedFiles.size === 0) return;
+        App.showActionModal({
+            title: 'Move selected files',
+            confirmText: 'Move',
+            bodyHtml: `
+                <label class="form-label small text-muted">Destination directory (within the project)</label>
+                <input type="text" id="bulkMoveInput" class="form-control bg-dark text-white border-secondary"
+                    placeholder="Destination directory path">
+            `,
+            onConfirm: async () => {
+                const dstDir = document.getElementById('bulkMoveInput').value.trim();
+                if (!dstDir) return;
+                try {
+                    const res = await App._fetch('/api/fs/move', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            src_paths: Array.from(App.state.selectedFiles),
+                            dst_dir: dstDir
+                        })
+                    });
+                    const data = await res.json();
+                    App.closeActionModal();
+                    App.showToast(`Batch Move: ${data.new_paths.length} items moved.`);
+                    App.state.selectedFiles.clear();
+                    App.updateBulkUI();
+                    App.openProject();
+                } catch (e) {
+                    App.showToast("Move failed: " + e.message, 'danger');
+                }
+            }
+        });
+    },
+
+    generateContext: async () => {
+        if (App.state.staging.size === 0) return;
+        const templateName = document.getElementById('promptTemplate').value;
+        const btn = document.getElementById('btnGenerateContext');
+        const originalText = btn.innerText;
+        btn.innerText = "Generating...";
+        btn.disabled = true;
+
+        try {
+            const format = document.getElementById('exportFormat').value;
+            const res = await App._fetch('/api/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    files: Array.from(App.state.staging),
+                    project_path: App.state.projectPath,
+                    template_name: templateName,
+                    export_format: format
+                })
+            });
+            const data = await res.json();
+            await navigator.clipboard.writeText(data.content);
+            App.showToast("Context copied", 'success');
+        } catch (e) {
+            App.showToast("Failed to generate context: " + e.message, 'danger');
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    },
+
+    openInExplorer: async (path) => {
+        try {
+            await App._fetch(App.config.endpoints.openPathInOs, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    project_path: App.state.projectPath,
+                    path: path
+                })
+            });
+        } catch (e) {
+            App.showToast("Failed to open path: " + e.message, "danger");
+        }
+    },
+
+    openCurrentInExplorer: async () => {
+        if (!App.state.currentFile) return;
+        await App.openInExplorer(App.state.currentFile);
     }
 };
 

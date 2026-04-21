@@ -1,8 +1,8 @@
 # FileCortex v6.2.0 Stable Release (工作区编排助手)
 
-> **版本**: 6.2.0 | **测试**: 143 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.2.0 | **测试**: 160 passed | **代码质量**: Ruff 0 errors
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.2.0 版本引入了 **MCP Server 完整支持**、**XML 导出引擎**、**全局配置框架** 及 **143 项全量审计测试**。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.2.0 版本引入了 **MCP Server 完整支持**、**XML 导出引擎**、**全局配置框架**、**模块化 Web 路由层**、**前端体验增强** 及 **160 项全量审计测试**。
 
 ## 🌟 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -61,7 +61,7 @@
 ## 🚀 快速开始
 
 ### 环境要求
-- Python 3.9+
+- Python 3.10+
 - Windows/macOS/Linux
 
 ### 桌面版
@@ -110,8 +110,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **143 项核心测试**：涵盖 API 契约、核心工具、配置、搜索、安全鲁棒性、格式化等。
-- **测试结果**：143 passed, 0 failed
+- **160 项核心测试**：涵盖 API 契约、核心工具、配置、搜索、安全鲁棒性、格式化，以及前端契约、目录树交互与 WebSocket 参数矩阵等。
+- **测试结果**：160 passed, 0 failed
 
 ### 代码质量检查
 ```bash
@@ -196,7 +196,7 @@ web_app.py              # FastAPI Web 版
 fctx.py                # CLI 工具
 mcp_server.py          # MCP 协议服务器
 
-tests/                  # 测试套件 (143 tests)
+tests/                  # 测试套件 (160 tests)
 ├── conftest.py        # pytest fixtures
 ├── test_*.py         # 各模块测试
 
@@ -218,6 +218,7 @@ pip install -r requirements.txt
 
 ### 重新打包 EXE
 ```bash
+pip install .[build]
 python build_exe.py
 ```
 

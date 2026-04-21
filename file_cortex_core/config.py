@@ -342,7 +342,7 @@ class DataManager:
         """
         try:
             target = PathValidator.norm_path(target_path_str)
-            for p_root in self.data["projects"]:
+            for p_root in sorted(self.data["projects"], key=len, reverse=True):
                 if target == p_root or target.startswith(p_root.rstrip("/") + "/"):
                     return p_root
         except Exception:

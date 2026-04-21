@@ -6,11 +6,8 @@
     <meta name="description" content="FileCortex - AI-powered workspace orchestration and file management tool for developers">
     <meta name="keywords" content="FileCortex, file manager, workspace, AI context, developer tool">
     <title>FileCortex v6.2.0 Production | Workspace Orchestrator</title>
-    <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
-    <!-- Highlight.js (Monokai Theme) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai-sublime.min.css" crossorigin="anonymous">
-    <!-- Custom CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -19,56 +16,74 @@
             <strong>JavaScript Required:</strong> This application requires JavaScript to function. Please enable it in your browser settings.
         </div>
     </noscript>
-    <div class="container-fluid vh-100 d-flex flex-column p-0">
-        <!-- Top Navigation -->
+
+    <div class="container-fluid app-shell vh-100 d-flex flex-column p-0">
         <nav class="navbar navbar-expand-lg navbar-dark px-3 py-2 flex-shrink-0">
             <a class="navbar-brand fw-bold" href="#" style="color: var(--accent); letter-spacing: -0.5px;">
-                <span class="me-1">💠</span> FileCortex <span class="badge bg-secondary text-white smaller ms-1" style="font-size: 0.6rem; vertical-align: middle; opacity: 0.8;">v6.2.0 Production</span>
+                FileCortex
+                <span class="badge bg-secondary text-white smaller ms-1" style="font-size: 0.6rem; vertical-align: middle; opacity: 0.8;">
+                    v6.2.0 Production
+                </span>
             </a>
-            <div class="d-flex ms-auto gap-2">
-                <input type="text" id="projectPath" class="form-control form-control-sm" placeholder="Full Project Path" style="width: 300px;">
-                <button id="btnPin" class="btn btn-outline-warning btn-sm" onclick="App.togglePin()" title="Pin Workspace">☆</button>
-                <button class="btn btn-outline-light btn-sm" onclick="App.showGlobalSettings()" title="Global Settings">⚙️</button>
+            <div class="d-flex ms-auto gap-2 flex-wrap justify-content-end">
+                <input type="text" id="projectPath" class="form-control form-control-sm" placeholder="Full Project Path" style="width: 320px;">
+                <button id="btnPin" class="btn btn-outline-warning btn-sm" onclick="App.togglePin()" title="Pin Workspace">Pin</button>
+                <button class="btn btn-outline-light btn-sm" onclick="App.showGlobalSettings()" title="Global Settings">Settings</button>
                 <button class="btn btn-primary btn-sm px-3" onclick="App.openProject()">Open</button>
-                <button class="btn btn-outline-light btn-sm" onclick="App.refreshProject()" title="Refresh Project">🔄</button>
+                <button class="btn btn-outline-light btn-sm" onclick="App.refreshProject()" title="Refresh Project">Refresh</button>
             </div>
         </nav>
 
-        <!-- Bulk Actions -->
+        <section id="workspaceSummaryBar" class="summary-bar flex-shrink-0 px-3 py-2 border-bottom">
+            <div class="summary-primary">
+                <div class="summary-title-group">
+                    <span class="summary-label">Workspace</span>
+                    <strong id="summaryProjectName">No workspace loaded</strong>
+                </div>
+                <div class="summary-title-group">
+                    <span class="summary-label">Search</span>
+                    <strong id="summarySearchState">Search disabled</strong>
+                </div>
+            </div>
+            <div class="summary-metrics">
+                <span class="summary-chip" id="summaryStageCount">0 staged</span>
+                <span class="summary-chip" id="summaryFavoriteCount">0 favorites</span>
+                <span class="summary-chip" id="summaryCategoryCount">0 categories</span>
+                <span class="summary-chip" id="summaryToolCount">0 tools</span>
+            </div>
+        </section>
+
         <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light" style="display:none !important;">
             <div>
                 <input type="checkbox" id="selectAllCb" class="form-check-input me-1" onchange="App.toggleSelectAll(this.checked)">
                 <small id="selectedCount" class="fw-bold text-primary">0</small>
             </div>
             <div class="btn-group btn-group-sm">
-                <button class="btn btn-outline-secondary" onclick="App.bulkMove()" title="Batch Move">✂️</button>
-                <button class="btn btn-outline-warning" onclick="App.batchRename()" title="Batch Regex Rename">✏️</button>
-                <button class="btn btn-outline-danger" onclick="App.bulkDelete()" title="Batch Delete">🗑️</button>
-                <button class="btn btn-outline-success" onclick="App.bulkStage()" title="Batch Stage">⬇</button>
+                <button class="btn btn-outline-secondary" onclick="App.bulkMove()" title="Batch Move">Move</button>
+                <button class="btn btn-outline-warning" onclick="App.batchRename()" title="Batch Regex Rename">Rename</button>
+                <button class="btn btn-outline-danger" onclick="App.bulkDelete()" title="Batch Delete">Delete</button>
+                <button class="btn btn-outline-success" onclick="App.bulkStage()" title="Batch Stage">Stage</button>
             </div>
         </div>
 
-        <!-- Main Workspace -->
-        <div class="row g-0 flex-grow-1 overflow-hidden">
-            
-            <!-- Sidebar: Recent Projects & Sessions -->
-            <div id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="width: 60px; transition: width 0.3s;">
-                <button class="btn btn-outline-light btn-sm mb-3" onclick="App.toggleSidebar()" title="Toggle Sidebar">☰</button>
+        <div class="row g-0 flex-grow-1 overflow-hidden app-main-row">
+            <aside id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="width: 60px; transition: width 0.3s;">
+                <button class="btn btn-outline-light btn-sm mb-3" onclick="App.toggleSidebar()" title="Toggle Sidebar">View</button>
+                <div class="sidebar-section-label">Pinned</div>
                 <div id="pinnedProjectsList" class="d-flex flex-column gap-2 mb-2 border-bottom pb-2"></div>
+                <div class="sidebar-section-label">Recent</div>
                 <div id="recentProjectsList" class="d-flex flex-column gap-2 overflow-auto"></div>
-            </div>
+            </aside>
 
-            <!-- Left Panel: File Browser & Search -->
-            <div class="col-md-3 glass-panel border-end d-flex flex-column h-100">
-                <!-- Search Box -->
+            <section class="col-md-3 glass-panel border-end d-flex flex-column h-100 panel-left">
                 <div class="p-3 border-bottom">
                     <div class="input-group input-group-sm mb-2">
-                        <span class="input-group-text bg-transparent border-end-0 text-muted">🔍</span>
-                        <input type="text" id="searchInput" class="form-control border-start-0" placeholder="Search files...">
+                        <span class="input-group-text bg-transparent border-end-0 text-muted">Find</span>
+                        <input type="text" id="searchInput" class="form-control border-start-0" placeholder="Search files or content...">
                     </div>
                     <div class="input-group input-group-sm mb-2">
-                        <span class="input-group-text bg-transparent border-end-0 text-muted">🚫</span>
-                        <input type="text" id="excludeInput" class="form-control border-start-0" placeholder="Excludes (comma separated)...">
+                        <span class="input-group-text bg-transparent border-end-0 text-muted">Skip</span>
+                        <input type="text" id="excludeInput" class="form-control border-start-0" placeholder="Exclude patterns...">
                     </div>
                     <div class="d-flex gap-2">
                         <select id="searchMode" class="form-select form-select-sm">
@@ -79,18 +94,31 @@
                         </select>
                         <button class="btn btn-primary btn-sm px-3" onclick="App.startSearch()">Find</button>
                     </div>
+                    <div class="search-option-grid mt-2">
+                        <label class="form-check search-option mb-0">
+                            <input class="form-check-input" type="checkbox" id="searchIncludeDirs">
+                            <span class="form-check-label">Include folders</span>
+                        </label>
+                        <label class="form-check search-option mb-0">
+                            <input class="form-check-input" type="checkbox" id="searchCaseSensitive">
+                            <span class="form-check-label">Case sensitive</span>
+                        </label>
+                        <label class="form-check search-option mb-0">
+                            <input class="form-check-input" type="checkbox" id="searchInverse">
+                            <span class="form-check-label">Inverse match</span>
+                        </label>
+                    </div>
                 </div>
 
-                <!-- Tabs -->
                 <ul class="nav nav-tabs nav-fill" id="leftTabs" role="tablist">
                     <li class="nav-item">
-                        <button class="nav-link active py-2" id="tab-tree" data-bs-toggle="tab" data-bs-target="#panel-tree" type="button">📁 Files</button>
+                        <button class="nav-link active py-2" id="tab-tree" data-bs-toggle="tab" data-bs-target="#panel-tree" type="button">Files</button>
                     </li>
                     <li class="nav-item">
                         <button class="nav-link py-2" id="tab-search" data-bs-toggle="tab" data-bs-target="#panel-search" type="button">Results</button>
                     </li>
                     <li class="nav-item">
-                        <button class="nav-link py-2" id="tab-fav" data-bs-toggle="tab" data-bs-target="#panel-fav" type="button">⭐ Favs</button>
+                        <button class="nav-link py-2" id="tab-fav" data-bs-toggle="tab" data-bs-target="#panel-fav" type="button">Favorites</button>
                     </li>
                 </ul>
 
@@ -108,27 +136,26 @@
                         <div id="favoritesList" class="list-group list-group-flush small"></div>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <!-- Center Panel: Preview & Info -->
-            <div class="col-md-6 d-flex flex-column h-100">
+            <main class="col-md-6 d-flex flex-column h-100 panel-center">
                 <div class="p-2 border-bottom d-flex justify-content-between align-items-center bg-transparent backdrop-blur">
                     <div class="d-flex align-items-center me-2 overflow-hidden">
                         <span id="currentFileName" class="fw-bold text-truncate text-muted italic" style="max-width: 300px;">Waiting for selection...</span>
                         <div id="fileTags" class="ms-2 d-flex gap-1"></div>
                     </div>
                     <div id="fileControls" class="btn-group btn-group-sm" style="display:none;">
-                        <button class="btn btn-outline-success" onclick="App.addToStaging()" title="Add to Staging">⬇ Add</button>
-                        <button class="btn btn-outline-warning" onclick="App.addToFavorites()" title="Add to Favorites">⭐</button>
-                        <button class="btn btn-outline-info" onclick="App.showFileNote()" title="Notes">📝</button>
-                        <button class="btn btn-outline-light" onclick="App.copyPath()" title="Copy Full Path">🔗</button>
-                        <button class="btn btn-outline-light" onclick="App.renameFile()">✏️</button>
-                        <button class="btn btn-outline-danger" onclick="App.deleteFile()">🗑️</button>
+                        <button class="btn btn-outline-success" onclick="App.addToStaging()" title="Add to Staging">Stage</button>
+                        <button class="btn btn-outline-warning" onclick="App.addToFavorites()" title="Add to Favorites">Favorite</button>
+                        <button class="btn btn-outline-info" onclick="App.showFileNote()" title="Notes">Notes</button>
+                        <button class="btn btn-outline-light" id="btnCopyPath" onclick="App.copyPath()" title="Copy Full Path">Copy Path</button>
+                        <button class="btn btn-outline-light" id="btnOpenExternal" onclick="App.openCurrentInExplorer()" title="Open in Explorer">Open</button>
+                        <button class="btn btn-outline-light" onclick="App.renameFile()">Rename</button>
+                        <button class="btn btn-outline-danger" onclick="App.deleteFile()">Delete</button>
                         <button class="btn btn-primary" id="btnEditSave" onclick="App.toggleEdit()">Edit</button>
                     </div>
                 </div>
 
-                <!-- Note Overlay -->
                 <div id="noteOverlay" class="glass-panel p-3 m-3 position-absolute start-0 end-0 translate-middle-y shadow-lg" style="display:none; z-index:100; top: 100px;">
                     <h6>File Notes</h6>
                     <textarea id="noteInput" class="form-control mb-2" rows="3"></textarea>
@@ -142,74 +169,70 @@
                     <pre class="m-0 h-100" id="preBlock"><code id="codePreview" class="hljs h-100 d-block p-4"></code></pre>
                     <textarea id="codeEditor" class="form-control w-100 h-100 border-0 rounded-0 p-4" style="display:none; background:#0a0a0a; color:#e2e8f0; resize:none;"></textarea>
                 </div>
-            </div>
+            </main>
 
-            <!-- Right Panel: Staging -->
-            <div class="col-md-2 glass-panel border-start d-flex flex-column h-100">
+            <section class="col-md-2 glass-panel border-start d-flex flex-column h-100 panel-right">
                 <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
-                    <h6 class="m-0 fw-bold">🛒 Staging</h6>
+                    <h6 class="m-0 fw-bold">Staging</h6>
                     <div class="d-flex gap-1 align-items-center">
-                        <button class="btn btn-outline-info btn-sm py-0 px-1" onclick="App.stageAll()" title="Stage All Files">⬇ All</button>
+                        <button class="btn btn-outline-info btn-sm py-0 px-1" onclick="App.stageAll()" title="Stage All Files">Stage All</button>
                         <button class="btn btn-link text-muted p-0 text-decoration-none x-small" onclick="App.clearStaging()" title="Clear Staging List">Clear</button>
                     </div>
                     <span id="tokenEstimate" class="badge bg-info">0 Tokens</span>
                 </div>
                 <div class="flex-grow-1 overflow-auto p-2">
                     <div id="stagingList" class="list-group list-group-flush small mb-3"></div>
-                    
-                    <!-- Quick Actions Section -->
+
                     <div id="quickActionsSection" style="display:none;">
                         <hr class="text-muted">
-                        <h6 class="small fw-bold text-muted mb-2">⚡ Quick Categorize</h6>
+                        <h6 class="small fw-bold text-muted mb-2">Quick Categorize</h6>
                         <div id="categoriesContainer" class="d-flex flex-wrap gap-1 mb-3"></div>
-                        
-                        <h6 class="small fw-bold text-muted mb-2">🛠️ Custom Tools</h6>
+
+                        <h6 class="small fw-bold text-muted mb-2">Custom Tools</h6>
                         <div id="toolsContainer" class="d-flex flex-wrap gap-1"></div>
                     </div>
                 </div>
                 <div class="p-3 border-top">
                     <div class="mb-2 d-flex gap-2">
                         <div class="flex-grow-1">
-                             <label class="small text-muted mb-1">📋 Format</label>
-                             <select id="exportFormat" class="form-select form-select-sm bg-dark text-white border-secondary">
-                                 <option value="markdown">Markdown</option>
-                                 <option value="xml">XML (Optimized for LLMs)</option>
-                             </select>
+                            <label class="small text-muted mb-1">Export Format</label>
+                            <select id="exportFormat" class="form-select form-select-sm bg-dark text-white border-secondary">
+                                <option value="markdown">Markdown</option>
+                                <option value="xml">XML (Optimized for LLMs)</option>
+                            </select>
                         </div>
                     </div>
                     <div class="mb-2">
-                        <label class="small text-muted mb-1">📜 Prompt Template</label>
+                        <label class="small text-muted mb-1">Prompt Template</label>
                         <select id="promptTemplate" class="form-select form-select-sm bg-dark text-white border-secondary">
                             <option value="">None (Standard)</option>
                         </select>
                     </div>
-                    <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="App.archiveStaging()">📦 Archive Selection</button>
-                    <button class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="App.showPathCollector()">🔗 Copy Paths</button>
-                    <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" onclick="App.generateContext()">🚀 Copy Context</button>
+                    <button class="btn btn-outline-info btn-sm w-100 mb-2" id="btnArchiveSelection" onclick="App.archiveStaging()">Archive Selection</button>
+                    <button class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="App.showPathCollector()">Copy Paths</button>
+                    <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" id="btnGenerateContext" onclick="App.generateContext()">Copy Context</button>
                 </div>
-            </div>
+            </section>
         </div>
     </div>
-    <!-- Toast Container -->
+
     <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1055;"></div>
 
-    <!-- Custom Context Menu -->
     <div id="customContextMenu" class="context-menu glass-panel" style="display:none; position:fixed; z-index:2000;">
-        <div class="context-item" onclick="App.ctxAction('stage')">⬇ Add to Staging</div>
-        <div class="context-item" onclick="App.ctxAction('fav')">⭐ Add to Favorites</div>
+        <div class="context-item" onclick="App.ctxAction('stage')">Add to Staging</div>
+        <div class="context-item" onclick="App.ctxAction('fav')">Add to Favorites</div>
         <div class="context-separator"></div>
-        <div class="context-item" onclick="App.ctxAction('copyPath')">🔗 Copy Full Path</div>
-        <div class="context-item" onclick="App.ctxAction('openOs')">📁 Open in Explorer</div>
+        <div class="context-item" onclick="App.ctxAction('copyPath')">Copy Full Path</div>
+        <div class="context-item" onclick="App.ctxAction('openOs')">Open in Explorer</div>
         <div class="context-separator"></div>
-        <div class="context-item text-danger" onclick="App.ctxAction('delete')">🗑️ Delete File</div>
+        <div class="context-item text-danger" onclick="App.ctxAction('delete')">Delete File</div>
     </div>
 
-    <!-- Keyboard Shortcuts Modal -->
     <div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content glass-panel text-white border-secondary">
                 <div class="modal-header border-bottom border-secondary">
-                    <h5 class="modal-title">⌨️ Keyboard Shortcuts</h5>
+                    <h5 class="modal-title">Keyboard Shortcuts</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -223,12 +246,11 @@
         </div>
     </div>
 
-    <!-- Tool Execution Result Modal -->
     <div class="modal fade" id="toolResultModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content glass-panel text-white">
           <div class="modal-header border-bottom border-secondary">
-            <h5 class="modal-title" id="toolResultModalLabel">🔧 Tool Execution Results</h5>
+            <h5 class="modal-title" id="toolResultModalLabel">Tool Execution Results</h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-0" id="toolResultModalBody" style="background: #0a0a0a; border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);">
@@ -236,12 +258,12 @@
         </div>
       </div>
     </div>
-    <!-- Path Collection Modal -->
+
     <div class="modal fade" id="pathCollectorModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content glass-panel text-white">
           <div class="modal-header border-bottom border-secondary">
-            <h5 class="modal-title">🧬 Path Collection & Formatting</h5>
+            <h5 class="modal-title">Path Collection & Formatting</h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-4">
@@ -290,24 +312,31 @@
           </div>
           <div class="modal-footer border-top border-secondary">
             <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancel</button>
-            <button type="button" class="btn btn-sm btn-primary px-4" onclick="App.collectPaths()">✅ Copy Results</button>
+            <button type="button" class="btn btn-sm btn-primary px-4" onclick="App.collectPaths()">Copy Results</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Settings Modal -->
     <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content glass-panel text-white">
           <div class="modal-header border-bottom border-secondary">
-            <h5 class="modal-title">⚙️ Global Settings</h5>
+            <h5 class="modal-title">Global Settings</h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-4" id="settingsModalBody">
              <div class="mb-3">
                 <label class="form-label small text-muted">Preview Limit (MB)</label>
                 <input type="number" id="set-preview-limit" class="form-control form-control-sm bg-dark text-white border-secondary">
+             </div>
+             <div class="mb-3">
+                <label class="form-label small text-muted">Token Warning Threshold</label>
+                <input type="number" id="set-token-threshold" class="form-control form-control-sm bg-dark text-white border-secondary">
+             </div>
+             <div class="mb-3">
+                <label class="form-label small text-muted">Token Ratio</label>
+                <input type="number" step="0.1" id="set-token-ratio" class="form-control form-control-sm bg-dark text-white border-secondary">
              </div>
              <div class="mb-3">
                 <label class="form-label small text-muted">Allowed Extensions (comma sep)</label>
@@ -325,13 +354,28 @@
         </div>
       </div>
     </div>
+
+    <div class="modal fade" id="actionModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content glass-panel text-white">
+          <div class="modal-header border-bottom border-secondary">
+            <h5 class="modal-title" id="actionModalTitle">Action</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-4" id="actionModalBody"></div>
+          <div class="modal-footer border-top border-secondary">
+            <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-sm btn-primary" id="actionModalConfirm">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" crossorigin="anonymous"></script>
-    <!-- Markdown & Mermaid -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js" crossorigin="anonymous"></script>
     <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
-    <!-- Custom App Logic -->
     <script src="/static/js/app.js"></script>
 </body>
 </html>

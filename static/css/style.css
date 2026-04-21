@@ -25,6 +25,68 @@ body {
     overflow: hidden;
 }
 
+.app-shell {
+    min-height: 100vh;
+}
+
+.summary-bar {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+    background: rgba(2, 6, 23, 0.55);
+    backdrop-filter: blur(14px);
+}
+
+.summary-primary,
+.summary-metrics {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.summary-title-group {
+    display: flex;
+    gap: 0.45rem;
+    align-items: baseline;
+}
+
+.summary-label,
+.sidebar-section-label {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.summary-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 0.78rem;
+}
+
+.search-option-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.search-option {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    padding: 0.45rem 0.55rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.8rem;
+}
+
 /* Glassmorphism Panels */
 .glass-panel {
     background: var(--panel-bg);
@@ -53,6 +115,34 @@ body {
     border: 1px solid transparent;
     display: flex;
     align-items: center;
+}
+
+.tree-toggle,
+.tree-toggle-spacer {
+    width: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0.25rem;
+    color: var(--text-muted);
+    flex: 0 0 1.25rem;
+}
+
+.tree-toggle {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+}
+
+.tree-toggle:hover {
+    color: var(--accent);
+}
+
+.tree-children {
+    margin-left: 1.35rem;
+    border-left: 1px dashed rgba(255, 255, 255, 0.08);
+    padding-left: 0.35rem;
 }
 
 .tree-node:hover, .staging-item:hover {
@@ -236,4 +326,39 @@ body {
 .drag-over {
     border: 2px dashed var(--accent) !important;
     background: var(--accent-dim) !important;
+}
+
+@media (max-width: 991px) {
+    body {
+        overflow: auto;
+        height: auto;
+    }
+
+    .app-main-row {
+        overflow: visible !important;
+    }
+
+    #workspaceSidebar {
+        width: 100% !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid var(--border);
+        flex-direction: row !important;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .summary-bar,
+    .summary-primary,
+    .summary-metrics,
+    .search-option-grid {
+        grid-template-columns: 1fr;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .panel-left,
+    .panel-center,
+    .panel-right {
+        min-height: 30vh;
+    }
 }

@@ -1,4 +1,5 @@
 import os
+import pathlib
 import threading
 
 import pytest
@@ -16,6 +17,13 @@ def test_dm_singleton_and_defaults(clean_config):
     assert dm is dm2
     assert "global_settings" in dm.data
     assert isinstance(dm.data["projects"], dict)
+
+def test_core_exports_include_get_app_dir():
+    """Public package exports should include get_app_dir consistently."""
+    import file_cortex_core
+
+    assert hasattr(file_cortex_core, "get_app_dir")
+    assert isinstance(file_cortex_core.get_app_dir(), pathlib.Path)
 
 # -----------------------------------------------------------------------------
 # 2. Persistence Symmetry & Atomicity (C3)

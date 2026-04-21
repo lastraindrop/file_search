@@ -1,8 +1,80 @@
 # FileCortex v6.2.0 Comprehensive Development Plan
 
-> **Date**: 2026-04-20
-> **Status**: Active Development Phase
-> **Test Results Baseline**: 76 passed, 4 failed / 80 total
+> Refresh 2026-04-21
+> Latest validated baseline: `160 passed` (`python -m pytest`)
+> Scope of this refresh:
+> 1. Correct stale baseline and stale defect claims from earlier drafts.
+> 2. Prioritize structural hardening over feature sprawl.
+> 3. Align roadmap with the actual product shape: local-first workspace orchestration plus AI context packaging.
+
+## 0. Current Reality Check
+
+### 0.1 What the project is today
+
+FileCortex is already a usable lightweight system with four delivery surfaces:
+
+- Desktop GUI: `file_search.py`
+- Web API/UI: `web_app.py` + `templates/` + `static/`
+- CLI: `fctx.py`
+- MCP-facing bridge: `mcp_server.py`
+
+The shared kernel is `file_cortex_core/`, which is the correct long-term center of gravity.
+
+### 0.2 Verified baseline
+
+- Automated regression status: `160 passed`
+- Static lint status: `ruff check .` clean
+- Current packaging/runtime mismatch still existed before this refresh:
+  - `README.md` claimed Python `3.9+` while `pyproject.toml` required `>=3.10`
+  - `pyinstaller` was declared as a runtime dependency even though it is a build-only tool
+  - `pytest.ini` forced a fixed repository-local `basetemp`, which is fragile across environments and CI/sandbox setups
+
+### 0.3 Confirmed engineering issues to address first
+
+- Monolithic entrypoints:
+  - `web_app.py` has now been reduced to an app-composition layer, with HTTP/WebSocket routes moved under `routers/`
+  - `file_search.py` is still a very large GUI/controller file
+- Export/API contract issues:
+  - `file_cortex_core.__all__` exposed `get_app_dir` without importing it
+- Security and consistency gaps:
+  - create/rename operations needed core-level single-segment name validation
+  - some API endpoints swallowed `HTTPException` and changed intended `403` results into generic `400/500`
+  - CORS middleware was configured with wildcard origins at app startup, while origin restrictions were only partially enforced in token middleware
+- Workspace resolution edge case:
+  - nested workspace resolution should prefer the most specific registered root
+
+### 0.4 Execution order for the current phase
+
+1. Stabilize core correctness and API semantics.
+2. Remove environment-specific packaging/test pitfalls.
+3. Add regression tests for uncovered security/contract cases.
+4. Continue structural decomposition with service extraction and GUI slimming.
+
+### 0.5 Latest increment on 2026-04-21
+
+- Web file tree behavior is now aligned with user expectations:
+  - opening a workspace loads the first directory level immediately
+  - deeper levels remain lazy-loaded
+- Desktop GUI no longer carries the hardcoded image-processor action:
+  - the old dedicated action was removed
+  - context-menu tool execution is now driven by `custom_tools`
+- Desktop GUI staging flow is now directly reachable from the file tree:
+  - users can right-click project-tree items and add them straight to staging
+  - favorites return to their intended role as organization, not a staging proxy
+- Regression coverage now includes UI/GUI contract safeguards for these changes.
+
+### 0.6 Current short-term plan
+
+1. Consolidate duplicate global settings endpoints into one public contract.
+2. Split `routers/common.py` into runtime, schema, and service layers.
+3. Split `static/js/app.js` into smaller state/render/action modules.
+4. Continue GUI ergonomics hardening:
+   - batch selection from the project tree
+   - clearer “already staged” state feedback
+   - fewer interaction asymmetries between Web and desktop
+5. Keep parameter-consistency tests as a release gate whenever search or settings schemas change.
+
+> Historical starting baseline on 2026-04-20: `76 passed, 4 failed / 80 total`
 
 ---
 
@@ -59,12 +131,12 @@ The project uses a **Microkernel (Plug-in Architecture)** pattern:
 
 | Issue | Severity | Impact | Location |
 |-------|----------|--------|----------|
-| **CRITICAL: `ntpath` not imported in security.py** | P0 | PathValidator.is_safe completely broken for cross-platform path handling | `security.py:33-48` |
-| **Singleton prevents test isolation** | P2 | Hard to test with independent configs | `config.py:142-148` |
-| **Global ACTIVE_PROCESSES dict** | P2 | No lifecycle management, potential memory leak | `web_app.py:56` |
-| **Duplicate API endpoints** | P1 | `/api/config/global` and `/api/global/settings` do same thing | `web_app.py:775-1097` |
-| **file_search.py not reviewed** (2283 LOC) | P2 | Desktop GUI not covered by tests | `file_search.py` |
-| **Empty routers/ directory** | P3 | Dead code | `routers/` |
+| **Desktop GUI controller remains monolithic** | P1 | `file_search.py` still mixes view, event flow, and orchestration logic, which slows maintenance and frontend parity work | `file_search.py` |
+| **Singleton/service-locator usage is still widespread** | P2 | `DataManager` is globally accessed from many entrypoints, reducing explicit dependency boundaries and test flexibility | `config.py`, `web_app.py`, `mcp_server.py` |
+| **Global ACTIVE_PROCESSES registry still lives at module scope** | P2 | Process lifecycle remains implicit and would benefit from a dedicated runtime service with cleanup policy | `routers/common.py`, `routers/http_routes.py` |
+| **Duplicate global-settings endpoints remain** | P2 | `/api/config/global` and `/api/global/settings` overlap and should be consolidated to one public contract | `routers/http_routes.py` |
+| **Shared router support module is getting too broad** | P2 | `routers/common.py` now mixes runtime state, request schemas, and helper functions; next step is split into `runtime`/`schemas`/`services` | `routers/common.py` |
+| **Frontend state layer is still concentrated in one large script** | P2 | `static/js/app.js` now matches the backend better, but it remains a large all-in-one state/controller file | `static/js/app.js` |
 
 ### 1.4 SOLID Compliance
 
@@ -324,7 +396,7 @@ FileCortex is a **local-first AI-augmented workspace orchestrator** that combine
 ## 7. Verification Checklist
 
 - [ ] `ruff check .` returns 0 errors (excluding E501)
-- [ ] `python -m pytest` returns 80/80+ passed, 0 failed
+- [x] `python -m pytest` returns 160 passed, 0 failed
 - [ ] `python web_app.py` starts and serves web UI
 - [ ] `python fctx.py open .` works from project directory
 - [ ] `python mcp_server.py --transport stdio` initializes

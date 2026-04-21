@@ -62,6 +62,14 @@ def test_create_existing_raises(tmp_path):
     with pytest.raises((FileExistsError, OSError)):
         FileOps.create_item(str(tmp_path), "exists.txt", is_dir=False)
 
+def test_create_rejects_path_traversal_name(tmp_path):
+    """Create API helpers should reject traversal or nested names."""
+    with pytest.raises(ValueError):
+        FileOps.create_item(str(tmp_path), "../escape.txt", is_dir=False)
+
+    with pytest.raises(ValueError):
+        FileOps.create_item(str(tmp_path), "nested/file.txt", is_dir=False)
+
 def test_archive_selection(mock_project, tmp_path):
     """Verify ZIP archiving of selected files."""
     files = [str(mock_project / "src" / "main.py"), str(mock_project / "README.md")]

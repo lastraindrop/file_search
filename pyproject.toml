@@ -25,7 +25,6 @@ dependencies = [
     "charset-normalizer>=3.4.0",
     "python-multipart>=0.0.20",
     "httpx>=0.27.0",
-    "pyinstaller>=6.18.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +37,9 @@ dev = [
 ]
 gui = [
     "customtkinter>=5.1.0",
+]
+build = [
+    "pyinstaller>=6.18.0",
 ]
 
 [project.scripts]

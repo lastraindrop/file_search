@@ -75,6 +75,20 @@ class TestDataManagerAdvanced:
         assert root is not None
         assert PathValidator.norm_path(root) == PathValidator.norm_path(p)
 
+    def test_resolve_project_root_prefers_most_specific_match(
+        self, clean_config, mock_project
+    ):
+        """Nested registered projects should resolve to the deepest matching root."""
+        dm = clean_config
+        parent = str(mock_project)
+        child_root = str(mock_project / "src")
+        dm.get_project_data(parent)
+        dm.get_project_data(child_root)
+
+        target = str(mock_project / "src" / "main.py")
+        root = dm.resolve_project_root(target)
+        assert PathValidator.norm_path(root) == PathValidator.norm_path(child_root)
+
     def test_resolve_project_root_unknown_returns_none(self, clean_config):
         """Unregistered path returns None."""
         dm = clean_config

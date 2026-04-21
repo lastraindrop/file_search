@@ -53,8 +53,9 @@ FileCortex 采用 **微内核 + 多端入口** 架构模式：
 所有路径权限及配置读取必须统一经过 `DataManager`。禁止直接读写文件系统或配置字典。
 
 #### 契约自洽性
-- **API 字段强校验**: 任何提供给前端的 API 对象（特别是搜索结果与文件元数据）**必须** 包含 UI 强依赖字段：`abs_path`, `name`, `size_fmt`, `mtime_fmt`, `has_children`。
-- **逻辑动态对齐**: 类似于预览上限 (1MB) 等参数必须从 `global_settings` 动态读取，禁止在代码中出现 `1024*1024` 类的硬编码。
+- **API 字段强校验**: 任何提供给前端的 API 对象（特别是搜索结果与文件元数据）**必须** 包含 UI 强依赖字段：`path`, `name`, `type`, `size_fmt`, `mtime_fmt`, `has_children`。
+- **逻辑动态对齐**: 类似于预览上限、Token 预算、搜索默认参数等必须从 `global_settings` 或项目 `search_settings` 动态读取，禁止在代码中保留与 UI 不一致的硬编码。
+- **交互入口一致**: 桌面 GUI、Web UI 与 CLI 的高频操作必须保持同等级可达性；例如“加入清单”不能只存在于某一个入口或依赖收藏中转。
 - **类型安全**: 任何涉及长度、偏移或切片的操作必须在计算后执行 `int()` 显式转换。
 
 #### Schema 自愈
@@ -327,13 +328,13 @@ class ActionBridge:
 ```python
 class FileNode(BaseModel):
     """文件节点模型"""
-    abs_path: str
+    path: str
     name: str
     size: int
     size_fmt: str
     mtime: float
     mtime_fmt: str
-    is_dir: bool
+    type: str  # "file" | "dir"
     has_children: bool = False
 ```
 

@@ -1,5 +1,5 @@
 from .actions import ActionBridge, FileOps
-from .config import DataManager, logger
+from .config import DataManager, get_app_dir, logger
 from .duplicate import DuplicateWorker
 from .search import SearchWorker, search_generator
 from .security import PathValidator

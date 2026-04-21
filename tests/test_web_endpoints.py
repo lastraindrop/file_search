@@ -17,6 +17,11 @@ def test_content_unauthorized_path(api_client, tmp_path):
     res = api_client.get(f"/api/content?path={str(f)}")
     assert res.status_code == 403
 
+def test_children_unauthorized_path(api_client, tmp_path):
+    """Directory listing outside registered project roots should fail."""
+    res = api_client.post("/api/fs/children", json={"path": str(tmp_path)})
+    assert res.status_code == 403
+
 def test_save_oversized_content(project_client, mock_project):
     """Test the 10MB Pydantic limit (or close to it)."""
     target = str(mock_project / "large.txt")
