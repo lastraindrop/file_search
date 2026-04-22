@@ -35,6 +35,12 @@ def build():
         '--hidden-import=uvicorn.lifespan.on',
         '--hidden-import=pathspec',
         '--hidden-import=charset_normalizer',
+        '--hidden-import=file_cortex_core.gui',
+        '--hidden-import=file_cortex_core.gui.batch_rename',
+        '--hidden-import=file_cortex_core.gui.duplicate_finder',
+        '--hidden-import=file_cortex_core.file_io',
+        '--hidden-import=file_cortex_core.format_utils',
+        '--hidden-import=file_cortex_core.context',
         '--name=FileCortex',
         '--collect-all=file_cortex_core',
         # If you have an icon, uncomment below

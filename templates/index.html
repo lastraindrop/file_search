@@ -208,6 +208,10 @@
                             <option value="">None (Standard)</option>
                         </select>
                     </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="includeBlueprint" checked>
+                        <label class="form-check-label small text-muted" for="includeBlueprint">Include Blueprint</label>
+                    </div>
                     <button class="btn btn-outline-info btn-sm w-100 mb-2" id="btnArchiveSelection" onclick="App.archiveStaging()">Archive Selection</button>
                     <button class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="App.showPathCollector()">Copy Paths</button>
                     <button class="btn btn-primary w-100 py-2 fw-bold pulse-accent" id="btnGenerateContext" onclick="App.generateContext()">Copy Context</button>

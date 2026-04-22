@@ -11,7 +11,7 @@ import queue
 import threading
 
 from .config import logger
-from .utils import FileUtils
+from .file_io import FileUtils
 
 
 class DuplicateWorker(threading.Thread):

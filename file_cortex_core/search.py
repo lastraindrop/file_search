@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .config import logger
-from .utils import FileUtils
+from .file_io import FileUtils
 
 MAX_SEARCH_RESULTS = 5000
 DEFAULT_BATCH_SIZE = 40
@@ -380,9 +380,6 @@ class SearchWorker(threading.Thread):
             positive_tags=self.positive_tags,
             negative_tags=self.negative_tags,
         )
-        if gen is None:
-            self.result_queue.put(("DONE", "DONE"))
-            return
         try:
             for result in gen:
                 if self.stop_event.is_set():

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Utility modules for FileCortex.
-
-Provides file operations, formatting utilities, and context generation.
+"""File I/O utilities for FileCortex.
 """
 
-import datetime
 import fnmatch
 import os
 import pathlib
@@ -14,133 +11,7 @@ from typing import Any
 import pathspec
 
 from .config import logger
-
-
-class FormatUtils:
-    """Utility class for formatting values."""
-
-    @staticmethod
-    def format_number(val: float | int) -> str:
-        """Formats a number with thousands separator.
-
-        Args:
-            val: The number to format.
-
-        Returns:
-            Formatted string with comma separators.
-        """
-        try:
-            return f"{int(val):,}"
-        except (ValueError, TypeError):
-            return str(val)
-
-    @staticmethod
-    def format_size(size_bytes: int) -> str:
-        """Formats a byte size into human-readable string.
-
-        Args:
-            size_bytes: Size in bytes.
-
-        Returns:
-            Formatted size string (B, KB, MB, GB).
-        """
-        if size_bytes < 0:
-            return "0 B"
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-
-    @staticmethod
-    def format_datetime(mtime: float) -> str:
-        """Formats a timestamp into a readable date-time string.
-
-        Args:
-            mtime: Unix timestamp.
-
-        Returns:
-            Formatted date-time string.
-        """
-        try:
-            return datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            return ""
-
-    @staticmethod
-    def estimate_tokens(text: str) -> int:
-        """Estimates token count for text content.
-
-        Uses weighted calculation:
-        - ASCII/Latin characters: ~4 chars per token
-        - Non-ASCII (CJK/Unicode): ~1.5 chars per token
-
-        Args:
-            text: The text to estimate tokens for.
-
-        Returns:
-            Estimated token count.
-        """
-        if not text:
-            return 0
-        non_ascii = sum(1 for c in text if ord(c) > 127)
-        ascii_count = len(text) - non_ascii
-        return int((ascii_count / 4) + (non_ascii / 1.5))
-
-    @staticmethod
-    def collect_paths(
-        paths: list[str],
-        root_dir: str | None = None,
-        mode: str = "relative",
-        separator: str = "\n",
-        file_prefix: str = "",
-        dir_suffix: str = "",
-    ) -> str:
-        """Formats paths into a single string with custom separators.
-
-        Args:
-            paths: List of paths to format.
-            root_dir: Root directory for relative paths.
-            mode: Path mode ('relative' or 'absolute').
-            separator: Separator between paths.
-            file_prefix: Prefix to add to all paths.
-            dir_suffix: Suffix to add to directory paths.
-
-        Returns:
-            Formatted paths string.
-        """
-        sep = separator.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
-
-        formatted = []
-        root = pathlib.Path(root_dir).resolve() if root_dir else None
-
-        for p_str in paths:
-            try:
-                p = pathlib.Path(p_str).resolve()
-                is_dir = p.is_dir()
-
-                if mode == "relative" and root:
-                    if root in p.parents or root == p:
-                        final_p_str = str(p.relative_to(root))
-                    else:
-                        final_p_str = str(p)
-                else:
-                    final_p_str = str(p)
-
-                if is_dir:
-                    if dir_suffix and not final_p_str.endswith(dir_suffix):
-                        final_p_str += dir_suffix
-
-                final_p_str = file_prefix + final_p_str
-
-                formatted.append(final_p_str)
-            except Exception:
-                formatted.append(p_str)
-
-        return sep.join(formatted)
+from .format_utils import FormatUtils
 
 
 class FileUtils:
@@ -187,32 +58,10 @@ class FileUtils:
             return True
 
         text_exts = {
-            ".py",
-            ".js",
-            ".ts",
-            ".html",
-            ".css",
-            ".json",
-            ".md",
-            ".txt",
-            ".yml",
-            ".yaml",
-            ".xml",
-            ".sql",
-            ".c",
-            ".cpp",
-            ".h",
-            ".java",
-            ".go",
-            ".rs",
-            ".sh",
-            ".bat",
-            ".ini",
-            ".cfg",
-            ".toml",
-            ".log",
-            ".env",
-            ".dockerfile",
+            ".py", ".js", ".ts", ".html", ".css", ".json", ".md", ".txt",
+            ".yml", ".yaml", ".xml", ".sql", ".c", ".cpp", ".h", ".java",
+            ".go", ".rs", ".sh", ".bat", ".ini", ".cfg", ".toml", ".log",
+            ".env", ".dockerfile",
         }
         if path.suffix.lower() in text_exts:
             return False
@@ -335,7 +184,7 @@ class FileUtils:
             List of paths.
         """
         root = pathlib.Path(root_dir).resolve()
-        git_spec = FileUtils.get_gitignore_spec(str(root)) if use_gitignore else None
+        git_spec = FileUtils.get_gitignore_spec(root) if use_gitignore else None
         results = []
 
         if mode == "top_folders":
@@ -390,7 +239,7 @@ class FileUtils:
         unique_files = set()
         root = pathlib.Path(root_dir).resolve() if root_dir else None
         git_spec = (
-            FileUtils.get_gitignore_spec(str(root))
+            FileUtils.get_gitignore_spec(root)
             if (root and use_gitignore)
             else None
         )
@@ -501,41 +350,16 @@ class FileUtils:
             Language identifier string.
         """
         mapping = {
-            ".py": "python",
-            ".js": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".jsx": "javascript",
-            ".html": "html",
-            ".css": "css",
-            ".json": "json",
-            ".md": "markdown",
-            ".java": "java",
-            ".c": "c",
-            ".cpp": "cpp",
-            ".h": "cpp",
-            ".cs": "csharp",
-            ".rs": "rust",
-            ".go": "go",
-            ".sql": "sql",
-            ".xml": "xml",
-            ".sh": "bash",
-            ".bat": "batch",
-            ".yml": "yaml",
-            ".yaml": "yaml",
-            ".toml": "toml",
-            ".dockerfile": "dockerfile",
-            "dockerfile": "dockerfile",
-            ".vue": "vue",
-            ".svelte": "svelte",
-            ".php": "php",
-            ".rb": "ruby",
-            ".swift": "swift",
-            ".kt": "kotlin",
-            ".dart": "dart",
-            ".ini": "ini",
-            ".cfg": "ini",
-            ".log": "text",
+            ".py": "python", ".js": "javascript", ".ts": "typescript",
+            ".tsx": "typescript", ".jsx": "javascript", ".html": "html",
+            ".css": "css", ".json": "json", ".md": "markdown",
+            ".java": "java", ".c": "c", ".cpp": "cpp", ".h": "cpp",
+            ".cs": "csharp", ".rs": "rust", ".go": "go", ".sql": "sql",
+            ".xml": "xml", ".sh": "bash", ".bat": "batch", ".yml": "yaml",
+            ".yaml": "yaml", ".toml": "toml", ".dockerfile": "dockerfile",
+            "dockerfile": "dockerfile", ".vue": "vue", ".svelte": "svelte",
+            ".php": "php", ".rb": "ruby", ".swift": "swift", ".kt": "kotlin",
+            ".dart": "dart", ".ini": "ini", ".cfg": "ini", ".log": "text",
         }
         return mapping.get(suffix.lower(), "")
 
@@ -627,183 +451,3 @@ class FileUtils:
         except Exception as e:
             logger.error(f"Tree generation failed: {e}")
         return "\n".join(lines)
-
-
-class NoiseReducer:
-    """Cleans code context to reduce token noise."""
-
-    @staticmethod
-    def clean(content: str, max_line_length: int = 500) -> str:
-        """Cleans content by removing minified blocks and noise.
-
-        Args:
-            content: Text content to clean.
-            max_line_length: Maximum line length before skipping.
-
-        Returns:
-            Cleaned content string.
-        """
-        if content is None:
-            return ""
-
-        lines = content.splitlines()
-        cleaned_lines = []
-
-        for line in lines:
-            if len(line) > max_line_length:
-                cleaned_lines.append(
-                    f"[... Line of {len(line)} chars skipped by NoiseReducer ...]"
-                )
-                continue
-
-            if len(line) > 200 and not any(c.isspace() for c in line):
-                total = len(line)
-                alnum = sum(1 for c in line if c.isalnum() or c in "+/=")
-                if (alnum / total) > 0.95:
-                    cleaned_lines.append(
-                        f"[... Base64-like block of {total} chars skipped ...]"
-                    )
-                    continue
-
-            cleaned_lines.append(line)
-
-        return "\n".join(cleaned_lines)
-
-
-class ContextFormatter:
-    """Formats file contents for LLM context."""
-
-    @staticmethod
-    def to_markdown(
-        paths: list[str],
-        root_dir: str | None = None,
-        prompt_prefix: str | None = None,
-        manual_excludes: list[str] | None = None,
-        use_gitignore: bool = True,
-    ) -> str:
-        """Converts files to markdown format.
-
-        Args:
-            paths: List of file paths.
-            root_dir: Root directory.
-            prompt_prefix: Optional prefix to add.
-            manual_excludes: Exclusion patterns.
-            use_gitignore: Whether to respect .gitignore.
-
-        Returns:
-            Markdown formatted string.
-        """
-        all_files = FileUtils.flatten_paths(
-            paths, root_dir, manual_excludes, use_gitignore
-        )
-
-        blocks = []
-        if prompt_prefix:
-            blocks.append(f"{prompt_prefix}\n\n---\n\n")
-
-        root = pathlib.Path(root_dir).resolve() if root_dir else None
-
-        for f_str in all_files:
-            p = pathlib.Path(f_str)
-            if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
-                continue
-
-            try:
-                p_res = p.resolve()
-                rel_path = (
-                    p_res.relative_to(root)
-                    if root and (root == p_res or root in p_res.parents)
-                    else p.name
-                )
-                lang = FileUtils.get_language_tag(p.suffix)
-                stat = p.stat()
-                size_kb = stat.st_size / 1024
-
-                content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
-                content = NoiseReducer.clean(content)
-
-                header = f"File: {rel_path} ({size_kb:.1f} KB)\n"
-                blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
-            except Exception as e:
-                logger.error(f"Failed to format file {f_str} for context: {e}")
-
-        return "".join(blocks)
-
-    @staticmethod
-    def to_xml(
-        paths: list[str],
-        root_dir: str | None = None,
-        prompt_prefix: str | None = None,
-        manual_excludes: list[str] | None = None,
-        use_gitignore: bool = True,
-    ) -> str:
-        """Converts files to XML format with CDATA.
-
-        Args:
-            paths: List of file paths.
-            root_dir: Root directory.
-            prompt_prefix: Optional prefix to add.
-            manual_excludes: Exclusion patterns.
-            use_gitignore: Whether to respect .gitignore.
-
-        Returns:
-            XML formatted string.
-        """
-        all_files = FileUtils.flatten_paths(
-            paths, root_dir, manual_excludes, use_gitignore
-        )
-
-        blocks = []
-        if prompt_prefix:
-            blocks.append(f"<instruction>\n{prompt_prefix}\n</instruction>\n\n")
-
-        root = pathlib.Path(root_dir).resolve() if root_dir else None
-        blocks.append("<context>\n")
-
-        for f_str in all_files:
-            p = pathlib.Path(f_str)
-            if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
-                continue
-
-            try:
-                p_res = p.resolve()
-                rel_path = (
-                    p_res.relative_to(root)
-                    if root and (root == p_res or root in p_res.parents)
-                    else p.name
-                )
-                size_kb = p.stat().st_size / 1024
-
-                content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
-                content = NoiseReducer.clean(content)
-
-                safe_content = content.replace("]]>", "]]]]><![CDATA[>")
-
-                blocks.append(
-                    f'  <file path="{rel_path}" size="{size_kb:.1f}KB">\n'
-                    f"<![CDATA[\n{safe_content}\n]]>\n  </file>\n"
-                )
-            except Exception:
-                pass
-
-        blocks.append("</context>")
-        return "".join(blocks)
-
-    @staticmethod
-    def generate_blueprint(
-        root_dir: str, excludes_str: str, use_gitignore: bool = True
-    ) -> str:
-        """Generates a project blueprint (ASCII tree).
-
-        Args:
-            root_dir: Root directory.
-            excludes_str: Exclusion patterns.
-            use_gitignore: Whether to respect .gitignore.
-
-        Returns:
-            Blueprint string.
-        """
-        tree = FileUtils.generate_ascii_tree(
-            root_dir, excludes_str, use_gitignore, max_depth=5
-        )
-        return f"--- PROJECT BLUEPRINT ---\n\n{tree}\n"

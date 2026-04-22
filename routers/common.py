@@ -37,6 +37,7 @@ class GenerateRequest(BaseModel):
     project_path: str | None = None
     template_name: str | None = None
     export_format: str = "markdown"
+    include_blueprint: bool = True
 
 
 class FileRenameRequest(BaseModel):

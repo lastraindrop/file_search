@@ -18,7 +18,7 @@ from typing import Any
 
 from .config import DataManager, logger
 from .security import PathValidator
-from .utils import FileUtils
+from .file_io import FileUtils
 
 
 class FileOps:

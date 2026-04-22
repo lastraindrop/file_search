@@ -66,14 +66,17 @@ FileCortex 采用 **微内核 + 多端入口** 架构模式：
 
 ### 1.3 模块职责
 
-| 模块 | 职责 | 行数 |
+| 模块 | 职责 | 备注 |
 |-----|------|------|
-| `config.py` | DataManager 单例，配置持久化，Schema 管理 | ~500 |
-| `security.py` | PathValidator 路径校验，黑名单拦截 | ~180 |
-| `search.py` | SearchWorker 搜索，多线程并发 | ~400 |
-| `utils.py` | FileUtils/FormatUtils/NoiseReducer | ~810 |
-| `actions.py` | FileOps 文件操作，ActionBridge 命令执行 | ~560 |
-| `duplicate.py` | DuplicateWorker 查重 | ~160 |
+| `config.py` | DataManager 单例，配置持久化，Schema 管理 | 核心状态管理 |
+| `security.py` | PathValidator 路径校验，确定性归一化逻辑 | 安全防御核心 |
+| `file_io.py` | FileUtils (物理 IO, .gitignore 解析, 树生成) | 原 utils.py 拆分 |
+| `format_utils.py`| FormatUtils (字节格式化, Token 估算) | 原 utils.py 拆分 |
+| `context.py` | ContextFormatter, NoiseReducer (XML/MD 导出) | 原 utils.py 拆分 |
+| `search.py` | SearchWorker 搜索，多线程并发 | 搜索引擎 |
+| `actions.py` | FileOps 文件操作，ActionBridge 命令执行 | 物理变更桥接 |
+| `duplicate.py` | DuplicateWorker 查重 (SHA256) | 查重逻辑 |
+| `gui/` | 抽离的 GUI 窗口 (BatchRename, DuplicateFinder) | 表现层分离 |
 
 ---
 
@@ -116,6 +119,9 @@ subprocess.run(["git", user_input], shell=False)
 ### 2.3 API 安全
 
 #### Token 认证
+- **HTTP**: 通过 `X-API-Token` 请求头校验。
+- **WebSocket**: 通过 URL 查询参数 `token` 校验。
+
 ```bash
 export FCTX_API_TOKEN="your_secret_token"
 ```

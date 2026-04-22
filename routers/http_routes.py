@@ -139,7 +139,10 @@ def generate_context(req: GenerateRequest) -> dict[str, Any]:
             )
         if req.export_format == "xml":
             content = ContextFormatter.to_xml(
-                req.files, root_dir=final_root, prompt_prefix=prompt_prefix
+                req.files,
+                root_dir=final_root,
+                prompt_prefix=prompt_prefix,
+                include_blueprint=req.include_blueprint,
             )
         else:
             content = ContextFormatter.to_markdown(
@@ -147,7 +150,9 @@ def generate_context(req: GenerateRequest) -> dict[str, Any]:
             )
     else:
         if req.export_format == "xml":
-            content = ContextFormatter.to_xml(req.files, prompt_prefix=None)
+            content = ContextFormatter.to_xml(
+                req.files, prompt_prefix=None, include_blueprint=req.include_blueprint
+            )
         else:
             content = ContextFormatter.to_markdown(req.files, prompt_prefix=None)
 

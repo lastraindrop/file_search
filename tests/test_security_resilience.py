@@ -14,6 +14,24 @@ from file_cortex_core import ActionBridge, FileUtils, PathValidator
     ("../../etc/passwd", "C:/User/Project", False),
     ("C:/Windows/System32", "C:/User/Project", False),
     ("//localhost/c$/evil", "C:/Project", False),
+    # Non-existent but valid subpaths
+    ("src/new_file.py", "C:/User/Project", True),
+    ("C:/User/Project/src/new_file.py", "C:/User/Project", True),
+    # Traversal attempts in non-existent paths
+    ("src/../../etc/passwd", "C:/User/Project", False),
+    ("C:/User/Project/src/../../etc/passwd", "C:/User/Project", False),
+    # Case sensitivity check (Windows)
+    ("c:/user/project/SRC/MAIN.PY", "C:/User/Project", True),
+    # Root boundary
+    ("C:/User/Project", "C:/User/Project", True),
+    ("C:/User", "C:/User/Project", False),
+    # POSIX style on Windows-detected input
+    ("/tmp/project/file.txt", "/tmp/project", True),
+    ("/tmp/project/../etc/passwd", "/tmp/project", False),
+    # Empty or dot segments
+    ("./file.txt", "C:/Project", True),
+    ("src/./main.py", "C:/Project", True),
+    ("src/../src/main.py", "C:/Project", True),
 ])
 def test_security_path_validator_matrix(path, root, expected_safe):
     """Core security matrix: Traversal, Windows System Paths, and UNC blocking."""

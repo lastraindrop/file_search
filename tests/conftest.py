@@ -16,36 +16,50 @@ def _reset_singleton():
     from file_cortex_core import FileUtils
     from web_app import ACTIVE_PROCESSES
 
+    # Force immediate GC to close unreferenced file handles
     gc.collect()
 
     with DataManager._lock:
         DataManager._instance = None
+    
     yield
 
     # Cleanup lingering processes to release file locks on Windows
-    for pid in list(ACTIVE_PROCESSES.keys()):
+    # Use a more defensive approach
+    pids = list(ACTIVE_PROCESSES.keys())
+    for pid in pids:
         proc = ACTIVE_PROCESSES.get(pid)
-        if proc and proc.poll() is None:
+        if proc:
             try:
-                if os.name == 'nt':
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
-                                 capture_output=True, timeout=2)
-                else:
-                    os.killpg(os.getpgid(pid), 15)
+                if proc.poll() is None:
+                    if os.name == 'nt':
+                        # Kill the whole tree if possible
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
+                                     capture_output=True, timeout=5, check=False)
+                    else:
+                        os.killpg(os.getpgid(pid), 15)
+                    proc.wait(timeout=2)
             except Exception:
                 try:
                     proc.kill()
+                    proc.wait(timeout=1)
                 except Exception:
                     pass
+            finally:
+                ACTIVE_PROCESSES.pop(pid, None)
 
+    # Final sweep
     with DataManager._lock:
         DataManager._instance = None
+    
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
 
+    # CRITICAL: Mandatory GC and sleep for Windows FS synchronization
     gc.collect()
+    if os.name == 'nt':
+        time.sleep(0.2) # Wait for OS to release file locks
 
-    time.sleep(0.5)
 
 @pytest.fixture
 def mock_project(tmp_path):

@@ -2145,7 +2145,9 @@ const App = {
         resultsDiv.innerHTML = '<div class="text-center p-3">Searching...</div>';
 
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${settings.mode}&inverse=${settings.inverse}&case_sensitive=${settings.caseSensitive}&include_dirs=${settings.includeDirs}`;
+        const token = App.state.globalSettings.api_token || "";
+        const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${settings.mode}&inverse=${settings.inverse}&case_sensitive=${settings.caseSensitive}&include_dirs=${settings.include_dirs}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+
 
         App.state.socket = new WebSocket(wsUrl);
         App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };
@@ -2220,6 +2222,7 @@ const App = {
 
         try {
             const format = document.getElementById('exportFormat').value;
+            const includeBlueprint = document.getElementById('includeBlueprint')?.checked || false;
             const res = await App._fetch('/api/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2227,7 +2230,8 @@ const App = {
                     files: Array.from(App.state.staging),
                     project_path: App.state.projectPath,
                     template_name: templateName,
-                    export_format: format
+                    export_format: format,
+                    include_blueprint: includeBlueprint
                 })
             });
             const data = await res.json();

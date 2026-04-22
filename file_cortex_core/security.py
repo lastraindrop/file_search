@@ -33,6 +33,7 @@ class PathValidator:
             target_raw = str(target_path)
             root_raw = str(root_path)
 
+            # Detect if we are dealing with Windows-style paths (drive letters or UNC)
             is_windows_target = (
                 bool(ntpath.splitdrive(target_raw)[0])
                 or target_raw.startswith(UNC_PREFIXES)
@@ -46,43 +47,32 @@ class PathValidator:
                 if target_raw.startswith(UNC_PREFIXES):
                     return False
 
-                root_norm = ntpath.normpath(root_raw).replace(
-                    '/', '\\'
-                ).lower()
+                # Normalize using ntpath for Windows logic
+                root_norm = ntpath.normpath(root_raw).replace("/", "\\").lower()
+                
+                # If target is relative, join it to root first
                 target_norm_raw = target_raw
-
                 if not ntpath.isabs(target_norm_raw):
                     target_norm_raw = ntpath.join(root_raw, target_norm_raw)
+                
+                target_norm = ntpath.normpath(target_norm_raw).replace("/", "\\").lower()
+                
+                # Prefix check: target must be root or inside root
+                root_prefix = root_norm.rstrip("\\") + "\\"
+                return (target_norm == root_norm or target_norm.startswith(root_prefix))
 
-                target_norm = ntpath.normpath(target_norm_raw).replace(
-                    '/', '\\'
-                ).lower()
-                root_prefix = root_norm.rstrip('\\') + '\\'
-                return (target_norm == root_norm
-                        or target_norm.startswith(root_prefix))
-
-            t = pathlib.Path(target_raw)
-            r = pathlib.Path(root_raw)
-
-            try:
-                r_resolved = r.resolve()
-            except Exception:
-                r_resolved = r
-
-            if t.is_absolute():
-                try:
-                    target = t.resolve()
-                except Exception:
-                    target = t
-            else:
-                try:
-                    target = (r_resolved / t).resolve()
-                except Exception:
-                    target = r_resolved / t
-
-            if hasattr(target, 'is_relative_to'):
-                return target.is_relative_to(r_resolved)
-            return r_resolved == target or r_resolved in target.parents
+            # POSIX-style logic
+            # Use abspath for normalization which doesn't require path existence
+            root_norm = os.path.abspath(root_raw)
+            
+            target_norm_raw = target_raw
+            if not os.path.isabs(target_norm_raw):
+                target_norm_raw = os.path.join(root_norm, target_norm_raw)
+            
+            target_norm = os.path.abspath(target_norm_raw)
+            
+            root_prefix = root_norm.rstrip(os.sep) + os.sep
+            return (target_norm == root_norm or target_norm.startswith(root_prefix))
         except Exception:
             return False
 

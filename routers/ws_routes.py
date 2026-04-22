@@ -9,7 +9,7 @@ import signal
 import subprocess
 import threading
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 from file_cortex_core import ActionBridge, FormatUtils, logger, search_generator
 from routers.common import (
@@ -23,12 +23,21 @@ from routers.common import (
 
 router = APIRouter()
 
+def verify_ws_token(token: str | None) -> bool:
+    """Verifies the API token for WebSocket connections."""
+    import os
+    expected_token = os.getenv("FCTX_API_TOKEN", "")
+    if not expected_token:
+        return True
+    return token == expected_token
+
 
 @router.websocket("/ws/search")
 async def websocket_search(
     websocket: WebSocket,
     path: str,
     query: str,
+    token: str | None = Query(None),
     mode: str = "smart",
     inverse: bool = False,
     case_sensitive: bool = False,
@@ -36,6 +45,11 @@ async def websocket_search(
 ) -> None:
     """Streams search results over WebSocket."""
     await websocket.accept()
+
+    if not verify_ws_token(token):
+        await websocket.send_json({"status": "ERROR", "msg": "Unauthorized"})
+        await websocket.close()
+        return
 
     project_root, proj_config = get_project_config_for_path(path)
     if not project_root or proj_config is None:
@@ -113,9 +127,15 @@ async def websocket_action_stream(
     project_path: str,
     tool_name: str,
     path: str,
+    token: str | None = Query(None),
 ) -> None:
     """Streams tool execution output over WebSocket."""
     await websocket.accept()
+
+    if not verify_ws_token(token):
+        await websocket.send_json({"status": "ERROR", "msg": "Unauthorized"})
+        await websocket.close()
+        return
 
     project_root = get_valid_project_root(project_path)
     if not project_root:
