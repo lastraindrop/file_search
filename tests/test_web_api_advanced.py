@@ -244,17 +244,17 @@ class TestAPITokenMiddleware:
         web_app.API_TOKEN = "test_secret_123"
 
         try:
-            res = api_client.get("/api/config/global")
+            res = api_client.get("/api/global/settings")
             assert res.status_code == 401
 
             res2 = api_client.get(
-                "/api/config/global",
+                "/api/global/settings",
                 headers={"X-API-Token": "wrong_token"},
             )
             assert res2.status_code == 401
 
             res3 = api_client.get(
-                "/api/config/global",
+                "/api/global/settings",
                 headers={"X-API-Token": "test_secret_123"},
             )
             assert res3.status_code == 200
@@ -271,7 +271,7 @@ class TestAPITokenMiddleware:
 
         try:
             allowed = client.options(
-                "/api/config/global",
+                "/api/global/settings",
                 headers={
                     "Origin": "https://allowed.example",
                     "Access-Control-Request-Method": "GET",
@@ -282,7 +282,7 @@ class TestAPITokenMiddleware:
             )
 
             blocked = client.options(
-                "/api/config/global",
+                "/api/global/settings",
                 headers={
                     "Origin": "https://blocked.example",
                     "Access-Control-Request-Method": "GET",

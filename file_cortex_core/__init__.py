@@ -6,6 +6,7 @@ from .file_io import FileUtils
 from .format_utils import FormatUtils
 from .search import SearchWorker, search_generator
 from .security import PathValidator
+from .gui import BatchRenameWindow, DuplicateFinderWindow
 
 __all__ = [
     "DataManager",
@@ -21,4 +22,6 @@ __all__ = [
     "NoiseReducer",
     "logger",
     "get_app_dir",
+    "BatchRenameWindow",
+    "DuplicateFinderWindow",
 ]

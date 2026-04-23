@@ -8,7 +8,7 @@ import signal
 import subprocess
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from file_cortex_core import (
     ActionBridge,
@@ -19,9 +19,8 @@ from file_cortex_core import (
     PathValidator,
     logger,
 )
-from routers.common import (
-    ACTIVE_PROCESSES,
-    PROCESS_LOCK,
+from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK
+from routers.schemas import (
     BatchRenameRequest,
     CategoriesUpdateRequest,
     CategorizeRequest,
@@ -48,6 +47,8 @@ from routers.common import (
     ToolExecuteRequest,
     ToolsUpdateRequest,
     WorkspacePinRequest,
+)
+from routers.services import (
     get_children,
     get_dm,
     get_node_info,
@@ -60,12 +61,13 @@ router = APIRouter()
 
 
 @router.post("/api/open")
-def open_project(req: ProjectOpenRequest) -> dict[str, Any]:
+def open_project(
+    req: ProjectOpenRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Opens and registers a project."""
     try:
         p = PathValidator.validate_project(req.path)
         logger.info(f"AUDIT - Opening project: {p}")
-        dm = get_dm()
 
         dm.add_to_recent(str(p))
         dm.get_project_data(str(p))
@@ -81,24 +83,26 @@ def open_project(req: ProjectOpenRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/children")
-def api_children(req: ChildrenRequest) -> dict[str, Any]:
+def api_children(
+    req: ChildrenRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Gets directory children."""
     p = pathlib.Path(req.path)
-    if not get_valid_project_root(req.path):
+    if not get_valid_project_root(req.path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
     return {
         "status": "ok",
         "parent": PathValidator.norm_path(p.parent) if p.parent else None,
-        "children": get_children(req.path),
+        "children": get_children(req.path, dm),
     }
 
 
 @router.get("/api/content")
-def get_content(path: str) -> dict[str, Any]:
+def get_content(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
     """Gets file content for preview."""
     p = pathlib.Path(path)
 
-    if not get_valid_project_root(path):
+    if not get_valid_project_root(path, dm):
         logger.warning(f"Blocking unauthorized content access: {path}")
         raise HTTPException(
             status_code=403,
@@ -111,7 +115,6 @@ def get_content(path: str) -> dict[str, Any]:
     if FileUtils.is_binary(p):
         return {"content": "--- Binary File (Preview Unavailable) ---"}
     try:
-        dm = get_dm()
         limit_mb = dm.data["global_settings"].get("preview_limit_mb", 1)
         max_preview = int(limit_mb * 1024 * 1024)
         content = FileUtils.read_text_smart(p, max_bytes=max_preview)
@@ -127,10 +130,12 @@ def get_content(path: str) -> dict[str, Any]:
 
 
 @router.post("/api/generate")
-def generate_context(req: GenerateRequest) -> dict[str, Any]:
+def generate_context(
+    req: GenerateRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Generates formatted context for files."""
     if req.project_path:
-        root, proj_config = get_project_config_for_path(req.project_path)
+        root, proj_config = get_project_config_for_path(req.project_path, dm)
         final_root = root if root else req.project_path
         prompt_prefix = None
         if proj_config and req.template_name:
@@ -160,9 +165,11 @@ def generate_context(req: GenerateRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/rename")
-def rename_file(req: FileRenameRequest) -> dict[str, Any]:
+def rename_file(
+    req: FileRenameRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Renames a file."""
-    project_root = get_valid_project_root(req.project_path)
+    project_root = get_valid_project_root(req.project_path, dm)
     if not project_root:
         raise HTTPException(
             status_code=403, detail="Access denied (Invalid project path)"
@@ -183,9 +190,11 @@ def rename_file(req: FileRenameRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/batch_rename")
-def api_batch_rename(req: BatchRenameRequest) -> dict[str, Any]:
+def api_batch_rename(
+    req: BatchRenameRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Batch renames files."""
-    project_root = get_valid_project_root(req.project_path)
+    project_root = get_valid_project_root(req.project_path, dm)
     if not project_root:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -213,9 +222,9 @@ def api_batch_rename(req: BatchRenameRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/delete")
-def delete_files(req: FileDeleteRequest) -> dict[str, str]:
+def delete_files(req: FileDeleteRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
     """Deletes files."""
-    project_root = get_valid_project_root(req.project_path)
+    project_root = get_valid_project_root(req.project_path, dm)
     if not project_root:
         raise HTTPException(
             status_code=403, detail="Access denied (Invalid project path)"
@@ -236,14 +245,14 @@ def delete_files(req: FileDeleteRequest) -> dict[str, str]:
 
 
 @router.post("/api/fs/move")
-def api_move(req: FileMoveRequest) -> dict[str, Any]:
+def api_move(req: FileMoveRequest, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
     """Moves files to a destination directory."""
     try:
         moved_paths = []
         skipped_paths = []
         for src in req.src_paths:
-            src_root = get_valid_project_root(src)
-            dst_root = get_valid_project_root(req.dst_dir)
+            src_root = get_valid_project_root(src, dm)
+            dst_root = get_valid_project_root(req.dst_dir, dm)
 
             if not src_root or not dst_root:
                 logger.warning(
@@ -277,10 +286,10 @@ def api_move(req: FileMoveRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/save")
-def api_save(req: FileSaveRequest) -> dict[str, str]:
+def api_save(req: FileSaveRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
     """Saves content to a file."""
     try:
-        if not get_valid_project_root(req.path):
+        if not get_valid_project_root(req.path, dm):
             raise HTTPException(status_code=403, detail="Access denied")
 
         logger.info(f"AUDIT - Saving content to: {req.path}")
@@ -294,10 +303,12 @@ def api_save(req: FileSaveRequest) -> dict[str, str]:
 
 
 @router.post("/api/fs/create")
-def api_create(req: FileCreateRequest) -> dict[str, Any]:
+def api_create(
+    req: FileCreateRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Creates a new file or directory."""
     try:
-        if not get_valid_project_root(req.parent_path):
+        if not get_valid_project_root(req.parent_path, dm):
             raise HTTPException(status_code=403, detail="Access denied")
         logger.info(
             f"AUDIT - Creating {'dir' if req.is_dir else 'file'}: "
@@ -314,9 +325,11 @@ def api_create(req: FileCreateRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/open_os")
-def api_open_os(req: OpenPathRequest) -> dict[str, str]:
+def api_open_os(
+    req: OpenPathRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Opens a file or directory in the operating system shell."""
-    project_root = get_valid_project_root(req.project_path)
+    project_root = get_valid_project_root(req.project_path, dm)
     if not project_root:
         raise HTTPException(status_code=403, detail="Access denied")
     if not is_path_safe(req.path, project_root):
@@ -333,28 +346,16 @@ def api_open_os(req: OpenPathRequest) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/api/config/global")
-def get_global_config() -> dict[str, Any]:
-    """Gets global configuration."""
-    return get_dm().data["global_settings"]
 
-
-@router.post("/api/config/global")
-def update_global_config(req: GlobalSettingsRequest) -> dict[str, Any]:
-    """Updates global configuration."""
-    data = req.model_dump(exclude_unset=True)
-    if "settings" in data and isinstance(data["settings"], dict):
-        data.update(data.pop("settings"))
-
-    get_dm().update_global_settings(data)
-    return {"status": "ok", "settings": get_dm().data["global_settings"]}
 
 
 @router.post("/api/fs/archive")
-def api_archive(req: FileArchiveRequest) -> dict[str, str]:
+def api_archive(
+    req: FileArchiveRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Archives selected files."""
     try:
-        if not get_valid_project_root(req.project_root):
+        if not get_valid_project_root(req.project_root, dm):
             raise HTTPException(status_code=403, detail="Access denied")
 
         for p in req.paths:
@@ -382,120 +383,130 @@ def api_archive(req: FileArchiveRequest) -> dict[str, str]:
 
 
 @router.get("/api/project/config")
-def get_proj_config(path: str) -> dict[str, Any]:
+def get_proj_config(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
     """Gets project configuration."""
-    root, _ = get_project_config_for_path(path)
+    root, _ = get_project_config_for_path(path, dm)
     if not root:
         raise HTTPException(status_code=403, detail="Access denied")
-    return get_dm().get_project_data(root)
+    return dm.get_project_data(root)
 
 
 @router.get("/api/project/prompt_templates")
-def get_prompt_templates(path: str) -> dict[str, str]:
+def get_prompt_templates(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
     """Gets project prompt templates."""
-    root, proj_config = get_project_config_for_path(path)
+    root, proj_config = get_project_config_for_path(path, dm)
     if not root or proj_config is None:
         return {}
     return proj_config.get("prompt_templates", {})
 
 
 @router.get("/api/workspaces")
-def get_workspaces() -> dict[str, Any]:
+def get_workspaces(dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
     """Gets all workspaces."""
-    return get_dm().get_workspaces_summary()
+    return dm.get_workspaces_summary()
 
 
 @router.post("/api/workspaces/pin")
-def toggle_pin(req: WorkspacePinRequest) -> dict[str, bool]:
+def toggle_pin(
+    req: WorkspacePinRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, bool]:
     """Toggles workspace pin status."""
-    return {"is_pinned": get_dm().toggle_pinned(req.path)}
+    return {"is_pinned": dm.toggle_pinned(req.path)}
 
 
 @router.get("/api/recent_projects")
-def get_recent_projects_legacy() -> list[dict[str, str]]:
+def get_recent_projects_legacy(dm: DataManager = Depends(get_dm)) -> list[dict[str, str]]:
     """Gets recent projects using the legacy response shape."""
     return [
         {"name": pathlib.Path(p).name, "path": p}
-        for p in get_dm().data["projects"].keys()
+        for p in dm.data["projects"].keys()
         if p and os.path.exists(p)
     ]
 
 
 @router.post("/api/project/note")
-def api_add_note(req: NoteRequest) -> dict[str, str]:
+def api_add_note(req: NoteRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
     """Adds a note to a file."""
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
-    get_dm().add_note(req.project_path, req.file_path, req.note)
+    dm.add_note(req.project_path, req.file_path, req.note)
     return {"status": "ok"}
 
 
 @router.post("/api/project/tag")
-def api_manage_tag(req: TagRequest) -> dict[str, str]:
+def api_manage_tag(req: TagRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
     """Manages tags on a file."""
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     if req.action == "add":
-        get_dm().add_tag(req.project_path, req.file_path, req.tag)
+        dm.add_tag(req.project_path, req.file_path, req.tag)
     else:
-        get_dm().remove_tag(req.project_path, req.file_path, req.tag)
+        dm.remove_tag(req.project_path, req.file_path, req.tag)
     return {"status": "ok"}
 
 
 @router.post("/api/project/session")
-def api_save_session(req: SessionRequest) -> dict[str, str]:
+def api_save_session(
+    req: SessionRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Saves a project session."""
-    if not get_valid_project_root(req.project_path):
+    if not get_valid_project_root(req.project_path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
-    get_dm().save_session(req.project_path, req.data)
+    dm.save_session(req.project_path, req.data)
     return {"status": "ok"}
 
 
 @router.post("/api/project/favorites")
-def api_manage_favorites(req: FavoriteRequest) -> dict[str, str]:
+def api_manage_favorites(
+    req: FavoriteRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Manages favorite groups."""
-    if not get_valid_project_root(req.project_path):
+    if not get_valid_project_root(req.project_path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
     for file_path in req.file_paths:
         if not is_path_safe(file_path, req.project_path):
             raise HTTPException(status_code=403, detail=f"Path unsafe: {file_path}")
     if req.action == "add":
-        get_dm().add_to_group(req.project_path, req.group_name, req.file_paths)
+        dm.add_to_group(req.project_path, req.group_name, req.file_paths)
     else:
-        get_dm().remove_from_group(req.project_path, req.group_name, req.file_paths)
+        dm.remove_from_group(req.project_path, req.group_name, req.file_paths)
     return {"status": "ok"}
 
 
 @router.post("/api/project/settings")
-def update_settings(req: ProjectSettingsRequest) -> dict[str, str]:
+def update_settings(
+    req: ProjectSettingsRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Updates project settings."""
-    if not get_valid_project_root(req.project_path):
+    if not get_valid_project_root(req.project_path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
-    get_dm().update_project_settings(req.project_path, req.settings)
+    dm.update_project_settings(req.project_path, req.settings)
     return {"status": "ok"}
 
 
 @router.post("/api/project/tools")
-def update_tools(req: ToolsUpdateRequest) -> dict[str, str]:
+def update_tools(
+    req: ToolsUpdateRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Updates custom tools configuration."""
-    if not get_valid_project_root(req.project_path):
+    if not get_valid_project_root(req.project_path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
     try:
-        get_dm().update_custom_tools(req.project_path, req.tools)
+        dm.update_custom_tools(req.project_path, req.tools)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/api/project/stats")
-def get_staging_stats(req: StatsRequest) -> dict[str, int]:
+def get_staging_stats(req: StatsRequest, dm: DataManager = Depends(get_dm)) -> dict[str, int]:
     """Gets aggregate token stats for selected files."""
-    root = get_valid_project_root(req.project_path) if req.project_path else None
+    root = get_valid_project_root(req.project_path, dm) if req.project_path else None
 
     manual_excludes = []
     use_git = True
     if root:
-        proj_data = get_dm().get_project_data(root)
+        proj_data = dm.get_project_data(root)
         ex_str = proj_data.get("excludes", "")
         manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
 
@@ -514,38 +525,44 @@ def get_staging_stats(req: StatsRequest) -> dict[str, int]:
 
 
 @router.post("/api/project/categories")
-def update_categories(req: CategoriesUpdateRequest) -> dict[str, str]:
+def update_categories(
+    req: CategoriesUpdateRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Updates quick categories."""
-    if not get_valid_project_root(req.project_path):
+    if not get_valid_project_root(req.project_path, dm):
         raise HTTPException(status_code=403, detail="Access denied")
     try:
-        get_dm().update_quick_categories(req.project_path, req.categories)
+        dm.update_quick_categories(req.project_path, req.categories)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/api/global/settings")
-def get_global_settings() -> dict[str, Any]:
+def get_global_settings(dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
     """Gets global settings."""
-    return get_dm().data.get("global_settings", {})
+    return dm.data.get("global_settings", {})
 
 
 @router.post("/api/global/settings")
-def update_global_settings(req: GlobalSettingsRequest) -> dict[str, str]:
+def update_global_settings(
+    req: GlobalSettingsRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Updates global settings."""
     data = req.model_dump(exclude_unset=True)
     if "settings" in data and isinstance(data["settings"], dict):
         data.update(data.pop("settings"))
 
-    get_dm().update_global_settings(data)
+    dm.update_global_settings(data)
     return {"status": "ok"}
 
 
 @router.post("/api/actions/stage_all")
-def api_stage_all(req: StageAllRequest) -> dict[str, Any]:
+def api_stage_all(
+    req: StageAllRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Stages all files in a project."""
-    root, proj_config = get_project_config_for_path(req.project_path)
+    root, proj_config = get_project_config_for_path(req.project_path, dm)
     if not root or proj_config is None:
         raise HTTPException(status_code=403, detail="Project not registered")
 
@@ -557,7 +574,7 @@ def api_stage_all(req: StageAllRequest) -> dict[str, Any]:
         items = FileUtils.get_project_items(
             root, manual_excludes, use_gitignore=True, mode=req.mode
         )
-        added = get_dm().batch_stage(root, items)
+        added = dm.batch_stage(root, items)
         return {"status": "ok", "added_count": added}
     except Exception as e:
         logger.error(f"Stage All failed: {e}")
@@ -565,10 +582,12 @@ def api_stage_all(req: StageAllRequest) -> dict[str, Any]:
 
 
 @router.post("/api/actions/categorize")
-def api_categorize(req: CategorizeRequest) -> dict[str, Any]:
+def api_categorize(
+    req: CategorizeRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Categorizes files into a directory."""
     try:
-        if not get_valid_project_root(req.project_path):
+        if not get_valid_project_root(req.project_path, dm):
             raise HTTPException(status_code=403, detail="Access denied")
 
         logger.info(
@@ -584,14 +603,16 @@ def api_categorize(req: CategorizeRequest) -> dict[str, Any]:
 
 
 @router.post("/api/actions/execute")
-def api_execute_tool(req: ToolExecuteRequest) -> dict[str, Any]:
+def api_execute_tool(
+    req: ToolExecuteRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, Any]:
     """Executes a custom tool on files."""
     try:
-        project_root = get_valid_project_root(req.project_path)
+        project_root = get_valid_project_root(req.project_path, dm)
         if not project_root:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        proj_config = get_dm().get_project_data(req.project_path)
+        proj_config = dm.get_project_data(req.project_path)
         template = proj_config.get("custom_tools", {}).get(req.tool_name)
         if not template:
             raise HTTPException(status_code=404, detail="Tool template not found")
@@ -653,10 +674,12 @@ def api_execute_tool(req: ToolExecuteRequest) -> dict[str, Any]:
 
 
 @router.post("/api/fs/collect_paths")
-def collect_paths_api(req: PathCollectionRequest) -> dict[str, str]:
+def collect_paths_api(
+    req: PathCollectionRequest, dm: DataManager = Depends(get_dm)
+) -> dict[str, str]:
     """Collects and formats paths."""
     try:
-        if req.project_root and not get_valid_project_root(req.project_root):
+        if req.project_root and not get_valid_project_root(req.project_root, dm):
             raise HTTPException(status_code=403, detail="Unauthorized project root")
 
         return {

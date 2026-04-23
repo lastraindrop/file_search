@@ -1,6 +1,6 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **版本**: 6.3.0 | **更新日期**: 2026-04-22 | **测试**: 191 passed
+> **版本**: 6.3.0 | **更新日期**: 2026-04-23 | **测试**: 191 passed
 
 本文档规划了项目的短期改进目标与长期愿景，旨在保持架构一致性与功能前瞻性。
 
@@ -16,21 +16,22 @@
 - [x] **191 项回归测试**: 覆盖边界、安全、并发及前端契约
 
 ## 📍 阶段 5：外科手术级重构与安全补全 (v6.3.0 - 已完成)
-- [x] **内核解耦**: `utils.py` 彻底拆分为 `file_io`, `format_utils`, `context` 子模块
+- [x] **内核解耦**: `utils.py` 彻底拆分为 `file_io`, `format_utils`, `context`, `format_utils` 子模块
 - [x] **GUI 瘦身**: 抽离大窗口类至 `file_cortex_core.gui`，降低入口文件复杂度
 - [x] **WebSocket 安全**: 为搜索流增加基于 `token` 的实时鉴权
 - [x] **上下文增强**: XML 导出支持动态注入 `blueprint` (项目蓝图)
 - [x] **环境鲁棒性**: 彻底解决 Windows 下的 `WinError 5` 与 `UnicodeDecodeError`
+- [x] **前端模块化**: `app.js` 彻底拆分为 ES6 模块 (`state`, `api`, `ui`, `main`)
+- [x] **依赖注入 (DI)**: DataManager 全面接入 FastAPI Dependency Injection 模式
 
 ## 📍 阶段 6：性能监控与稳定性护航 (Planned - 2026 Q3)
 - [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件，防止过度消耗本地资源
 - [ ] **[PLANNED] SlowAPI 监控**: 自动记录并导出 >1s 的慢 IO 操作日志
-- [ ] **[PLANNED] 参数一致性守卫**: 增加针对搜索参数、Token 预算的动态 Schema 校验
-- [ ] **[PLANNED] 依赖注入 (DI)**: DataManager 从单体单例转向容器管理，支持更深度的测试隔离
+- [x] **参数一致性守卫**: 实现了针对搜索参数、Token 预算的跨端动态 Schema 校验 (v6.3.0)
 
 ## 📍 阶段 7：智能化编排与插件生态 (v7.0 - 2026 Q4)
 - [ ] **[PLANNED] 插件系统**: 定义标准 Hook 接口，支持用户贡献自定义搜索/导出插件
-- [ ] **[PLANNED] 前端状态管理**: `app.js` 拆分为 `Store/Render/Effect` 模块，提升 Web 端可维护性
+- [x] **前端状态管理**: `app.js` 拆分为 `state/api/ui/main` 模块，提升 Web 端可维护性 (v6.3.0)
 - [ ] **[PLANNED] 多模态支持**: 增加针对 PDF、Excel 等非代码文件的语义抓取
 
 ---

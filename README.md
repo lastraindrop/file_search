@@ -1,8 +1,8 @@
-# FileCortex v6.2.0 Stable Release (工作区编排助手)
+# FileCortex v6.3.0 Production Release (工作区编排助手)
 
-> **版本**: 6.2.0 | **测试**: 160 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.3.0 | **测试**: 191 passed | **代码质量**: Ruff 0 errors
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。它可以帮助你高效地管理项目文件、通过 **Categorizer (分类器)** 整理目录、执行自动化脚本，并能一键导出结构化的上下文（支持 XML/Markdown）以供 AI 辅助编程使用。v6.2.0 版本引入了 **MCP Server 完整支持**、**XML 导出引擎**、**全局配置框架**、**模块化 Web 路由层**、**前端体验增强** 及 **160 项全量审计测试**。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。v6.3.0 版本实现了 **外科手术级架构重构**，引入了 **内核解耦 (Microkernel Separation)**、**前端 ES6 模块化**、**FastAPI 依赖注入模式** 以及 **191 项全量审计测试**。
 
 ## 🌟 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -18,9 +18,9 @@
 
 ### 多端访问
 - **桌面版 (Tkinter)**：原生桌面体验，支持目录树导航与实时预览。
-- **网页版 (FastAPI)**：现代 Web UI，支持自定义右键菜单、搜索防抖和全局快捷键。
-- **CLI 工具 (fctx.py)**：headless 环境下的命令行编排，支持 `open`, `stage` 等命令。
-- **MCP Server**：作为 **Model Context Protocol** 服务器运行，使 AI Agent 能原生调用。
+- **网页版 (FastAPI)**：现代化 ES6 模块化前端，支持自定义右键菜单、搜索防抖和全局快捷键。
+- **CLI 工具 (fctx.py)**：Headless 环境下的命令行编排，支持 `open`, `stage`, `run` 等命令。
+- **MCP Server**：作为 **Model Context Protocol** 服务器运行，支持 AI Agent 原生调用。
 
 ### 文件管理
 - **多模式搜索**：支持 smart（智能）、exact（精确）、regex（正则）、content（内容）四种搜索模式。
@@ -110,8 +110,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **160 项核心测试**：涵盖 API 契约、核心工具、配置、搜索、安全鲁棒性、格式化，以及前端契约、目录树交互与 WebSocket 参数矩阵等。
-- **测试结果**：160 passed, 0 failed
+- **191 项核心测试**：涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约及 Windows 兼容性全量审计。
+- **测试结果**：191 passed, 0 failed
 
 ### 代码质量检查
 ```bash
@@ -183,25 +183,34 @@ black .
 
 ```
 file_cortex_core/          # 微内核逻辑包
-├── __init__.py           # 导出接口
-├── config.py            # DataManager 单例与配置
-├── security.py         # PathValidator 路径校验
-├── utils.py           # FileUtils, FormatUtils, NoiseReducer
-├── actions.py        # FileOps, ActionBridge
-├── search.py        # SearchWorker, search_generator
-├── duplicate.py    # DuplicateWorker 查重
+├── __init__.py           # 统一接口导出
+├── config.py            # DataManager (SSOT 配置中心)
+├── security.py         # PathValidator (安全沙盒与归一化)
+├── file_io.py          # FileUtils (物理 I/O 与 Gitignore)
+├── format_utils.py     # FormatUtils (格式化与 Token 估算)
+├── context.py          # ContextFormatter (AI 上下文导出)
+├── search.py           # SearchWorker (搜索引擎)
+├── actions.py          # FileOps, ActionBridge (执行桥接)
+├── gui/                # 抽离的 GUI 组件 (BatchRename, DuplicateFinder)
+├── duplicate.py        # DuplicateWorker (SHA256 查重)
 
-file_search.py           # Tkinter 桌面版
-web_app.py              # FastAPI Web 版
-fctx.py                # CLI 工具
-mcp_server.py          # MCP 协议服务器
+routers/                  # 模块化路由层
+├── http_routes.py      # 标准 HTTP 端点
+├── ws_routes.py        # 实时搜索 WebSocket
+├── services.py         # 业务逻辑服务层 (Service Layer)
+├── schemas.py          # Pydantic 参数校验模型 (Schema Layer)
+└── common.py           # 共享状态与进程管理
 
-tests/                  # 测试套件 (160 tests)
-├── conftest.py        # pytest fixtures
-├── test_*.py         # 各模块测试
+static/js/                # 模块化前端 (ES6 Modules)
+├── main.js             # 流程控制
+├── state.js            # 状态中心
+├── api.js              # API 封装
+└── ui.js               # UI 渲染驱动
 
-static/                  # Web 静态资源
-templates/               # HTML 模板
+file_search.py           # Tkinter 桌面版 (轻量化 Controller)
+web_app.py              # FastAPI Web 入口
+fctx.py                # CLI 工具入口
+mcp_server.py          # MCP 协议服务入口
 
 build_exe.py            # PyInstaller 打包脚本
 requirements.txt        # 依赖清单

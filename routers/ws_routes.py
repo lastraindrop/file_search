@@ -9,12 +9,11 @@ import signal
 import subprocess
 import threading
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 
 from file_cortex_core import ActionBridge, FormatUtils, logger, search_generator
-from routers.common import (
-    ACTIVE_PROCESSES,
-    PROCESS_LOCK,
+from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK
+from routers.services import (
     get_dm,
     get_project_config_for_path,
     get_valid_project_root,
@@ -42,6 +41,7 @@ async def websocket_search(
     inverse: bool = False,
     case_sensitive: bool = False,
     include_dirs: bool = False,
+    dm: DataManager = Depends(get_dm),
 ) -> None:
     """Streams search results over WebSocket."""
     await websocket.accept()
@@ -51,7 +51,7 @@ async def websocket_search(
         await websocket.close()
         return
 
-    project_root, proj_config = get_project_config_for_path(path)
+    project_root, proj_config = get_project_config_for_path(path, dm)
     if not project_root or proj_config is None:
         logger.warning(f"Blocking potentially unsafe search access: {path}")
         await websocket.send_json(
@@ -128,6 +128,7 @@ async def websocket_action_stream(
     tool_name: str,
     path: str,
     token: str | None = Query(None),
+    dm: DataManager = Depends(get_dm),
 ) -> None:
     """Streams tool execution output over WebSocket."""
     await websocket.accept()
@@ -137,13 +138,13 @@ async def websocket_action_stream(
         await websocket.close()
         return
 
-    project_root = get_valid_project_root(project_path)
+    project_root = get_valid_project_root(project_path, dm)
     if not project_root:
         await websocket.send_json({"status": "ERROR", "msg": "Access denied"})
         await websocket.close()
         return
 
-    proj_config = get_dm().get_project_data(project_path)
+    proj_config = dm.get_project_data(project_path)
     template = proj_config["custom_tools"].get(tool_name)
     if not template:
         await websocket.send_json({"status": "ERROR", "msg": "Tool template not found"})

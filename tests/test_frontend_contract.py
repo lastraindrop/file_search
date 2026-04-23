@@ -28,7 +28,7 @@ def test_index_contains_updated_frontend_contract(api_client):
 
 def test_static_assets_reflect_current_frontend_architecture(api_client):
     """Static assets should target the new OS-open endpoint and search flags."""
-    js_res = api_client.get("/static/js/app.js")
+    js_res = api_client.get("/static/js/main.js")
     css_res = api_client.get("/static/css/style.css")
 
     assert js_res.status_code == 200
@@ -37,7 +37,7 @@ def test_static_assets_reflect_current_frontend_architecture(api_client):
     js = js_res.text
     css = css_res.text
 
-    assert "/api/fs/open_os" in js
+    assert "api.openInOs" in js or "/api/fs/open_os" in js
     assert "searchIncludeDirs" in js
     assert "searchCaseSensitive" in js
     assert "searchInverse" in js

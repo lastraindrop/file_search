@@ -63,7 +63,7 @@ def test_api_content_edge_cases(project_client, mock_project, file_type, expecte
 @pytest.mark.parametrize("request_format", ["flat", "nested"])
 def test_api_global_settings_sync(project_client, request_format):
     """Consolidated Test: Global settings update (Forward & backward compatible)."""
-    endpoint = "/api/config/global"
+    endpoint = "/api/global/settings"
     payload = {"preview_limit_mb": 2.5, "token_threshold": 300000}
     if request_format == "nested":
         payload = {"settings": payload}
@@ -71,11 +71,10 @@ def test_api_global_settings_sync(project_client, request_format):
     res = project_client.post(endpoint, json=payload)
     assert res.status_code == 200
 
-    # Verify via both GET endpoints
-    for route in ["/api/config/global", "/api/global/settings"]:
-        data = project_client.get(route).json()
-        assert data["preview_limit_mb"] == 2.5
-        assert data["token_threshold"] == 300000
+    # Verify via the unified GET endpoint
+    data = project_client.get("/api/global/settings").json()
+    assert data["preview_limit_mb"] == 2.5
+    assert data["token_threshold"] == 300000
 
 def test_api_project_specific_metadata(project_client, mock_project):
     """Test tools, Categories, and Favorites update endpoints."""

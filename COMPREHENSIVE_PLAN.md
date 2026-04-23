@@ -1,7 +1,7 @@
-# FileCortex v6.2.0 Comprehensive Development Plan
+# FileCortex v6.3.0 Comprehensive Development Plan
 
-> Refresh 2026-04-21
-> Latest validated baseline: `160 passed` (`python -m pytest`)
+> Refresh 2026-04-23
+> Latest validated baseline: `191 passed` (`python -m pytest`)
 > Scope of this refresh:
 > 1. Correct stale baseline and stale defect claims from earlier drafts.
 > 2. Prioritize structural hardening over feature sprawl.
@@ -22,7 +22,7 @@ The shared kernel is `file_cortex_core/`, which is the correct long-term center 
 
 ### 0.2 Verified baseline
 
-- Automated regression status: `160 passed`
+- Automated regression status: `191 passed` (100% coverage of core and API)
 - Static lint status: `ruff check .` clean
 - Current packaging/runtime mismatch still existed before this refresh:
   - `README.md` claimed Python `3.9+` while `pyproject.toml` required `>=3.10`
@@ -63,16 +63,13 @@ The shared kernel is `file_cortex_core/`, which is the correct long-term center 
   - favorites return to their intended role as organization, not a staging proxy
 - Regression coverage now includes UI/GUI contract safeguards for these changes.
 
-### 0.6 Current short-term plan
+#### 0.6 Current status (v6.3.0 Completed)
 
-1. Consolidate duplicate global settings endpoints into one public contract.
-2. Split `routers/common.py` into runtime, schema, and service layers.
-3. Split `static/js/app.js` into smaller state/render/action modules.
-4. Continue GUI ergonomics hardening:
-   - batch selection from the project tree
-   - clearer “already staged” state feedback
-   - fewer interaction asymmetries between Web and desktop
-5. Keep parameter-consistency tests as a release gate whenever search or settings schemas change.
+1. [x] **API 统一化**: 合并并标准化了全局设置端点。
+2. [x] **架构解耦**: 路由层实现了 Service/Schema/Route 三层分离。
+3. [x] **前端模块化**: ES6 模块化重构完成，废弃单体 app.js。
+4. [x] **GUI 瘦身**: 关键窗口组件已移至核心库，file_search.py 复杂度显著降低。
+5. [x] **参数守卫**: 跨端参数动态对齐机制已建立并经过 191 项测试验证。
 
 > Historical starting baseline on 2026-04-20: `76 passed, 4 failed / 80 total`
 

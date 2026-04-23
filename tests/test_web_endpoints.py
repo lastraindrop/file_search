@@ -59,9 +59,9 @@ def test_global_settings_roundtrip(api_client):
         "token_threshold": 500000,
         "theme": "dark"
     }
-    api_client.post("/api/config/global", json=new_settings)
+    api_client.post("/api/global/settings", json=new_settings)
 
-    res = api_client.get("/api/config/global")
+    res = api_client.get("/api/global/settings")
     data = res.json()
     assert data["preview_limit_mb"] == 5.5
     assert data["theme"] == "dark"
