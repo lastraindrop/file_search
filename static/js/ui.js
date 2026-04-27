@@ -208,25 +208,14 @@ export function renderActions() {
 export function updateWorkspaceSummary() {
     const projectPath = state.projectPath;
     const projectName = document.getElementById('summaryProjectName');
-    const searchState = document.getElementById('summarySearchState');
     const stageCount = document.getElementById('summaryStageCount');
     const favoriteCount = document.getElementById('summaryFavoriteCount');
-    const categoryCount = document.getElementById('summaryCategoryCount');
-    const toolCount = document.getElementById('summaryToolCount');
 
     if (projectName) {
         projectName.innerText = projectPath
             ? projectPath.split(/[\\\/]/).pop()
             : 'No workspace loaded';
-    }
-
-    if (searchState) {
-        const searchSettings = window.App.getSearchUiSettings();
-        const parts = [searchSettings.mode];
-        if (searchSettings.includeDirs) parts.push('dirs');
-        if (searchSettings.caseSensitive) parts.push('case');
-        if (searchSettings.inverse) parts.push('inverse');
-        searchState.innerText = projectPath ? parts.join(' | ') : 'Search disabled';
+        projectName.title = projectPath || '';
     }
 
     if (stageCount) stageCount.innerText = `${state.staging.size} staged`;
@@ -234,8 +223,6 @@ export function updateWorkspaceSummary() {
     const groups = state.projConfig.groups || {};
     const favoriteTotal = Object.values(groups).reduce((acc, items) => acc + items.length, 0);
     if (favoriteCount) favoriteCount.innerText = `${favoriteTotal} favorites`;
-    if (categoryCount) categoryCount.innerText = `${Object.keys(state.projConfig.quick_categories || {}).length} categories`;
-    if (toolCount) toolCount.innerText = `${Object.keys(state.projConfig.custom_tools || {}).length} tools`;
 }
 
 export function showActionModal({ title, bodyHtml, confirmText = 'Confirm', onConfirm }) {

@@ -300,6 +300,33 @@ class FileUtils:
         return sorted(unique_files)
 
     @staticmethod
+    @lru_cache(maxsize=128)
+    def _detect_encoding(file_path_str: str, mtime: float, size: int) -> str:
+        """Internal cached encoding detector.
+
+        Args:
+            file_path_str: File path string.
+            mtime: Modification time.
+            size: File size.
+
+        Returns:
+            Detected encoding string.
+        """
+        try:
+            from charset_normalizer import from_bytes
+
+            with open(file_path_str, "rb") as f:
+                header = f.read(65536)
+                best_match = from_bytes(header).best()
+                return (
+                    best_match.encoding
+                    if (best_match and best_match.encoding)
+                    else "utf-8"
+                )
+        except Exception:
+            return "utf-8"
+
+    @staticmethod
     def read_text_smart(file_path: pathlib.Path, max_bytes: int | None = None) -> str:
         """Reads file content with smart encoding detection.
 
@@ -311,20 +338,12 @@ class FileUtils:
             File content as string.
         """
         try:
-            from charset_normalizer import from_bytes
+            st = file_path.stat()
+            encoding = FileUtils._detect_encoding(
+                str(file_path.absolute()), st.st_mtime, st.st_size
+            )
 
             with open(file_path, "rb") as f:
-                header = f.read(65536)
-
-                best_match = from_bytes(header).best()
-                encoding = (
-                    best_match.encoding
-                    if (best_match and best_match.encoding)
-                    else "utf-8"
-                )
-
-                f.seek(0)
-
                 if max_bytes:
                     raw = f.read(max_bytes + 10)
                     try:
@@ -336,8 +355,11 @@ class FileUtils:
         except Exception as e:
             logger.debug(f"Smart read failed for {file_path}: {e}")
 
-        content = file_path.read_text("utf-8", "ignore")
-        return content[:max_bytes] if max_bytes else content
+        try:
+            content = file_path.read_text("utf-8", "ignore")
+            return content[:max_bytes] if max_bytes else content
+        except Exception:
+            return ""
 
     @staticmethod
     def get_language_tag(suffix: str) -> str:

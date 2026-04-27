@@ -80,33 +80,38 @@ class PathValidator:
     def norm_path(p: str | pathlib.Path | None) -> str:
         """Canonicalize path: absolute, platform-aware casing, posix-style.
 
-        Also standardizes trailing slashes.
+        Standardizes separators and removes trailing slashes except for roots.
         """
-        if not p:
+        if p is None:
             return ""
+
+        s = str(p).strip()
+        if not s:
+            return ""
+
         try:
-            p_str = os.path.abspath(str(p)).replace("\\", "/")
-
-            if sys.platform == "win32":
-                p_str = p_str.lower()
-                if p_str.startswith("//?/"):
-                    return p_str.rstrip("/")
-                if len(p_str) == 3 and p_str[1:3] == ":/":
-                    return p_str
-            else:
-                if p_str == "/":
-                    return "/"
-
-            return p_str.rstrip("/")
+            # Attempt physical normalization
+            path_str = os.path.abspath(s).replace("\\", "/")
         except Exception:
-            s = str(p).replace("\\", "/")
-            if sys.platform == "win32":
-                s = s.lower()
-            if s == "/":
+            # Fallback to logical string cleanup if abspath fails
+            path_str = s.replace("\\", "/")
+
+        if sys.platform == "win32":
+            path_str = path_str.lower()
+            # Standardize long path prefixes if they exist
+            if path_str.startswith("//?/"):
+                path_str = path_str[4:]
+
+            # Drive roots: "c:/" remains "c:/"
+            if len(path_str) == 3 and path_str[1:3] == ":/":
+                return path_str
+        else:
+            # POSIX root: "/" remains "/"
+            if path_str == "/":
                 return "/"
-            if len(s) == 3 and s[1:3] == ":/":
-                return s
-            return s.rstrip("/")
+
+        # Remove trailing slashes for all non-root paths
+        return path_str.rstrip("/")
 
     @staticmethod
     def validate_project(path_str: str) -> pathlib.Path:

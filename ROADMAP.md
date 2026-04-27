@@ -16,22 +16,22 @@
 - [x] **191 项回归测试**: 覆盖边界、安全、并发及前端契约
 
 ## 📍 阶段 5：外科手术级重构与安全补全 (v6.3.0 - 已完成)
-- [x] **内核解耦**: `utils.py` 彻底拆分为 `file_io`, `format_utils`, `context`, `format_utils` 子模块
+- [x] **内核解耦**: `utils.py` 彻底拆分为 `file_io`, `format_utils`, `context` 子模块
 - [x] **GUI 瘦身**: 抽离大窗口类至 `file_cortex_core.gui`，降低入口文件复杂度
 - [x] **WebSocket 安全**: 为搜索流增加基于 `token` 的实时鉴权
-- [x] **上下文增强**: XML 导出支持动态注入 `blueprint` (项目蓝图)
-- [x] **环境鲁棒性**: 彻底解决 Windows 下的 `WinError 5` 与 `UnicodeDecodeError`
-- [x] **前端模块化**: `app.js` 彻底拆分为 ES6 模块 (`state`, `api`, `ui`, `main`)
-- [x] **依赖注入 (DI)**: DataManager 全面接入 FastAPI Dependency Injection 模式
+- [x] **前端重构**: 引入 **"控制中心 (Filter Toolbar)"** 布局，实现全局参数动态对齐
+- [x] **智能查重**: 为 DuplicateFinder 增加 **"保留最早/最晚"** 智能全选功能
+- [x] **191 项全量回归测试**: 覆盖内存保护、编码缓存及路径归一化协议
 
 ## 📍 阶段 6：性能监控与稳定性护航 (Planned - 2026 Q3)
 - [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件，防止过度消耗本地资源
+- [ ] **[PLANNED] Virtual Scroll**: Web 端引入虚拟滚动，支持万级文件树的丝滑渲染
 - [ ] **[PLANNED] SlowAPI 监控**: 自动记录并导出 >1s 的慢 IO 操作日志
 - [x] **参数一致性守卫**: 实现了针对搜索参数、Token 预算的跨端动态 Schema 校验 (v6.3.0)
 
 ## 📍 阶段 7：智能化编排与插件生态 (v7.0 - 2026 Q4)
+- [ ] **[PLANNED] 语义指纹**: 为文件生成快速哈希指纹，加速增量索引与变更检测
 - [ ] **[PLANNED] 插件系统**: 定义标准 Hook 接口，支持用户贡献自定义搜索/导出插件
-- [x] **前端状态管理**: `app.js` 拆分为 `state/api/ui/main` 模块，提升 Web 端可维护性 (v6.3.0)
 - [ ] **[PLANNED] 多模态支持**: 增加针对 PDF、Excel 等非代码文件的语义抓取
 
 ---

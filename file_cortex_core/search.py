@@ -170,7 +170,7 @@ def search_generator(
             limit = max_size_mb * 1024 * 1024
             if path.stat().st_size > limit:
                 return False, ""
-            content = FileUtils.read_text_smart(path)
+            content = FileUtils.read_text_smart(path, max_bytes=limit)
             found = False
             snippet = ""
             for line in content.splitlines():

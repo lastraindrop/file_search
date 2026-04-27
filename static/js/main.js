@@ -90,11 +90,12 @@ const App = {
         if (savedExcludes && excludeIn) excludeIn.value = savedExcludes;
         App.restoreSearchUiState();
         
-        ['searchMode', 'searchIncludeDirs', 'searchCaseSensitive', 'searchInverse', 'excludeInput']
+        ['searchMode', 'searchIncludeDirs', 'searchCaseSensitive', 'searchInverse', 'excludeInput', 'searchInput']
             .forEach((id) => {
                 const el = document.getElementById(id);
                 if (!el) return;
-                el.addEventListener('change', () => {
+                const eventType = el.tagName === 'INPUT' && el.type === 'text' ? 'input' : 'change';
+                el.addEventListener(eventType, () => {
                     App.persistSearchUiState();
                     App.updateWorkspaceSummary();
                 });

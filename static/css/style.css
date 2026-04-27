@@ -102,7 +102,50 @@ body {
     background: rgba(2, 6, 23, 0.8) !important;
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border);
-    padding: 0.75rem 1.5rem !important;
+    padding: 0.5rem 1.5rem !important;
+}
+
+.project-path-container {
+    max-width: 450px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+}
+
+.filter-toolbar {
+    background: rgba(15, 23, 42, 0.4);
+    padding: 0.6rem 1rem !important;
+}
+
+.filter-main { max-width: 300px; }
+.filter-skip { max-width: 250px; }
+.mode-select { max-width: 110px; }
+
+.search-checkboxes {
+    display: flex;
+    align-items: center;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+}
+
+.search-option-mini {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.summary-bar {
+    background: rgba(2, 6, 23, 0.3);
+    padding: 0.25rem 1.25rem !important;
+}
+
+.summary-label {
+    font-weight: 300;
+    opacity: 0.7;
+    font-size: 0.8rem;
 }
 
 /* Tree & List Items */

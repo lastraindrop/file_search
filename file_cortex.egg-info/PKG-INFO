@@ -1,26 +1,49 @@
+Metadata-Version: 2.4
+Name: file-cortex
+Version: 6.2.0
+Summary: A powerful workspace orchestrator and file processor for AI-assisted coding.
+Author-email: Developer <dev@example.com>
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.117.0
+Requires-Dist: uvicorn>=0.37.0
+Requires-Dist: pydantic>=2.11.0
+Requires-Dist: jinja2>=3.1.2
+Requires-Dist: pathspec>=0.12.0
+Requires-Dist: charset-normalizer>=3.4.0
+Requires-Dist: python-multipart>=0.0.20
+Requires-Dist: httpx>=0.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.3.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Provides-Extra: gui
+Requires-Dist: customtkinter>=5.1.0; extra == "gui"
+Provides-Extra: build
+Requires-Dist: pyinstaller>=6.18.0; extra == "build"
+
 # FileCortex v6.3.0 Production Release (工作区编排助手)
 
 > **版本**: 6.3.0 | **测试**: 191 passed | **代码质量**: Ruff 0 errors
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。v6.3.0 版本实现了 **外科手术级架构重构**，引入了 **内核解耦 (Microkernel Separation)**、**控制中心 (Control Center) UI 布局**、**智能查重清理** 以及 **191 项全量审计测试**。
+这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。v6.3.0 版本实现了 **外科手术级架构重构**，引入了 **内核解耦 (Microkernel Separation)**、**前端 ES6 模块化**、**FastAPI 依赖注入模式** 以及 **191 项全量审计测试**。
 
 ## 🌟 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
 - **Agentic Era Ready**: 直接接入 AI 智能体生态 (MCP 协议)。
 
-## 🌟 主要功能 (v6.3.0 Final)
+## 🌟 主要功能 (v6.2.0 Final)
 
-### 现代化交互
-- **控制中心 (Control Center)**: Web 端引入顶部全局过滤器工具栏，统一配置“排除规则”与“搜索模式”，实现流程驱动的沉浸式体验。
-- **智能查重 (Smart Cleanup)**: DuplicateFinder 支持“保留最早/最晚”一键筛选冗余文件，效率提升 10x。
-- **XML 导出引擎**: 实现了 **XML 导出引擎**（支持 CDATA 封装），大幅提升 LLM 对复杂/嵌套代码片段的解析精度。
-- **项目蓝图 (Blueprint)**: 一键生成项目架构 ASCII 快照，快速同步项目结构。
-
-### 性能与安全
-- **二级探测缓存**: 引入 `(path, mtime, size)` 编码探测缓存，大幅提升大规模文件读取速度。
-- **内存防溢出**: 针对并发内容搜索实施了 `max_bytes` 物理隔离，确保低配机器也能流畅运行。
-- **路径沙盒**: 强化后的 `PathValidator` 确保跨平台路径 Key 的唯一性与安全性。
-- **Token 预算预警**: UI 会在超过阈值时通过颜色警示用户。
+### AI 上下文增强
+- **XML 导出引擎**：实现了 **XML 导出引擎**（支持 CDATA 封装），大幅提升 LLM 对复杂/嵌套代码片段的解析精度。
+- **项目蓝图 (Blueprint)**：一键生成项目架构 ASCII 快照，快速同步项目结构。
+- **中日韩 Token 加权估算**：集成 **FormatUtils** 的 CJK 加权 Token 估算，自动识别中日韩文字并应用正确的权重计算。
+- **Token 预算预警**：UI 会在超过阈值时通过颜色警示用户。
 
 ### 多端访问
 - **桌面版 (Tkinter)**：原生桌面体验，支持目录树导航与实时预览。

@@ -67,25 +67,42 @@ class DuplicateFinderWindow(tk.Toplevel):
 
         self.tree = ttk.Treeview(
             main_f,
-            columns=("path", "size"),
+            columns=("path", "size", "mtime"),
             show="tree headings",
             selectmode="extended",
         )
         self.tree.heading("#0", text="重复组 / 文件名")
         self.tree.heading("path", text="物理路径")
         self.tree.heading("size", text="大小")
-        self.tree.column("#0", width=300)
-        self.tree.column("path", width=500)
-        self.tree.column("size", width=100)
+        self.tree.heading("mtime", text="修改时间")
+        self.tree.column("#0", width=250)
+        self.tree.column("path", width=450)
+        self.tree.column("size", width=80)
+        self.tree.column("mtime", width=120)
         self.tree.pack(fill=tk.BOTH, expand=True)
 
         btn_f = ttk.Frame(main_f, padding=10)
         btn_f.pack(fill=tk.X)
+
+        self.btn_smart = ttk.Menubutton(btn_f, text="✨ 智能全选...")
+        self.smart_menu = tk.Menu(self.btn_smart, tearoff=0)
+        self.smart_menu.add_command(
+            label="保留最早 (推荐)", command=lambda: self.smart_select("oldest")
+        )
+        self.smart_menu.add_command(
+            label="保留最晚", command=lambda: self.smart_select("newest")
+        )
+        self.smart_menu.add_separator()
+        self.smart_menu.add_command(label="取消全选", command=lambda: self.tree.selection_set())
+        self.btn_smart.config(menu=self.smart_menu, state=tk.DISABLED)
+        self.btn_smart.pack(side=tk.LEFT, padx=5)
+
         self.btn_delete = ttk.Button(
             btn_f,
             text="永久删除选中的冗余文件",
             command=self.delete_selected,
             state=tk.DISABLED,
+            style="Danger.TButton",
         )
         self.btn_delete.pack(side=tk.RIGHT, padx=5)
         ttk.Button(btn_f, text="停止并关闭", command=self.on_close).pack(
@@ -118,13 +135,15 @@ class DuplicateFinderWindow(tk.Toplevel):
                                 f"共发现 {len(self.duplicate_groups)} 组重复内容。"
                             )
                             self.btn_delete.config(state=tk.NORMAL)
+                            self.btn_smart.config(state=tk.NORMAL)
                         elif res[0] == "ERROR":
                             messagebox.showerror("错误", f"扫描失败: {res[1]}")
                             self.destroy()
                         return
 
                     h = res["hash"]
-                    sz_fmt = FormatUtils.format_size(res["size"])
+                    sz = res["size"]
+                    sz_fmt = FormatUtils.format_size(sz)
                     group_id = self.tree.insert(
                         "",
                         "end",
@@ -135,6 +154,9 @@ class DuplicateFinderWindow(tk.Toplevel):
 
                     for p_str in res["paths"]:
                         p = pathlib.Path(p_str)
+                        st = p.stat()
+                        mtime = st.st_mtime
+                        dt_fmt = FormatUtils.format_datetime(mtime)
                         rel = (
                             p.relative_to(self.current_dir)
                             if self.current_dir in p.parents
@@ -144,7 +166,7 @@ class DuplicateFinderWindow(tk.Toplevel):
                             group_id,
                             "end",
                             text=f"📄 {rel}",
-                            values=(p_str, sz_fmt),
+                            values=(p_str, sz_fmt, dt_fmt, mtime),
                         )
                 except queue.Empty:
                     break
@@ -156,6 +178,42 @@ class DuplicateFinderWindow(tk.Toplevel):
 
         self.after(200, self.poll_results)
 
+    def smart_select(self, mode: str = "oldest") -> None:
+        """Automatically selects redundant files based on time.
+
+        Args:
+            mode: 'oldest' (keep oldest) or 'newest' (keep newest).
+        """
+        selection = []
+        for group in self.tree.get_children():
+            children = self.tree.get_children(group)
+            if not children:
+                continue
+
+            # Sort children by mtime (stored in values[3])
+            items = []
+            for child in children:
+                vals = self.tree.item(child)["values"]
+                items.append((float(vals[3]), child))
+
+            # Sort by time
+            items.sort(key=lambda x: x[0])
+
+            if mode == "oldest":
+                # Keep items[0], select the rest
+                selection.extend([it[1] for it in items[1:]])
+            else:
+                # Keep items[-1], select the rest
+                selection.extend([it[1] for it in items[:-1]])
+
+        self.tree.selection_set(selection)
+        if selection:
+            self.show_status(f"智能全选：已选中 {len(selection)} 个冗余文件。")
+
+    def show_status(self, msg: str) -> None:
+        """Updates the header text."""
+        self.lbl_head.config(text=msg)
+
     def delete_selected(self) -> None:
         """Deletes the selected duplicate files."""
         sel = self.tree.selection()
@@ -166,7 +224,9 @@ class DuplicateFinderWindow(tk.Toplevel):
         for s in sel:
             vals = self.tree.item(s)["values"]
             if vals and len(vals) > 0:
-                to_delete.append(vals[0])
+                # Ensure it's a file, not a group header
+                if self.tree.parent(s):
+                    to_delete.append(vals[0])
 
         if not to_delete:
             messagebox.showwarning("提示", "请先选中具体的重复文件（非分组标题）后再执行删除。")
@@ -179,19 +239,24 @@ class DuplicateFinderWindow(tk.Toplevel):
         ):
             from ..actions import FileOps
 
+            deleted_count = 0
             for p_str in to_delete:
                 try:
                     FileOps.delete_file(p_str)
-                    # UI removal logic (simplified)
-                    for item in list(self.tree.selection()):
-                        if (
-                            self.tree.item(item)["values"]
-                            and self.tree.item(item)["values"][0] == p_str
-                        ):
-                            self.tree.delete(item)
+                    deleted_count += 1
+                    # Find and remove item from tree
+                    for group in self.tree.get_children():
+                        for child in self.tree.get_children(group):
+                            if (
+                                self.tree.item(child)["values"]
+                                and self.tree.item(child)["values"][0] == p_str
+                            ):
+                                self.tree.delete(child)
                 except Exception as e:
                     messagebox.showerror("错误", f"删除 {p_str} 失败: {e}")
-            messagebox.showinfo("成功", "已清理选中的冗余文件！")
+
+            messagebox.showinfo("成功", f"已清理 {deleted_count} 个冗余文件！")
+            self.smart_select("oldest")  # Refresh selection if any groups remain
 
     def on_close(self) -> None:
         """Handles window close event."""
