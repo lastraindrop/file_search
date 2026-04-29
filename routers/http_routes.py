@@ -116,7 +116,7 @@ def get_content(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
         return {"content": "--- Binary File (Preview Unavailable) ---"}
     try:
         limit_mb = dm.data["global_settings"].get("preview_limit_mb", 1)
-        max_preview = int(limit_mb * 1024 * 1024)
+        max_preview = int(round(limit_mb * 1024 * 1024))
         content = FileUtils.read_text_smart(p, max_bytes=max_preview)
 
         return {

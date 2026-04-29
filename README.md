@@ -1,14 +1,15 @@
-# FileCortex v6.3.0 Production Release (工作区编排助手)
+# FileCortex v6.3.0 Production Ready (工作区编排助手)
 
 > **版本**: 6.3.0 | **测试**: 191 passed | **代码质量**: Ruff 0 errors
 
-这是一个通用的 **工作区编排与文件处理工具 (Workspace Orchestrator)**。v6.3.0 版本实现了 **外科手术级架构重构**，引入了 **内核解耦 (Microkernel Separation)**、**控制中心 (Control Center) UI 布局**、**智能查重清理** 以及 **191 项全量审计测试**。
-
 ## 🌟 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
-- **Agentic Era Ready**: 直接接入 AI 智能体生态 (MCP 协议)。
+- **Engineering Excellence**: 基于 **Pydantic V2** 与 **Google Style** 构建的健壮内核。
 
 ## 🌟 主要功能 (v6.3.0 Final)
+...
+- **强类型配置**: 引入 Pydantic 模型驱动的 `DataManager`，实现配置的自愈与严谨校验。
+- **策略化搜索**: 重构后的搜索引擎支持多维度匹配策略，更易于扩展。
 
 ### 现代化交互
 - **控制中心 (Control Center)**: Web 端引入顶部全局过滤器工具栏，统一配置“排除规则”与“搜索模式”，实现流程驱动的沉浸式体验。

@@ -338,26 +338,33 @@ class FileUtils:
             File content as string.
         """
         try:
+            if not file_path.exists() or not file_path.is_file():
+                return ""
+
             st = file_path.stat()
+            # If max_bytes is set and file is huge, read_text_smart must still be efficient
             encoding = FileUtils._detect_encoding(
                 str(file_path.absolute()), st.st_mtime, st.st_size
             )
 
             with open(file_path, "rb") as f:
                 if max_bytes:
-                    raw = f.read(max_bytes + 10)
+                    raw = f.read(max_bytes)
                     try:
-                        return raw.decode(encoding, errors="ignore")[:max_bytes]
+                        return raw.decode(encoding, errors="ignore")
                     except Exception:
-                        return raw.decode("utf-8", errors="ignore")[:max_bytes]
+                        return raw.decode("utf-8", errors="ignore")
                 else:
                     return f.read().decode(encoding, errors="ignore")
         except Exception as e:
             logger.debug(f"Smart read failed for {file_path}: {e}")
 
+        # Final safety fallback using rb and decode to respect max_bytes
         try:
-            content = file_path.read_text("utf-8", "ignore")
-            return content[:max_bytes] if max_bytes else content
+            with open(file_path, "rb") as f:
+                if max_bytes:
+                    return f.read(max_bytes).decode("utf-8", errors="ignore")
+                return f.read().decode("utf-8", errors="ignore")
         except Exception:
             return ""
 

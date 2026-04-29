@@ -267,8 +267,9 @@ async def get_file_stats(
                 f"  {path.name}: {FormatUtils.format_size(size)}, "
                 f"{tokens} tokens, mtime={FormatUtils.format_datetime(stat.st_mtime)}"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"MCP Stat error for {p}: {e}")
+            lines.append(f"  {path.name}: Error retrieving stats")
 
     lines.append(f"\nTotal: {FormatUtils.format_size(total_size)}, {total_tokens} tokens")
     return "\n".join(lines)
