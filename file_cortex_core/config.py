@@ -4,7 +4,7 @@
 Manages application and project configuration with atomic persistence.
 """
 
-import copy
+import contextlib
 import json
 import logging
 import logging.handlers
@@ -244,10 +244,20 @@ class DataManager:
 
                 # Ensure list normalization
                 self.config.recent_projects = [
-                    p for p in [PathValidator.norm_path(x) for x in self.config.recent_projects] if p
+                    p
+                    for p in [
+                        PathValidator.norm_path(x)
+                        for x in self.config.recent_projects
+                    ]
+                    if p
                 ]
                 self.config.pinned_projects = [
-                    p for p in [PathValidator.norm_path(x) for x in self.config.pinned_projects] if p
+                    p
+                    for p in [
+                        PathValidator.norm_path(x)
+                        for x in self.config.pinned_projects
+                    ]
+                    if p
                 ]
 
             except Exception as e:
@@ -285,10 +295,8 @@ class DataManager:
 
             except Exception as e:
                 if temp_path and os.path.exists(temp_path):
-                    try:
+                    with contextlib.suppress(Exception):
                         os.unlink(temp_path)
-                    except Exception:
-                        pass
                 logger.error(f"Failed to save configuration: {e}")
                 raise e
 
@@ -475,6 +483,11 @@ class DataManager:
 
     def update_custom_tools(self, project_path: str, tools: dict[str, str]) -> None:
         """Updates the custom tools dictionary for a project."""
+        if not isinstance(tools, dict):
+            raise ValueError("tools must be a dictionary.")
+        for k in tools:
+            if not isinstance(k, str):
+                raise ValueError(f"Tool name must be a string, got {type(k).__name__}.")
         with self._lock:
             proj = self.get_project_data_obj(project_path)
             proj.custom_tools = tools
@@ -484,7 +497,7 @@ class DataManager:
         """Updates quick categories, ensuring no traversal in relative paths."""
         with self._lock:
             proj = self.get_project_data_obj(project_path)
-            for name, rel_dir in categories.items():
+            for _name, rel_dir in categories.items():
                 if ".." in rel_dir:
                     raise ValueError(f"Category path '{rel_dir}' contains illegal '..' traversal.")
             proj.quick_categories = categories

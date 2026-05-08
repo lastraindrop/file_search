@@ -84,8 +84,8 @@ def test_dm_group_management(clean_config, mock_project):
 
     # Remove
     dm.remove_from_group(p, "Default", [files[0]])
+    proj = dm.get_project_data(p)
     assert len(proj["groups"]["Default"]) == 1
-    # Check with normalization
     found = [PathValidator.norm_path(x) for x in proj["groups"]["Default"]]
     assert PathValidator.norm_path(files[1]) in found
 

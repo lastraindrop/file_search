@@ -48,9 +48,10 @@ class PathMatcher:
     """Handles filename and path-based matching logic."""
 
     def __init__(self, query: SearchQuery):
+        """Initializes the PathMatcher with the given search query."""
         self.q = query
         self.flags = 0 if query.case_sensitive else re.IGNORECASE
-        
+
         # Pre-process keywords
         processed_text = query.text.strip() if query.case_sensitive else query.text.lower().strip()
         self.all_pos = query.positive_tags.copy()
@@ -60,10 +61,10 @@ class PathMatcher:
                     self.all_pos.append(kw)
 
         self.neg_keywords = [k if query.case_sensitive else k.lower() for k in query.negative_tags]
-        
+
         self.plain_pos: list[str] = []
         self.regex_pos: list[re.Pattern] = []
-        
+
         for tag in self.all_pos:
             if tag.startswith("/") and tag.endswith("/") and len(tag) > 2:
                 try:
@@ -82,9 +83,10 @@ class PathMatcher:
 
     def matches(self, name: str, rel_path: pathlib.Path | None = None) -> bool:
         """Determines if a name/path matches the criteria."""
-        if not (self.q.text or self.all_pos or self.neg_keywords):
-            found = False
-        elif self.q.text.strip() in (".", "..") and not (self.all_pos or self.neg_keywords):
+        if not (self.q.text or self.all_pos or self.neg_keywords) or (
+            self.q.text.strip() in (".", "..")
+            and not (self.all_pos or self.neg_keywords)
+        ):
             found = False
         else:
             target_path = str(rel_path).replace("\\", "/") if rel_path else name
@@ -121,6 +123,7 @@ class ContentMatcher:
     """Handles file content-based matching logic."""
 
     def __init__(self, query: SearchQuery, path_matcher: PathMatcher):
+        """Initializes the ContentMatcher with query and path matcher."""
         self.q = query
         self.pm = path_matcher
 
@@ -128,31 +131,30 @@ class ContentMatcher:
         """Scans file content for matches."""
         if self.q.mode not in ("content", "regex") or not self.q.text.strip():
             return False, ""
-        
+
         try:
             limit = self.q.max_size_mb * 1024 * 1024
             if path.stat().st_size > limit:
                 return False, ""
-            
+
             content = FileUtils.read_text_smart(path, max_bytes=limit)
             found = False
             snippet = ""
-            
+
             target_query = self.q.text if self.q.case_sensitive else self.q.text.lower()
-            
+
             for line in content.splitlines():
                 target_line = line if self.q.case_sensitive else line.lower()
-                
+
                 if self.q.mode == "regex" and self.pm.main_re:
                     if self.pm.main_re.search(line):
                         found = True
                         snippet = line.strip()
                         break
-                elif self.q.mode == "content":
-                    if target_query in target_line:
-                        found = True
-                        snippet = line.strip()
-                        break
+                elif self.q.mode == "content" and target_query in target_line:
+                    found = True
+                    snippet = line.strip()
+                    break
 
             return (found != self.q.is_inverse), snippet
         except Exception as e:
@@ -208,14 +210,14 @@ def search_generator(
         positive_tags=positive_tags or [],
         negative_tags=negative_tags or [],
     )
-    
+
     root_path = pathlib.Path(root_dir)
     excludes = [e.lower().strip() for e in query.manual_excludes.split() if e.strip()]
     git_spec = FileUtils.get_gitignore_spec(root_path) if query.use_gitignore else None
-    
+
     path_matcher = PathMatcher(query)
     content_matcher = ContentMatcher(query, path_matcher)
-    
+
     count = 0
     content_futures: dict[Any, dict[str, Any]] = {}
 
@@ -225,10 +227,10 @@ def search_generator(
                 break
 
             rel_root = pathlib.Path(root).relative_to(root_path)
-            
+
             # Prune directories based on ignore rules
             dirs[:] = [
-                d for d in dirs 
+                d for d in dirs
                 if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, True)
             ]
 
@@ -245,13 +247,13 @@ def search_generator(
             for file in files:
                 if stop_event and stop_event.is_set():
                     break
-                    
+
                 full_path = pathlib.Path(root) / file
                 rel_path = rel_root / file
-                
+
                 if FileUtils.should_ignore(file, rel_path, excludes, git_spec, False):
                     continue
-                
+
                 try:
                     meta = FileUtils.get_metadata(full_path)
                 except Exception:
@@ -270,7 +272,7 @@ def search_generator(
                 elif query.mode == "content" and query.text:
                     future = SHARED_SEARCH_POOL.submit(content_matcher.match_file, full_path)
                     content_futures[future] = meta
-                    
+
                     if len(content_futures) >= DEFAULT_BATCH_SIZE:
                         # Process done futures to maintain result order and flow
                         done_batch = [f for f in content_futures if f.done()]
@@ -280,7 +282,7 @@ def search_generator(
                                 done_batch = [f for f in content_futures if f.done()]
                             except Exception:
                                 pass
-                                
+
                         for f in done_batch:
                             is_match, snippet = f.result()
                             info = content_futures.pop(f)

@@ -17,13 +17,33 @@ export const config = {
     },
     defaults: {
         archiveName: 'context_backup.zip',
-        tokenThreshold: 128000,
+        tokenThreshold: 100000,
         tokenRatio: 4
     },
     endpoints: {
         workspaces: '/api/workspaces',
         openProject: '/api/open',
-        openPathInOs: '/api/fs/open_os'
+        openPathInOs: '/api/fs/open_os',
+        projectConfig: '/api/project/config',
+        projectSettings: '/api/project/settings',
+        globalSettings: '/api/global/settings',
+        fsChildren: '/api/fs/children',
+        content: '/api/content',
+        fileNote: '/api/project/note',
+        archive: '/api/fs/archive',
+        rename: '/api/fs/rename',
+        batchRename: '/api/fs/batch_rename',
+        delete: '/api/fs/delete',
+        move: '/api/fs/move',
+        save: '/api/fs/save',
+        stageAll: '/api/actions/stage_all',
+        categorize: '/api/actions/categorize',
+        terminate: '/api/actions/terminate',
+        pin: '/api/workspaces/pin',
+        stats: '/api/project/stats',
+        generate: '/api/generate',
+        collectPaths: '/api/fs/collect_paths',
+        favorites: '/api/project/favorites',
     }
 };
 

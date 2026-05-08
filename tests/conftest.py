@@ -21,7 +21,7 @@ def _reset_singleton():
 
     with DataManager._lock:
         DataManager._instance = None
-    
+
     yield
 
     # Cleanup lingering processes to release file locks on Windows
@@ -51,7 +51,7 @@ def _reset_singleton():
     # Final sweep
     with DataManager._lock:
         DataManager._instance = None
-    
+
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
 

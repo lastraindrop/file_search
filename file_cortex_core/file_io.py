@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""File I/O utilities for FileCortex.
-"""
+"""File I/O utilities for FileCortex."""
 
+import contextlib
 import fnmatch
 import os
 import pathlib
@@ -80,9 +80,7 @@ class FileUtils:
                     if byte < 32 and byte not in (7, 8, 9, 10, 12, 13, 27):
                         non_text_count += 1
 
-                if (non_text_count / len(chunk)) > 0.3:
-                    return True
-                return False
+                return (non_text_count / len(chunk)) > 0.3
         except Exception:
             return True
 
@@ -104,10 +102,8 @@ class FileUtils:
         gitignore_path = pathlib.Path(root_dir) / ".gitignore"
         mtime = 0
         if gitignore_path.exists():
-            try:
+            with contextlib.suppress(Exception):
                 mtime = gitignore_path.stat().st_mtime
-            except Exception:
-                pass
         return FileUtils._get_cached_gitignore_spec(str(root_dir), mtime)
 
     @staticmethod

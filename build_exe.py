@@ -12,6 +12,7 @@ import shutil
 
 
 def build():
+    """Builds the desktop executable using PyInstaller."""
     # 确保在当前目录下运行
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)

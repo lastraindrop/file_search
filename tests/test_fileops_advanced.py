@@ -15,7 +15,7 @@ def test_save_content_atomic(tmp_path):
     assert target.read_text(encoding="utf-8") == "NEW"
 
 def test_save_content_binary_reject(tmp_path):
-    """Saving binary content as text should either work or raise appropriate error if validation exists."""
+    """Saving binary content as text should either work or raise error."""
     # Current implementation just writes string.
     # But let's check if FileOps prevents overwriting known binary types if added in future.
     # For now, ensure it writes correctly.

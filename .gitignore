@@ -12,6 +12,7 @@ buildvenv/
 dist/
 build/
 *.spec
+*.egg-info/
 tests/tmp_tests/
 tests/tmp_test_res/
 test_recursive_temp/

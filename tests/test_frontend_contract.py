@@ -12,7 +12,6 @@ def test_index_contains_updated_frontend_contract(api_client):
     required_ids = [
         "workspaceSummaryBar",
         "summaryProjectName",
-        "summarySearchState",
         "searchIncludeDirs",
         "searchCaseSensitive",
         "searchInverse",
@@ -50,7 +49,8 @@ def test_static_assets_reflect_current_frontend_architecture(api_client):
 
 def test_desktop_gui_avoids_hardcoded_image_processor_menu():
     """Desktop GUI should expose generic custom-tool actions, not fixed image tools."""
-    source = open("file_search.py", encoding="utf-8", errors="ignore").read()
+    with open("file_search.py", encoding="utf-8", errors="ignore") as f:
+        source = f.read()
 
     # Avoid checking localized Chinese strings which are prone to encoding issues in tests
     assert "image_splitter" not in source

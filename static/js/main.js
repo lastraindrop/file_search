@@ -112,7 +112,17 @@ const App = {
             if (pathInput) pathInput.value = lastProj;
             App.openProject();
         }
-        
+
+        // Close search overlay on outside click
+        document.addEventListener('click', (e) => {
+            const overlay = document.getElementById('searchOverlay');
+            if (overlay && overlay.style.display !== 'none') {
+                if (!overlay.contains(e.target) && !e.target.closest('#searchInput') && !e.target.closest('#btnStopSearch') && !e.target.closest('[onclick*="startSearch"]')) {
+                    App.closeSearchOverlay();
+                }
+            }
+        });
+
         const actionConfirm = document.getElementById('actionModalConfirm');
         if (actionConfirm) {
             actionConfirm.addEventListener('click', async () => {
@@ -272,6 +282,93 @@ const App = {
         } catch (e) { ui.showToast("Failed to save settings: " + e.message, 'danger'); }
     },
 
+    showProjectSettings: () => {
+        const cfg = App.state.projConfig || {};
+        document.getElementById('proj-excludes').value = cfg.excludes || '';
+        document.getElementById('proj-max-search-size').value = cfg.max_search_size_mb || 10;
+
+        const toolsEditor = document.getElementById('proj-tools-editor');
+        toolsEditor.innerHTML = '';
+        Object.entries(cfg.custom_tools || {}).forEach(([name, tmpl]) => {
+            toolsEditor.appendChild(App._createKeyValueRow('tool', name, tmpl));
+        });
+
+        const catEditor = document.getElementById('proj-categories-editor');
+        catEditor.innerHTML = '';
+        Object.entries(cfg.quick_categories || {}).forEach(([name, dir]) => {
+            catEditor.appendChild(App._createKeyValueRow('category', name, dir));
+        });
+
+        const tmplEditor = document.getElementById('proj-templates-editor');
+        tmplEditor.innerHTML = '';
+        Object.entries(cfg.prompt_templates || {}).forEach(([name, text]) => {
+            tmplEditor.appendChild(App._createKeyValueRow('template', name, text));
+        });
+
+        new bootstrap.Modal(document.getElementById('projectSettingsModal')).show();
+    },
+
+    _createKeyValueRow: (prefix, key, value) => {
+        const row = document.createElement('div');
+        row.className = 'd-flex gap-1 mb-1 align-items-center';
+        row.id = `kv-row-${prefix}-${key}`;
+        row.innerHTML = `
+            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-key" style="width:30%" value="${App.escapeHtml(key)}" placeholder="Name">
+            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-value" style="width:55%" value="${App.escapeHtml(value)}" placeholder="Value">
+            <button class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('.d-flex').remove()">&times;</button>
+        `;
+        return row;
+    },
+
+    addToolEntry: () => {
+        const editor = document.getElementById('proj-tools-editor');
+        const idx = editor.children.length;
+        editor.appendChild(App._createKeyValueRow('tool', `tool_${idx}`, ''));
+    },
+
+    addCategoryEntry: () => {
+        const editor = document.getElementById('proj-categories-editor');
+        const idx = editor.children.length;
+        editor.appendChild(App._createKeyValueRow('category', `cat_${idx}`, ''));
+    },
+
+    addTemplateEntry: () => {
+        const editor = document.getElementById('proj-templates-editor');
+        const idx = editor.children.length;
+        editor.appendChild(App._createKeyValueRow('template', `tmpl_${idx}`, ''));
+    },
+
+    saveProjectSettings: async () => {
+        const readKvRows = (containerId) => {
+            const rows = document.querySelectorAll(`#${containerId} .d-flex`);
+            const result = {};
+            rows.forEach((row) => {
+                const inputs = row.querySelectorAll('input');
+                if (inputs.length >= 2) {
+                    const key = inputs[0].value.trim();
+                    const val = inputs[1].value.trim();
+                    if (key && val) result[key] = val;
+                }
+            });
+            return result;
+        };
+
+        const settings = {
+            excludes: document.getElementById('proj-excludes').value,
+            max_search_size_mb: parseInt(document.getElementById('proj-max-search-size').value, 10) || 10,
+            custom_tools: readKvRows('proj-tools-editor'),
+            quick_categories: readKvRows('proj-categories-editor'),
+            prompt_templates: readKvRows('proj-templates-editor'),
+        };
+
+        try {
+            await api.saveProjectSettings(App.state.projectPath, settings);
+            bootstrap.Modal.getInstance(document.getElementById('projectSettingsModal')).hide();
+            ui.showToast("Project settings saved");
+            App.refreshProject();
+        } catch (e) { ui.showToast("Failed to save project settings: " + e.message, 'danger'); }
+    },
+
     previewFile: async (path) => {
         if (App.state.isEditing && App.state.currentFile !== path) {
             if (!confirm("Discard unsaved changes and switch file?")) return;
@@ -330,12 +427,6 @@ const App = {
         if (!App.state.currentFile) return;
         const notes = App.state.projConfig.notes || {};
         let note = notes[App.state.currentFile] || "";
-        if (!note) {
-            const fileName = App.state.currentFile.split(/[\\\/]/).pop();
-            Object.entries(notes).forEach(([key, val]) => {
-                if (key.endsWith(fileName)) note = val;
-            });
-        }
         document.getElementById('noteInput').value = note;
         document.getElementById('noteOverlay').style.display = 'block';
     },
@@ -526,43 +617,72 @@ const App = {
         App.persistSearchUiState();
         ui.updateWorkspaceSummary();
         const query = document.getElementById('searchInput').value;
-        const tab = new bootstrap.Tab(document.getElementById('tab-search'));
-        tab.show();
 
-        const resultsDiv = document.getElementById('searchResultsList');
-        resultsDiv.innerHTML = '<div class="text-center p-3">Searching...</div>';
+        if (!query.trim()) return;
+
+        document.getElementById('btnStopSearch').style.display = 'inline-block';
+        const overlay = document.getElementById('searchOverlay');
+        const list = document.getElementById('searchOverlayList');
+        const count = document.getElementById('searchOverlayCount');
+        overlay.style.display = 'flex';
+        list.innerHTML = '<div class="text-center p-3 small text-muted">Searching...</div>';
+        count.innerText = '...';
 
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const token = App.state.globalSettings.api_token || "";
+        const token = App.state.globalSettings.api_token || window.__FCTX_API_TOKEN__ || "";
         const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${settings.mode}&inverse=${settings.inverse}&case_sensitive=${settings.caseSensitive}&include_dirs=${settings.include_dirs}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 
         if (App.state.socket) App.state.socket.close();
         App.state.socket = new WebSocket(wsUrl);
-        App.state.socket.onopen = () => { resultsDiv.innerHTML = ''; };
+        let resultCount = 0;
+        App.state.socket.onopen = () => { list.innerHTML = ''; };
         App.state.socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.status === "DONE") {
-                const count = resultsDiv.querySelectorAll('[data-path]').length;
-                if (count === 0) {
-                    resultsDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">?</div><div>No results found.</div></div>';
-                } else {
-                    const footer = document.createElement('div');
-                    footer.className = 'text-center p-2 text-muted x-small border-top';
-                    footer.innerText = `${count} results found`;
-                    resultsDiv.appendChild(footer);
+                if (resultCount === 0) {
+                    list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">?</div><div>No results found.</div></div>';
                 }
+                count.innerText = `${resultCount} results`;
+                document.getElementById('btnStopSearch').style.display = 'none';
                 return App.state.socket.close();
             }
             if (data.status === "ERROR") {
-                resultsDiv.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
+                list.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
+                count.innerText = 'Error';
+                document.getElementById('btnStopSearch').style.display = 'none';
                 return App.state.socket.close();
             }
-            ui.renderSearchResultItem(data);
-            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+            resultCount++;
+            count.innerText = `${resultCount} results`;
+            ui.renderSearchResultItem(data, true);
+            list.scrollTop = list.scrollHeight;
         };
         App.state.socket.onerror = () => {
-            resultsDiv.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
+            list.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
+            count.innerText = 'Error';
+            document.getElementById('btnStopSearch').style.display = 'none';
         };
+    },
+
+    stopSearch: () => {
+        if (App.state.socket) {
+            App.state.socket.close();
+            App.state.socket = null;
+        }
+        document.getElementById('btnStopSearch').style.display = 'none';
+        const count = document.getElementById('searchOverlayCount');
+        const list = document.getElementById('searchOverlayList');
+        const existing = list.querySelectorAll('[data-path]');
+        count.innerText = `${existing.length} results (stopped)`;
+    },
+
+    closeSearchOverlay: () => {
+        if (App.state.socket) {
+            App.state.socket.close();
+            App.state.socket = null;
+        }
+        document.getElementById('searchOverlay').style.display = 'none';
+        document.getElementById('btnStopSearch').style.display = 'none';
     },
 
     categorizeStaged: async (catName) => {
@@ -891,7 +1011,9 @@ const App = {
     stageAll: async () => {
         if (!App.state.projectPath) return;
         try {
-            const data = await api.stageAll(App.state.projectPath);
+            const settings = App.getSearchUiSettings();
+            const mode = settings.mode === 'content' ? 'files' : settings.mode;
+            const data = await api.stageAll(App.state.projectPath, mode, true);
             await App.refreshProject();
             ui.showToast(`Staged ${data.added_count} files`);
         } catch (e) { ui.showToast("Stage All failed: " + e.message, 'danger'); }
@@ -1013,6 +1135,9 @@ const App = {
         assignBool('searchIncludeDirs', App.config.storageKeys.includeDirs);
         assignBool('searchCaseSensitive', App.config.storageKeys.caseSensitive);
         assignBool('searchInverse', App.config.storageKeys.inverse);
+        const savedMode = localStorage.getItem(App.config.storageKeys.mode);
+        const modeSelect = document.getElementById('searchMode');
+        if (savedMode && modeSelect) modeSelect.value = savedMode;
     },
 
     getSearchUiSettings: () => ({

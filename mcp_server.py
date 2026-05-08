@@ -13,6 +13,7 @@ from file_cortex_core import (
     DataManager,
     FileUtils,
     PathValidator,
+    logger,
     search_generator,
 )
 
@@ -26,10 +27,12 @@ except ImportError:
         """Fallback mock for environments without MCP SDK."""
 
         def __init__(self, name: str) -> None:
+            """Initializes the fallback FastMCP mock."""
             self.name = name
             self._tools = {}
 
         def tool(self, name: str = None, description: str = ""):
+            """Registers a tool decorator."""
             def decorator(func):
                 tool_name = name or func.__name__
                 self._tools[tool_name] = {
@@ -40,6 +43,7 @@ except ImportError:
             return decorator
 
         def run(self, host: str = None, port: int = None):
+            """Prints server info (mock)."""
             if host or port:
                 print(
                     f"MCP Server would run on {host}:{port} "
@@ -60,6 +64,7 @@ def get_mcp() -> FastMCP:
     return _mcp_instance
 
 def get_dm():
+    """Returns a DataManager singleton instance."""
     return DataManager()
 
 
@@ -206,13 +211,12 @@ async def get_project_blueprint(
         return "Error: Project path is not registered or authorized."
 
     try:
-        tree = FileUtils.generate_ascii_tree(
+        return FileUtils.generate_ascii_tree(
             root,
             excludes_str=excludes,
             use_gitignore=True,
             max_depth=max_depth,
         )
-        return tree
     except Exception as e:
         return f"Error generating blueprint: {e}"
 

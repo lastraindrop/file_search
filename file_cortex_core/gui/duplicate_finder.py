@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Duplicate finder window for FileCortex GUI.
-"""
+"""Duplicate finder window for FileCortex GUI."""
 
 import pathlib
 import queue
@@ -13,7 +12,6 @@ from tkinter import (
 
 from ..config import DataManager, logger
 from ..duplicate import DuplicateWorker
-from ..file_io import FileUtils
 from ..format_utils import FormatUtils
 
 
@@ -223,10 +221,8 @@ class DuplicateFinderWindow(tk.Toplevel):
         to_delete = []
         for s in sel:
             vals = self.tree.item(s)["values"]
-            if vals and len(vals) > 0:
-                # Ensure it's a file, not a group header
-                if self.tree.parent(s):
-                    to_delete.append(vals[0])
+            if vals and len(vals) > 0 and self.tree.parent(s):
+                to_delete.append(vals[0])
 
         if not to_delete:
             messagebox.showwarning("提示", "请先选中具体的重复文件（非分组标题）后再执行删除。")

@@ -62,11 +62,11 @@ def main() -> None:
         print(f"PROJECT REGISTERED: {abs_path}")
         return
 
-    elif args.command == "projects":
+    if args.command == "projects":
         for p in data_mgr.data["projects"]:
             print(f"- {p}")
 
-    elif args.command == "stage":
+    if args.command == "stage":
         proj_root = data_mgr.resolve_project_root(args.project)
         if not proj_root:
             print(f"ERROR: Project '{args.project}' is not registered or is unsafe.")
@@ -84,7 +84,7 @@ def main() -> None:
             data_mgr.save()
             print(f"Staged: {file_path_str}")
 
-    elif args.command == "categorize":
+    if args.command == "categorize":
         proj_root = data_mgr.resolve_project_root(args.project)
         if not proj_root:
             print(f"ERROR: Project '{args.project}' is not registered.")
@@ -103,7 +103,7 @@ def main() -> None:
         except Exception as e:
             print(f"ERROR: {e}")
 
-    elif args.command == "run":
+    if args.command == "run":
         proj_root = data_mgr.resolve_project_root(args.project)
         if not proj_root:
             print(f"ERROR: Project '{args.project}' is not registered.")

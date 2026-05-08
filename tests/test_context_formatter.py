@@ -30,6 +30,7 @@ def test_to_xml_empty_files(tmp_path):
     assert "<file " not in res
 
 def test_blueprint_depth_limit(stress_project):
+    """Verifies that depth limit works in blueprint generation."""
     from file_cortex_core import FileUtils
     # max_depth=0 allows showing the root's direct children but not their contents
     tree = FileUtils.generate_ascii_tree(str(stress_project), excludes_str="", max_depth=0)

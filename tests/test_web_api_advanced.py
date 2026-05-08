@@ -230,6 +230,7 @@ class TestWebAPIAdvanced:
 
 
 def client_get_settings(client):
+    """Helper to get global settings."""
     return client.get("/api/global/settings").json()
 
 

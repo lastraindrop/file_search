@@ -17,8 +17,8 @@ from collections.abc import Generator
 from typing import Any
 
 from .config import DataManager, logger
-from .security import PathValidator
 from .file_io import FileUtils
+from .security import PathValidator
 
 
 class FileOps:
@@ -399,15 +399,14 @@ class ActionBridge:
             if is_shell:
                 safe_context = {k: win_quote(v) for k, v in context.items()}
                 return template.format(**safe_context), True, context
-            else:
-                cmd_str = template.format(**context)
-                try:
-                    raw_args = shlex.split(cmd_str, posix=False)
-                    args = [t.strip('"') for t in raw_args]
-                    return args, False, context
-                except Exception:
-                    safe_context = {k: win_quote(v) for k, v in context.items()}
-                    return template.format(**safe_context), True, context
+            cmd_str = template.format(**context)
+            try:
+                raw_args = shlex.split(cmd_str, posix=False)
+                args = [t.strip('"') for t in raw_args]
+                return args, False, context
+            except Exception:
+                safe_context = {k: win_quote(v) for k, v in context.items()}
+                return template.format(**safe_context), True, context
         else:
             tokens = shlex.split(template, posix=True)
             final_cmd = [t.format(**context) for t in tokens]
@@ -570,7 +569,4 @@ class ActionBridge:
                     process.terminate()
                     process.wait(timeout=1)
                 except Exception:
-                    try:
-                        process.kill()
-                    except Exception:
-                        pass
+                    pass

@@ -60,13 +60,6 @@ export function updateFileMetaUI(path) {
     tagContainer.innerHTML = '';
     const tags = state.projConfig.tags || {};
     const matchedTags = tags[path] || [];
-    if (matchedTags.length === 0) {
-        Object.entries(tags).forEach(([key, val]) => {
-            if (path && key && path.endsWith(key.split('/').pop())) {
-                matchedTags.push(...val);
-            }
-        });
-    }
     matchedTags.forEach(tag => {
         const span = document.createElement('span');
         span.className = 'badge bg-info text-dark small';
@@ -112,26 +105,27 @@ export function renderFavorites() {
     const select = document.getElementById('favGroupSelect');
     if (!list || !select) return;
     list.innerHTML = '';
-    
+
     if (!state.projConfig || !state.projConfig.groups) {
         window.App.updateWorkspaceSummary();
         return;
     }
 
     const groups = Object.keys(state.projConfig.groups);
-    const currentOptions = Array.from(select.options).map(o => o.value);
-    
+    const currentValue = select.value;
+
+    select.innerHTML = '';
     groups.forEach((g) => {
-        if (!currentOptions.includes(g)) {
-            const opt = document.createElement('option');
-            opt.value = g;
-            opt.innerText = g;
-            select.appendChild(opt);
-        }
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.innerText = g;
+        select.appendChild(opt);
     });
-    
-    if (!select.value && groups.length > 0) {
-        select.value = state.projConfig.current_group || groups[0] || "Default";
+
+    if (groups.includes(currentValue)) {
+        select.value = currentValue;
+    } else if (groups.length > 0) {
+        select.value = state.projConfig.current_group || groups[0];
     }
 
     const currentGroup = select.value || "Default";
@@ -240,28 +234,16 @@ export function closeActionModal() {
     state.actionModalHandler = null;
 }
 
-export function renderSearchResultItem(data) {
-    const list = document.getElementById('searchResultsList');
+export function renderSearchResultItem(data, overlayMode = false) {
+    const list = overlayMode
+        ? document.getElementById('searchOverlayList')
+        : document.getElementById('searchResultsList');
     if (!list) return;
     const item = document.createElement('div');
     item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer d-flex align-items-center';
     item.setAttribute('data-path', data.path);
     item.style.cursor = 'pointer';
-    
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'form-check-input me-3 x-small';
-    cb.style.width = '0.8rem';
-    cb.style.height = '0.8rem';
-    cb.checked = state.selectedFiles.has(data.path);
-    cb.onclick = (e) => {
-        e.stopPropagation();
-        if (cb.checked) state.selectedFiles.add(data.path);
-        else state.selectedFiles.delete(data.path);
-        window.App.updateBulkUI();
-    };
-    item.appendChild(cb);
-    
+
     const contentDiv = document.createElement('div');
     contentDiv.className = 'flex-grow-1 overflow-hidden';
     const snippetHtml = data.snippet ? `<div class="x-small text-warning mt-1 text-truncate border-start border-warning ps-2" style="background: rgba(255,193,7,0.05)">${escapeHtml(data.snippet)}</div>` : "";
@@ -274,11 +256,26 @@ export function renderSearchResultItem(data) {
         ${snippetHtml}
     `;
     item.appendChild(contentDiv);
-    
+
+    if (overlayMode) {
+        const stageBtn = document.createElement('button');
+        stageBtn.className = 'btn btn-sm btn-link text-success p-0 ms-2';
+        stageBtn.innerHTML = '&#43;';
+        stageBtn.title = 'Stage this file';
+        stageBtn.onclick = (e) => {
+            e.stopPropagation();
+            window.App.state.staging.add(data.path);
+            window.App.syncStagingToBackend();
+            window.App.updateWorkspaceSummary();
+            showToast('Added to staging');
+        };
+        item.appendChild(stageBtn);
+    }
+
     item.onclick = () => window.App.previewFile(data.path);
     item.oncontextmenu = (e) => {
         e.preventDefault();
-        window.App.showPathCollector([data.path]);
+        window.App.showContextMenu(e, data.path);
     };
     list.appendChild(item);
 }

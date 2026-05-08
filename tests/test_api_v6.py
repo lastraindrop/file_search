@@ -36,7 +36,9 @@ def test_api_browser_contracts(project_client, mock_project):
 
     # 4. Recent
     res_recent = project_client.get("/api/recent_projects")
-    assert any(PathValidator.norm_path(p["path"]) == PathValidator.norm_path(mock_project) for p in res_recent.json())
+    paths = res_recent.json()
+    norm_project = PathValidator.norm_path(mock_project)
+    assert any(PathValidator.norm_path(p["path"]) == norm_project for p in paths)
 
 @pytest.mark.parametrize("file_type,expected_content", [
     ("binary", "--- Binary File (Preview Unavailable) ---"),
@@ -81,11 +83,20 @@ def test_api_project_specific_metadata(project_client, mock_project):
     path = str(mock_project)
 
     # Tools
-    project_client.post("/api/project/tools", json={"project_path": path, "tools": {"Harden": "fctx polish"}})
+    project_client.post(
+        "/api/project/tools",
+        json={"project_path": path, "tools": {"Harden": "fctx polish"}},
+    )
     # Categories
-    project_client.post("/api/project/categories", json={"project_path": path, "categories": {"Legacy": "old_src"}})
+    project_client.post(
+        "/api/project/categories",
+        json={"project_path": path, "categories": {"Legacy": "old_src"}},
+    )
     # Settings (Whitelisting check)
-    project_client.post("/api/project/settings", json={"project_path": path, "settings": {"excludes": "*.log", "illegal": "leak"}})
+    project_client.post(
+        "/api/project/settings",
+        json={"project_path": path, "settings": {"excludes": "*.log", "illegal": "leak"}},
+    )
 
     config = project_client.get(f"/api/project/config?path={path}").json()
     assert config["custom_tools"]["Harden"] == "fctx polish"
@@ -99,7 +110,7 @@ def test_api_project_specific_metadata(project_client, mock_project):
 
 @pytest.mark.parametrize("op", ["move", "rename", "delete"])
 def test_api_fs_ops_safety(project_client, mock_project, system_dir, op):
-    """stress test security of file operations via API."""
+    """Stress test security of file operations via API."""
     src = str(mock_project / "src" / "main.py")
 
     if op == "move":
@@ -109,10 +120,23 @@ def test_api_fs_ops_safety(project_client, mock_project, system_dir, op):
         if res.status_code == 200:
             assert src in res.json().get("skipped", [])
     elif op == "rename":
-        res = project_client.post("/api/fs/rename", json={"project_path": str(mock_project), "path": src, "new_name": "../../etc/passwd"})
-        assert res.status_code != 200 # Should trigger PathValidator
+        res = project_client.post(
+            "/api/fs/rename",
+            json={
+                "project_path": str(mock_project),
+                "path": src,
+                "new_name": "../../etc/passwd",
+            },
+        )
+        assert res.status_code != 200  # Should trigger PathValidator
     elif op == "delete":
-        res = project_client.post("/api/fs/delete", json={"project_path": str(mock_project), "paths": ["../../../etc/passwd"]})
+        res = project_client.post(
+            "/api/fs/delete",
+            json={
+                "project_path": str(mock_project),
+                "paths": ["../../../etc/passwd"],
+            },
+        )
         assert res.status_code != 200
 
 # -----------------------------------------------------------------------------
@@ -126,14 +150,23 @@ def test_api_full_generation_flow(project_client, mock_project, fmt):
     f1 = str(mock_project / "src" / "main.py")
 
     # 1. Stage
-    project_client.post("/api/project/settings", json={"project_path": root, "settings": {"staging_list": [f1]}})
+    project_client.post(
+        "/api/project/settings",
+        json={"project_path": root, "settings": {"staging_list": [f1]}},
+    )
 
     # 2. Stats
-    res_stats = project_client.post("/api/project/stats", json={"paths": [f1], "project_path": root})
+    res_stats = project_client.post(
+        "/api/project/stats",
+        json={"paths": [f1], "project_path": root},
+    )
     assert res_stats.json()["total_tokens"] > 0
 
     # 3. Generate
-    res_gen = project_client.post("/api/generate", json={"files": [f1], "project_path": root, "export_format": fmt})
+    res_gen = project_client.post(
+        "/api/generate",
+        json={"files": [f1], "project_path": root, "export_format": fmt},
+    )
     assert res_gen.status_code == 200
     content = res_gen.json()["content"]
     if fmt == "xml":
@@ -147,7 +180,8 @@ def test_api_full_generation_flow(project_client, mock_project, fmt):
 
 def test_api_search_websocket_protocol(project_client, mock_project):
     """Verify WebSocket search flow and stop events."""
-    with project_client.websocket_connect(f"/ws/search?path={str(mock_project)}&query=main&mode=smart") as ws:
+    ws_url = f"/ws/search?path={str(mock_project)}&query=main&mode=smart"
+    with project_client.websocket_connect(ws_url) as ws:
         results = []
         while True:
             data = ws.receive_json()

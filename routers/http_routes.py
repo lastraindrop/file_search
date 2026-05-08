@@ -8,11 +8,12 @@ import signal
 import subprocess
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from file_cortex_core import (
     ActionBridge,
     ContextFormatter,
+    DataManager,
     FileOps,
     FileUtils,
     FormatUtils,
@@ -58,11 +59,12 @@ from routers.services import (
 )
 
 router = APIRouter()
+_dm_dep = Depends(get_dm)
 
 
 @router.post("/api/open")
 def open_project(
-    req: ProjectOpenRequest, dm: DataManager = Depends(get_dm)
+    req: ProjectOpenRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Opens and registers a project."""
     try:
@@ -84,7 +86,7 @@ def open_project(
 
 @router.post("/api/fs/children")
 def api_children(
-    req: ChildrenRequest, dm: DataManager = Depends(get_dm)
+    req: ChildrenRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Gets directory children."""
     p = pathlib.Path(req.path)
@@ -98,7 +100,7 @@ def api_children(
 
 
 @router.get("/api/content")
-def get_content(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
+def get_content(path: str, dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Gets file content for preview."""
     p = pathlib.Path(path)
 
@@ -131,7 +133,7 @@ def get_content(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
 
 @router.post("/api/generate")
 def generate_context(
-    req: GenerateRequest, dm: DataManager = Depends(get_dm)
+    req: GenerateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Generates formatted context for files."""
     if req.project_path:
@@ -166,7 +168,7 @@ def generate_context(
 
 @router.post("/api/fs/rename")
 def rename_file(
-    req: FileRenameRequest, dm: DataManager = Depends(get_dm)
+    req: FileRenameRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Renames a file."""
     project_root = get_valid_project_root(req.project_path, dm)
@@ -191,7 +193,7 @@ def rename_file(
 
 @router.post("/api/fs/batch_rename")
 def api_batch_rename(
-    req: BatchRenameRequest, dm: DataManager = Depends(get_dm)
+    req: BatchRenameRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Batch renames files."""
     project_root = get_valid_project_root(req.project_path, dm)
@@ -222,7 +224,7 @@ def api_batch_rename(
 
 
 @router.post("/api/fs/delete")
-def delete_files(req: FileDeleteRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
+def delete_files(req: FileDeleteRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Deletes files."""
     project_root = get_valid_project_root(req.project_path, dm)
     if not project_root:
@@ -245,7 +247,7 @@ def delete_files(req: FileDeleteRequest, dm: DataManager = Depends(get_dm)) -> d
 
 
 @router.post("/api/fs/move")
-def api_move(req: FileMoveRequest, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
+def api_move(req: FileMoveRequest, dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Moves files to a destination directory."""
     try:
         moved_paths = []
@@ -286,7 +288,7 @@ def api_move(req: FileMoveRequest, dm: DataManager = Depends(get_dm)) -> dict[st
 
 
 @router.post("/api/fs/save")
-def api_save(req: FileSaveRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
+def api_save(req: FileSaveRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Saves content to a file."""
     try:
         if not get_valid_project_root(req.path, dm):
@@ -304,7 +306,7 @@ def api_save(req: FileSaveRequest, dm: DataManager = Depends(get_dm)) -> dict[st
 
 @router.post("/api/fs/create")
 def api_create(
-    req: FileCreateRequest, dm: DataManager = Depends(get_dm)
+    req: FileCreateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Creates a new file or directory."""
     try:
@@ -326,7 +328,7 @@ def api_create(
 
 @router.post("/api/fs/open_os")
 def api_open_os(
-    req: OpenPathRequest, dm: DataManager = Depends(get_dm)
+    req: OpenPathRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Opens a file or directory in the operating system shell."""
     project_root = get_valid_project_root(req.project_path, dm)
@@ -351,7 +353,7 @@ def api_open_os(
 
 @router.post("/api/fs/archive")
 def api_archive(
-    req: FileArchiveRequest, dm: DataManager = Depends(get_dm)
+    req: FileArchiveRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Archives selected files."""
     try:
@@ -383,7 +385,7 @@ def api_archive(
 
 
 @router.get("/api/project/config")
-def get_proj_config(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
+def get_proj_config(path: str, dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Gets project configuration."""
     root, _ = get_project_config_for_path(path, dm)
     if not root:
@@ -392,7 +394,7 @@ def get_proj_config(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, A
 
 
 @router.get("/api/project/prompt_templates")
-def get_prompt_templates(path: str, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
+def get_prompt_templates(path: str, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Gets project prompt templates."""
     root, proj_config = get_project_config_for_path(path, dm)
     if not root or proj_config is None:
@@ -401,31 +403,31 @@ def get_prompt_templates(path: str, dm: DataManager = Depends(get_dm)) -> dict[s
 
 
 @router.get("/api/workspaces")
-def get_workspaces(dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
+def get_workspaces(dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Gets all workspaces."""
     return dm.get_workspaces_summary()
 
 
 @router.post("/api/workspaces/pin")
 def toggle_pin(
-    req: WorkspacePinRequest, dm: DataManager = Depends(get_dm)
+    req: WorkspacePinRequest, dm: DataManager = _dm_dep
 ) -> dict[str, bool]:
     """Toggles workspace pin status."""
     return {"is_pinned": dm.toggle_pinned(req.path)}
 
 
 @router.get("/api/recent_projects")
-def get_recent_projects_legacy(dm: DataManager = Depends(get_dm)) -> list[dict[str, str]]:
+def get_recent_projects_legacy(dm: DataManager = _dm_dep) -> list[dict[str, str]]:
     """Gets recent projects using the legacy response shape."""
     return [
         {"name": pathlib.Path(p).name, "path": p}
-        for p in dm.data["projects"].keys()
+        for p in dm.data["projects"]
         if p and os.path.exists(p)
     ]
 
 
 @router.post("/api/project/note")
-def api_add_note(req: NoteRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
+def api_add_note(req: NoteRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Adds a note to a file."""
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
@@ -434,7 +436,7 @@ def api_add_note(req: NoteRequest, dm: DataManager = Depends(get_dm)) -> dict[st
 
 
 @router.post("/api/project/tag")
-def api_manage_tag(req: TagRequest, dm: DataManager = Depends(get_dm)) -> dict[str, str]:
+def api_manage_tag(req: TagRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Manages tags on a file."""
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
@@ -447,7 +449,7 @@ def api_manage_tag(req: TagRequest, dm: DataManager = Depends(get_dm)) -> dict[s
 
 @router.post("/api/project/session")
 def api_save_session(
-    req: SessionRequest, dm: DataManager = Depends(get_dm)
+    req: SessionRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Saves a project session."""
     if not get_valid_project_root(req.project_path, dm):
@@ -458,7 +460,7 @@ def api_save_session(
 
 @router.post("/api/project/favorites")
 def api_manage_favorites(
-    req: FavoriteRequest, dm: DataManager = Depends(get_dm)
+    req: FavoriteRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Manages favorite groups."""
     if not get_valid_project_root(req.project_path, dm):
@@ -475,7 +477,7 @@ def api_manage_favorites(
 
 @router.post("/api/project/settings")
 def update_settings(
-    req: ProjectSettingsRequest, dm: DataManager = Depends(get_dm)
+    req: ProjectSettingsRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Updates project settings."""
     if not get_valid_project_root(req.project_path, dm):
@@ -486,7 +488,7 @@ def update_settings(
 
 @router.post("/api/project/tools")
 def update_tools(
-    req: ToolsUpdateRequest, dm: DataManager = Depends(get_dm)
+    req: ToolsUpdateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Updates custom tools configuration."""
     if not get_valid_project_root(req.project_path, dm):
@@ -499,7 +501,7 @@ def update_tools(
 
 
 @router.post("/api/project/stats")
-def get_staging_stats(req: StatsRequest, dm: DataManager = Depends(get_dm)) -> dict[str, int]:
+def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str, int]:
     """Gets aggregate token stats for selected files."""
     root = get_valid_project_root(req.project_path, dm) if req.project_path else None
 
@@ -526,7 +528,7 @@ def get_staging_stats(req: StatsRequest, dm: DataManager = Depends(get_dm)) -> d
 
 @router.post("/api/project/categories")
 def update_categories(
-    req: CategoriesUpdateRequest, dm: DataManager = Depends(get_dm)
+    req: CategoriesUpdateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Updates quick categories."""
     if not get_valid_project_root(req.project_path, dm):
@@ -539,14 +541,14 @@ def update_categories(
 
 
 @router.get("/api/global/settings")
-def get_global_settings(dm: DataManager = Depends(get_dm)) -> dict[str, Any]:
+def get_global_settings(dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Gets global settings."""
     return dm.data.get("global_settings", {})
 
 
 @router.post("/api/global/settings")
 def update_global_settings(
-    req: GlobalSettingsRequest, dm: DataManager = Depends(get_dm)
+    req: GlobalSettingsRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Updates global settings."""
     data = req.model_dump(exclude_unset=True)
@@ -559,7 +561,7 @@ def update_global_settings(
 
 @router.post("/api/actions/stage_all")
 def api_stage_all(
-    req: StageAllRequest, dm: DataManager = Depends(get_dm)
+    req: StageAllRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Stages all files in a project."""
     root, proj_config = get_project_config_for_path(req.project_path, dm)
@@ -583,7 +585,7 @@ def api_stage_all(
 
 @router.post("/api/actions/categorize")
 def api_categorize(
-    req: CategorizeRequest, dm: DataManager = Depends(get_dm)
+    req: CategorizeRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Categorizes files into a directory."""
     try:
@@ -604,7 +606,7 @@ def api_categorize(
 
 @router.post("/api/actions/execute")
 def api_execute_tool(
-    req: ToolExecuteRequest, dm: DataManager = Depends(get_dm)
+    req: ToolExecuteRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Executes a custom tool on files."""
     try:
@@ -675,7 +677,7 @@ def api_execute_tool(
 
 @router.post("/api/fs/collect_paths")
 def collect_paths_api(
-    req: PathCollectionRequest, dm: DataManager = Depends(get_dm)
+    req: PathCollectionRequest, dm: DataManager = _dm_dep
 ) -> dict[str, str]:
     """Collects and formats paths."""
     try:

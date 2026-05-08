@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Context generation and noise reduction for FileCortex.
-"""
+"""Context generation and noise reduction for FileCortex."""
 
 import pathlib
 
@@ -139,7 +138,7 @@ class ContextFormatter:
             blocks.append(f"<instruction>\n{prompt_prefix}\n</instruction>\n\n")
 
         root = pathlib.Path(root_dir).resolve() if root_dir else None
-        
+
         if include_blueprint and root:
             ex_str = " ".join(manual_excludes) if manual_excludes else ""
             blueprint = ContextFormatter.generate_blueprint(str(root), ex_str, use_gitignore)

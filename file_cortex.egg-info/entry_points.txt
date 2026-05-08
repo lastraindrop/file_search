@@ -1,3 +1,0 @@
-[console_scripts]
-fctx = fctx:main
-fctx-web = web_app:main

@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Formatting utilities for FileCortex.
-"""
+"""Formatting utilities for FileCortex."""
 
 import datetime
 import pathlib
-from typing import Any
-
-from .config import logger
 
 
 class FormatUtils:
@@ -41,12 +37,11 @@ class FormatUtils:
             return "0 B"
         if size_bytes < 1024:
             return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
+        if size_bytes < 1024 * 1024:
             return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
+        if size_bytes < 1024 * 1024 * 1024:
             return f"{size_bytes / (1024 * 1024):.1f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
     @staticmethod
     def format_datetime(mtime: float) -> str:
@@ -123,9 +118,8 @@ class FormatUtils:
                 else:
                     final_p_str = str(p)
 
-                if is_dir:
-                    if dir_suffix and not final_p_str.endswith(dir_suffix):
-                        final_p_str += dir_suffix
+                if is_dir and dir_suffix and not final_p_str.endswith(dir_suffix):
+                    final_p_str += dir_suffix
 
                 final_p_str = file_prefix + final_p_str
 

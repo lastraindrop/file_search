@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import pathlib
 import signal
 import subprocess
 import threading
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
-from file_cortex_core import ActionBridge, FormatUtils, logger, search_generator
+from file_cortex_core import ActionBridge, DataManager, FormatUtils, logger, search_generator
 from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK
 from routers.services import (
     get_dm,
@@ -21,6 +22,7 @@ from routers.services import (
 )
 
 router = APIRouter()
+_dm_dep = Depends(get_dm)
 
 def verify_ws_token(token: str | None) -> bool:
     """Verifies the API token for WebSocket connections."""
@@ -41,7 +43,7 @@ async def websocket_search(
     inverse: bool = False,
     case_sensitive: bool = False,
     include_dirs: bool = False,
-    dm: DataManager = Depends(get_dm),
+    dm: DataManager = _dm_dep,
 ) -> None:
     """Streams search results over WebSocket."""
     await websocket.accept()
@@ -115,10 +117,8 @@ async def websocket_search(
     except Exception as e:
         logger.error(f"Search error: {e}")
         search_task.cancel()
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
-        except Exception:
-            pass
 
 
 @router.websocket("/ws/actions/execute")
@@ -128,7 +128,7 @@ async def websocket_action_stream(
     tool_name: str,
     path: str,
     token: str | None = Query(None),
-    dm: DataManager = Depends(get_dm),
+    dm: DataManager = _dm_dep,
 ) -> None:
     """Streams tool execution output over WebSocket."""
     await websocket.accept()
@@ -221,9 +221,7 @@ async def websocket_action_stream(
                 logger.error(f"Cleanup failed for pid {pid}: {e}")
     except Exception as e:
         logger.error(f"Action stream error: {e}")
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
-        except Exception:
-            pass
     finally:
         stream_task.cancel()

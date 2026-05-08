@@ -55,8 +55,11 @@ def test_core_path_collection_formatting(mock_project):
     """Verify path collection string orchestration."""
     files = [str(mock_project / "src" / "main.py"), str(mock_project / "README.md")]
     # Test different modes
-    out_rel = FormatUtils.collect_paths(files, mode='relative', root_dir=str(mock_project))
-    assert "src/main.py" in out_rel.replace("\\", "/") or "src/main.py" in out_rel.lower().replace("\\", "/")
+    out_rel = FormatUtils.collect_paths(
+        files, mode='relative', root_dir=str(mock_project),
+    )
+    normalized = out_rel.replace("\\", "/").lower()
+    assert "src/main.py" in normalized
 
     out_abs = FormatUtils.collect_paths(files, mode='absolute')
     assert str(mock_project) in out_abs
@@ -104,9 +107,8 @@ def test_core_ops_batch_rename_rollback(tmp_path):
             raise PermissionError("Atomicity Test")
         return real_rename(self, target)
 
-    with patch.object(Path, "rename", faulty_rename):
-        with pytest.raises(PermissionError):
-            FileOps.batch_rename(str(tmp_path), files, "file_(.*)", "new_\\1", dry_run=False)
+    with patch.object(Path, "rename", faulty_rename), pytest.raises(PermissionError):
+        FileOps.batch_rename(str(tmp_path), files, "file_(.*)", "new_\\1", dry_run=False)
 
     # Rollback check: none should be renamed
     assert (tmp_path / "file_0.txt").exists()

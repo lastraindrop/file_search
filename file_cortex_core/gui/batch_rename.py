@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Batch rename window for FileCortex GUI.
-"""
+"""Batch rename window for FileCortex GUI."""
 
 import pathlib
 import re

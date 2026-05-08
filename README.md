@@ -1,6 +1,6 @@
 # FileCortex v6.3.0 Production Ready (工作区编排助手)
 
-> **版本**: 6.3.0 | **测试**: 191 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.3.0 | **测试**: 221 passed | **代码质量**: Ruff 0 errors
 
 ## 🌟 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -25,7 +25,7 @@
 
 ### 多端访问
 - **桌面版 (Tkinter)**：原生桌面体验，支持目录树导航与实时预览。
-- **网页版 (FastAPI)**：现代化 ES6 模块化前端，支持自定义右键菜单、搜索防抖和全局快捷键。
+- **网页版 (FastAPI)**：现代化 ES6 模块化前端，支持搜索浮层覆盖、实时 WebSocket 搜索流、自定义右键菜单、搜索防抖和全局快捷键。
 - **CLI 工具 (fctx.py)**：Headless 环境下的命令行编排，支持 `open`, `stage`, `run` 等命令。
 - **MCP Server**：作为 **Model Context Protocol** 服务器运行，支持 AI Agent 原生调用。
 
@@ -60,6 +60,7 @@
 - [开发者说明 (Architecture & Security)](DEVELOPER_GUIDE.md)
 - [项目路线图 (Roadmap)](ROADMAP.md)
 - [全面分析报告](ANALYSIS_REPORT.md)
+- [前端深度分析](FRONTEND_ANALYSIS.md)
 - [综合开发计划](COMPREHENSIVE_PLAN.md)
 - [Pytest 测试说明](tests/README.md)
 
@@ -117,8 +118,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **191 项核心测试**：涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约及 Windows 兼容性全量审计。
-- **测试结果**：191 passed, 0 failed
+- **221 项核心测试**：涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、Windows 兼容性及 8 个核心模块边缘场景。
+- **测试结果**：221 passed, 0 failed
 
 ### 代码质量检查
 ```bash

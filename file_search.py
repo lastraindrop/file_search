@@ -8,7 +8,6 @@ project files with context generation for LLM workflows.
 import os
 import pathlib
 import queue
-import re
 import subprocess
 import sys
 import threading
@@ -32,6 +31,7 @@ from file_cortex_core import (
     FormatUtils,
     PathValidator,
     SearchWorker,
+    __version__,
     logger,
 )
 
@@ -55,7 +55,7 @@ class FileCortexApp:
             root: The root tkinter window.
         """
         self.root = root
-        self.root.title("FileCortex v6.2.0 Production | 工业级分析助手")
+        self.root.title(f"FileCortex v{__version__} | 工业级分析助手")
         self.root.geometry("1280x850")
 
         self.data_mgr = DataManager()
@@ -1176,9 +1176,7 @@ class FileCortexApp:
                 return
         elif tree == self.tree_proj:
             full_path = self.get_tree_path(sel[0])
-        elif tree == self.tree_staging:
-            full_path = pathlib.Path(tree.item(sel[0])["values"][0])
-        elif tree == self.tree_fav:
+        elif tree == self.tree_staging or tree == self.tree_fav:
             full_path = pathlib.Path(tree.item(sel[0])["values"][0])
 
         if not full_path or not full_path.exists():
@@ -1306,12 +1304,11 @@ class FileCortexApp:
                 p_str = PathValidator.norm_path(p_raw)
                 p = pathlib.Path(p_str)
 
-                if apply_filter and filter_text:
-                    if (
-                        filter_text not in p.name.lower()
-                        and filter_text not in p_str.lower()
-                    ):
-                        continue
+                if apply_filter and filter_text and (
+                    filter_text not in p.name.lower()
+                    and filter_text not in p_str.lower()
+                ):
+                    continue
 
                 if not p.exists():
                     continue
@@ -1904,7 +1901,6 @@ class FileCortexApp:
 
     def open_duplicate_finder(self) -> None:
         """Opens the duplicate file finder window."""
-
         if not self.current_dir:
             messagebox.showwarning("提示", "请先打开一个项目目录。")
             return

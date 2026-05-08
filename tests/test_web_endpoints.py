@@ -1,7 +1,10 @@
 
 def test_open_nonexistent_project(api_client):
     """Verify 404/400 for invalid project paths."""
-    res = api_client.post("/api/open", json={"path": "/this/path/does/not/exist/at/all/fc_test_12345"})
+    res = api_client.post(
+        "/api/open",
+        json={"path": "/this/path/does/not/exist/at/all/fc_test_12345"},
+    )
     assert res.status_code in (404, 400)
 
 def test_open_system_dir_blocked(api_client, system_dir):
@@ -102,8 +105,12 @@ def test_project_note_and_tag(project_client, mock_project):
     from file_cortex_core import PathValidator
     f_norm = PathValidator.norm_path(f)
     notes = config.get("notes", {})
-    assert any(PathValidator.norm_path(k) == f_norm and v == "Refactor needed"
-               for k, v in notes.items()), f"Note not found. Keys: {list(notes.keys())}, Expected: {f_norm}"
+    assert any(
+        PathValidator.norm_path(k) == f_norm and v == "Refactor needed"
+        for k, v in notes.items()
+    ), f"Note not found. Keys: {list(notes.keys())}, Expected: {f_norm}"
     tags = config.get("tags", {})
-    assert any(PathValidator.norm_path(k) == f_norm and "Priority" in v
-               for k, v in tags.items()), f"Tag not found. Keys: {list(tags.keys())}, Expected: {f_norm}"
+    assert any(
+        PathValidator.norm_path(k) == f_norm and "Priority" in v
+        for k, v in tags.items()
+    ), f"Tag not found. Keys: {list(tags.keys())}, Expected: {f_norm}"

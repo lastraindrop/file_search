@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from file_cortex_core import logger
+from file_cortex_core import __version__, logger
 from routers import common as route_common
 from routers.http_routes import router as http_router
 from routers.ws_routes import router as ws_router
@@ -65,7 +65,7 @@ async def verify_api_token(request: Request, call_next):
 
 def create_app() -> FastAPI:
     """Creates and configures the FastAPI application."""
-    app = FastAPI(title="FileCortex v6.2.0 API")
+    app = FastAPI(title="FileCortex v6.3.0 API")
 
     app.add_middleware(
         CORSMiddleware,
@@ -102,7 +102,9 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     """Serves the main index page."""
-    return templates.TemplateResponse(request, "index.html", {})
+    return templates.TemplateResponse(
+        request, "index.html", {"api_token": API_TOKEN, "version": __version__}
+    )
 
 
 def main() -> None:
