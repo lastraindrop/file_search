@@ -276,11 +276,11 @@ def search_generator(
                     if len(content_futures) >= DEFAULT_BATCH_SIZE:
                         # Process done futures to maintain result order and flow
                         done_batch = [f for f in content_futures if f.done()]
-                        if not done_batch:
+                        if not done_batch and content_futures:
                             try:
                                 next(as_completed(content_futures, timeout=0.01))
                                 done_batch = [f for f in content_futures if f.done()]
-                            except Exception:
+                            except (StopIteration, TimeoutError):
                                 pass
 
                         for f in done_batch:

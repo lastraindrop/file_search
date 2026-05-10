@@ -26,7 +26,6 @@ _dm_dep = Depends(get_dm)
 
 def verify_ws_token(token: str | None) -> bool:
     """Verifies the API token for WebSocket connections."""
-    import os
     expected_token = os.getenv("FCTX_API_TOKEN", "")
     if not expected_token:
         return True
@@ -170,8 +169,9 @@ async def websocket_action_stream(
 
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"pid": proc.pid})
 
-            for line in proc.stdout:
-                main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
+            if proc.stdout:
+                for line in proc.stdout:
+                    main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
 
             proc.wait()
             with PROCESS_LOCK:

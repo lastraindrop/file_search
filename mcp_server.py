@@ -174,9 +174,9 @@ async def register_workspace(
     if not os.path.isdir(path):
         return f"Error: Path '{path}' does not exist or is not a directory."
 
-    root = get_dm().resolve_project_root(project_path)
+    root = get_dm().resolve_project_root(path)
     if root:
-        return f"Workspace '{project_path}' is already registered."
+        return f"Workspace '{path}' is already registered."
 
     dm = get_dm()
     dm.add_to_recent(path)
@@ -212,7 +212,7 @@ async def get_project_blueprint(
 
     try:
         return FileUtils.generate_ascii_tree(
-            root,
+            pathlib.Path(root),
             excludes_str=excludes,
             use_gitignore=True,
             max_depth=max_depth,

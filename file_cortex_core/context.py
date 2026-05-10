@@ -58,6 +58,7 @@ class ContextFormatter:
         prompt_prefix: str | None = None,
         manual_excludes: list[str] | None = None,
         use_gitignore: bool = True,
+        apply_noise_reducer: bool = False,
     ) -> str:
         """Converts files to markdown format.
 
@@ -67,6 +68,7 @@ class ContextFormatter:
             prompt_prefix: Optional prefix to add.
             manual_excludes: Exclusion patterns.
             use_gitignore: Whether to respect .gitignore.
+            apply_noise_reducer: Whether to apply noise reduction to content.
 
         Returns:
             Markdown formatted string.
@@ -98,7 +100,8 @@ class ContextFormatter:
                 size_kb = stat.st_size / 1024
 
                 content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
-                content = NoiseReducer.clean(content)
+                if apply_noise_reducer:
+                    content = NoiseReducer.clean(content)
 
                 header = f"File: {rel_path} ({size_kb:.1f} KB)\n"
                 blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
@@ -115,6 +118,7 @@ class ContextFormatter:
         manual_excludes: list[str] | None = None,
         use_gitignore: bool = True,
         include_blueprint: bool = True,
+        apply_noise_reducer: bool = True,
     ) -> str:
         """Converts files to XML format with CDATA and optional blueprint.
 
@@ -125,6 +129,7 @@ class ContextFormatter:
             manual_excludes: Exclusion patterns.
             use_gitignore: Whether to respect .gitignore.
             include_blueprint: Whether to include project structure blueprint.
+            apply_noise_reducer: Whether to apply noise reduction to content.
 
         Returns:
             XML formatted string.
@@ -163,7 +168,8 @@ class ContextFormatter:
                 size_kb = p.stat().st_size / 1024
 
                 content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
-                content = NoiseReducer.clean(content)
+                if apply_noise_reducer:
+                    content = NoiseReducer.clean(content)
 
                 safe_content = content.replace("]]>", "]]]]><![CDATA[>")
 

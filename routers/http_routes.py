@@ -136,6 +136,7 @@ def generate_context(
     req: GenerateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Generates formatted context for files."""
+    noise_reducer = dm.config.global_settings.enable_noise_reducer or req.apply_noise_reducer
     if req.project_path:
         root, proj_config = get_project_config_for_path(req.project_path, dm)
         final_root = root if root else req.project_path
@@ -150,18 +151,29 @@ def generate_context(
                 root_dir=final_root,
                 prompt_prefix=prompt_prefix,
                 include_blueprint=req.include_blueprint,
+                apply_noise_reducer=noise_reducer,
             )
         else:
             content = ContextFormatter.to_markdown(
-                req.files, root_dir=final_root, prompt_prefix=prompt_prefix
+                req.files,
+                root_dir=final_root,
+                prompt_prefix=prompt_prefix,
+                apply_noise_reducer=noise_reducer,
             )
     else:
         if req.export_format == "xml":
             content = ContextFormatter.to_xml(
-                req.files, prompt_prefix=None, include_blueprint=req.include_blueprint
+                req.files,
+                prompt_prefix=None,
+                include_blueprint=req.include_blueprint,
+                apply_noise_reducer=noise_reducer,
             )
         else:
-            content = ContextFormatter.to_markdown(req.files, prompt_prefix=None)
+            content = ContextFormatter.to_markdown(
+                req.files,
+                prompt_prefix=None,
+                apply_noise_reducer=noise_reducer,
+            )
 
     return {"content": content, "tokens": FormatUtils.estimate_tokens(content)}
 

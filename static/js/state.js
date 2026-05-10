@@ -17,7 +17,7 @@ export const config = {
     },
     defaults: {
         archiveName: 'context_backup.zip',
-        tokenThreshold: 100000,
+        tokenThreshold: 128000,
         tokenRatio: 4
     },
     endpoints: {

@@ -29,6 +29,7 @@ class GenerateRequest(BaseModel):
     template_name: str | None = None
     export_format: str = "markdown"
     include_blueprint: bool = True
+    apply_noise_reducer: bool = True
 
 
 class FileRenameRequest(BaseModel):

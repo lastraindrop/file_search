@@ -65,7 +65,7 @@ async def verify_api_token(request: Request, call_next):
 
 def create_app() -> FastAPI:
     """Creates and configures the FastAPI application."""
-    app = FastAPI(title="FileCortex v6.3.0 API")
+    app = FastAPI(title=f"FileCortex v{__version__} API")
 
     app.add_middleware(
         CORSMiddleware,

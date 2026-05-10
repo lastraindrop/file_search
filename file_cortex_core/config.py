@@ -96,6 +96,7 @@ class GlobalSettings(BaseModel):
     enable_noise_reducer: bool = False
     token_ratio: float = 4.0
     theme: str = "dark"
+    allowed_extensions: str = ""
 
 
 class AppConfig(BaseModel):

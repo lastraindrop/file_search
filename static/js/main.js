@@ -278,7 +278,8 @@ const App = {
             App.state.globalSettings = { ...App.state.globalSettings, ...body };
             App.updateStats();
             ui.showToast("Global settings saved successfully");
-            bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
+            if (modalInstance) modalInstance.hide();
         } catch (e) { ui.showToast("Failed to save settings: " + e.message, 'danger'); }
     },
 
@@ -363,7 +364,8 @@ const App = {
 
         try {
             await api.saveProjectSettings(App.state.projectPath, settings);
-            bootstrap.Modal.getInstance(document.getElementById('projectSettingsModal')).hide();
+            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('projectSettingsModal'));
+            if (modalInstance) modalInstance.hide();
             ui.showToast("Project settings saved");
             App.refreshProject();
         } catch (e) { ui.showToast("Failed to save project settings: " + e.message, 'danger'); }
@@ -1050,7 +1052,8 @@ const App = {
                 await navigator.clipboard.writeText(data.result);
                 ui.showToast(`✅ ${paths.length} paths copied to clipboard!`, "success");
                 const modalEl = document.getElementById('pathCollectorModal');
-                bootstrap.Modal.getInstance(modalEl).hide();
+                const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                if (modalInstance) modalInstance.hide();
             }
         } catch (e) { ui.showToast("Collection failed: " + e.message, "danger"); }
     },
