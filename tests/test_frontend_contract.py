@@ -68,10 +68,10 @@ def test_api_open_os_uses_shell_open(project_client, mock_project, monkeypatch):
     """Open-in-OS endpoint should call the shell opener for authorized paths."""
     target = mock_project / "src" / "main.py"
 
-    import routers.http_routes as http_routes
+    from routers import fs_routes
 
     opener = MagicMock()
-    monkeypatch.setattr(http_routes.FileUtils, "open_path_in_os", opener)
+    monkeypatch.setattr(fs_routes.FileUtils, "open_path_in_os", opener)
 
     res = project_client.post(
         "/api/fs/open_os",

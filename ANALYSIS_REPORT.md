@@ -1,8 +1,74 @@
-# FileCortex v6.3.1 完整分析报告
+# FileCortex v6.3.2 完整分析报告
 
-> **分析日期**: 2026-05-10
-> **分析版本**: v6.3.1
+> **分析日期**: 2026-05-14
+> **分析版本**: v6.3.2
 > **分析人**: AI Code Review System
+
+---
+
+## 1. 总体架构分析
+
+### 1.1 v6.3.2 新增成果
+
+FileCortex 在 v6.3.2 版本完成了工程化深耕与架构解耦：
+
+*   **路由层按域拆分**: `http_routes.py` (743行) 拆分为 `project_routes` (201行) + `fs_routes` (310行) + `action_routes` (278行)，合并层仅 27 行。
+*   **遍历逻辑去重**: `FileUtils.walk_filtered()` 统一了 4 处重复的 `os.walk` + `dirs[:]` + `should_ignore` 模式。
+*   **DataManager DI**: 新增 `create()` / `reset()` / `activate()` 三级注入支持，向后兼容。
+*   **Desktop GUI 提取**: `PathCollectionDialog` 独立组件，减少单体类 92 行。
+*   **Clipboard 去重**: 4 处 `clipboard_clear/append` 合并为 `_copy_to_clipboard`。
+*   **8 项 BUG 修复**: fctx else 分支 / results_count / None 崩溃 / deprecated API / ruff 配置 / GUI 可选导入。
+*   **测试提升**: 294 → **348** (+54), ruff 0 errors。
+
+### 1.2 SOLID 符合度 (v6.3.2)
+
+| 原则 | v6.3.1 | v6.3.2 | 改进 |
+|------|--------|--------|------|
+| **S** 单一职责 | B- | B | 路由拆分 / PathCollectionDialog 提取 |
+| **O** 开闭原则 | B+ | B+ | 新增路由模块无需改主文件 |
+| **L** 里氏替换 | A | A | - |
+| **I** 接口隔离 | A | A | - |
+| **D** 依赖倒置 | B | B+ | DataManager DI 三级支持 |
+
+### 1.3 模块耦合 (v6.3.2)
+
+| 耦合路径 | v6.3.1 | v6.3.2 |
+|----------|--------|--------|
+| `http_routes.py` (743行单体) | **中** | 27行合并层 |
+| `__init__.py` → `gui/*` | **高** | `try/except ImportError` |
+
+---
+
+## 2. v6.3.2 BUG 修复清单
+
+| ID | 模块 | 描述 | 修复 |
+|----|------|------|------|
+| BUG-026 | `fctx.py` | `else` 分支逻辑错误 (任意命令后显示 help) | `if not args.command` |
+| BUG-027 | `file_search.py` | `results_count` 未初始化 | 添加 `self.results_count = 0` |
+| BUG-028 | `file_search.py` | `current_proj_config` NoneType 崩溃 (4处) | None guard |
+| BUG-029 | `http_routes.py` | `dm.data["global_settings"]` deprecated | `dm.config.global_settings.preview_limit_mb` |
+| BUG-030 | `http_routes.py` | `dm.data["projects"]` deprecated | `dm.config.projects` |
+| DEBT-006 | `__init__.py` | GUI 无条件导入 | `try/except ImportError` |
+| DEBT-008 | `pyproject.toml` | 废弃 ruff 规则 | 移除 ANN101/ANN102 |
+
+---
+
+## 3. 测试与健康度
+
+**验证基线**: `348 passed`, `0 failed` (自 v6.3.1 294 项起新增 54 项测试)。
+
+新增覆盖:
+- **CLI fctx**: 4 项 (命令分支逻辑修正回归)
+- **API 强类型**: 2 项 (deprecated API 替换验证)
+- **搜索边界**: 4 项 (空结果/中断/大文件/内容匹配)
+- **路径标验证器扩展**: 5 项 (None/空/尾部斜杠)
+- **文件操作扩展**: 6 项 (原子保存/移动/归档/分类)
+- **噪声消减器边界**: 4 项 (None/空/base64)
+- **格式化工具**: 6 项 (负数/零/GB/CJK)
+- **配置管理扩展**: 5 项 (部分更新/类型验证/去重/pin/session)
+- **Web API 扩展**: 7 项 (设置轮询/上下文/暂存/保存)
+- **上下文格式化器**: 5 项 (空路径/CDATA/prefix/noise)
+- **GUI 导入安全**: 3 项
 
 ---
 

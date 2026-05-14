@@ -37,7 +37,7 @@ def test_dm_save_load_symmetry(clean_config, mock_project):
     dm.save()
 
     # Re-instantiate
-    DataManager._instance = None
+    DataManager.reset()
     dm_new = DataManager()
     dm_new.config_path = dm.config_path
     dm_new.load()

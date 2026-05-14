@@ -173,6 +173,10 @@ class DataManager:
     This class acts as the Single Source of Truth (SSOT) for all settings,
     utilizing Pydantic models for strict validation and atomic file writes
     for persistence.
+
+    Supports both singleton access (``DataManager()``) and explicit instance
+    management via ``DataManager.create()`` / ``DataManager.reset()`` for
+    testing and dependency injection scenarios.
     """
 
     _instance: "DataManager | None" = None
@@ -190,7 +194,11 @@ class DataManager:
     )
 
     def __new__(cls) -> "DataManager":
-        """Creates or returns the singleton instance."""
+        """Creates or returns the singleton instance.
+
+        For dependency injection scenarios where a standalone instance is
+        needed, use ``DataManager.create()`` instead.
+        """
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
@@ -204,6 +212,58 @@ class DataManager:
         """Initializes the internal config state."""
         self.config: AppConfig = AppConfig()
         self.load()
+
+    @classmethod
+    def create(cls) -> "DataManager":
+        """Creates a standalone DataManager instance (non-singleton).
+
+        Useful for dependency injection, testing, and scenarios where
+        a fresh configuration state is needed without affecting the
+        global singleton.
+
+        Returns:
+            A new DataManager instance with its own configuration.
+        """
+        instance = super().__new__(cls)
+        instance._init_data()
+        return instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Resets the global singleton instance.
+
+        After calling this, the next call to ``DataManager()`` will
+        create a fresh instance with default configuration.
+        """
+        with cls._lock:
+            cls._instance = None
+
+    @classmethod
+    @contextlib.contextmanager
+    def activate(cls, instance: "DataManager | None" = None):
+        """Temporarily sets a DataManager instance as the active singleton.
+
+        Args:
+            instance: The instance to activate. If None, a fresh standalone
+                      instance is created.
+
+        Yields:
+            The active DataManager instance.
+
+        Example::
+
+            dm = DataManager.create()
+            dm.config.last_directory = "/tmp"
+            with DataManager.activate(dm):
+                # All code using DataManager() will get 'dm'
+                assert DataManager().config.last_directory == "/tmp"
+        """
+        old = cls._instance
+        cls._instance = instance if instance is not None else cls.create()
+        try:
+            yield cls._instance
+        finally:
+            cls._instance = old
 
     @property
     def data(self) -> dict[str, Any]:

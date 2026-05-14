@@ -1,6 +1,6 @@
-# FileCortex v6.3.1 (工作区编排助手)
+# FileCortex v6.3.2 (工作区编排助手)
 
-> **版本**: 6.3.1 | **测试**: 294 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.3.2 | **测试**: 348 passed | **代码质量**: Ruff 0 errors
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -41,6 +41,7 @@
 
 ## 详细文档
 - [综合审计与修复计划](COMPREHENSIVE_PLAN.md)
+- [技术指南 (架构/参数对齐/防BUG)](TECHNICAL_GUIDE.md)
 - [开发者指南](DEVELOPER_GUIDE.md)
 - [项目路线图](ROADMAP.md)
 - [分析报告](ANALYSIS_REPORT.md)
@@ -89,8 +90,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **294 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP 及 Windows 兼容性。
-- **测试结果**: 294 passed, 0 failed
+- **348 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP 及 Windows 兼容性。
+- **测试结果**: 348 passed, 0 failed
 
 ### 代码质量检查
 ```bash
@@ -115,8 +116,11 @@ file_cortex_core/          # 微内核逻辑包
 ├── duplicate.py        # DuplicateWorker (SHA256 查重)
 └── gui/                # GUI 组件 (BatchRename, DuplicateFinder)
 
-routers/                  # 模块化路由层
-├── http_routes.py      # HTTP 端点
+routers/                  # 模块化路由层 (v6.3.2 按域拆分)
+├── http_routes.py      # 合并层 (向后兼容)
+├── project_routes.py   # 工作区/项目管理
+├── fs_routes.py        # 文件系统 CRUD
+├── action_routes.py    # 暂存/工具/上下文/设置
 ├── ws_routes.py        # WebSocket 搜索/工具流
 ├── services.py         # 业务逻辑服务层
 ├── schemas.py          # Pydantic 参数校验模型

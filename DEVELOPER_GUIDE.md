@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.3.1 | **更新日期**: 2026-05-10
+> **版本**: 6.3.2 | **更新日期**: 2026-05-14
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -15,12 +15,48 @@
 *   **兼容性**: `.data` 属性提供字典视图，标记为 DEPRECATED——新代码应使用 Pydantic 模型属性。
 *   **原子性**: 所有修改必须通过 `dm.update_*` 方法并调用 `dm.save()` 完成持久化。
 
-### 1.2 核心模块
+### 1.2 依赖注入 (v6.3.2)
+`DataManager` 支持三种实例管理模式：
+
+```python
+# 1. 单例访问 (默认, 向后兼容)
+dm = DataManager()
+
+# 2. 独立实例 (测试/DI 场景)
+dm = DataManager.create()
+
+# 3. 上下文管理器 (临时替换全局单例)
+with DataManager.activate(dm):
+    service = SomeService(DataManager())
+
+# 4. 重置单例 (测试隔离)
+DataManager.reset()
+```
+
+### 1.3 核心模块
 *   `file_cortex_core.security`: `PathValidator` 提供唯一性路径归一化协议。
 *   `file_cortex_core.search`: 匹配逻辑与文件系统遍历完全解耦，策略化设计。
 *   `file_cortex_core.context`: AI 上下文生成（Markdown/XML），支持 `apply_noise_reducer` 参数控制去噪。
+*   `file_cortex_core.file_io`: `FileUtils.walk_filtered()` — 统一的项目目录遍历生成器，所有 os.walk 调用点共享。
 
-### 1.3 前后端参数动态对齐
+### 1.4 路由层架构 (v6.3.2)
+HTTP 路由已按功能域拆分：
+
+```
+routers/
+├── http_routes.py        # 合并层 (27 行, 向后兼容)
+├── project_routes.py     # 工作区/项目管理 (201 行)
+├── fs_routes.py          # 文件系统 CRUD (310 行)
+├── action_routes.py      # 暂存/工具执行/上下文/设置 (278 行)
+├── ws_routes.py          # WebSocket 搜索/工具流
+├── schemas.py            # Pydantic 请求模型
+├── services.py           # 业务逻辑服务层
+└── common.py             # 共享状态与进程管理
+```
+
+所有子路由通过 `http_routes.py` 合并为单一 `router` 对象，`web_app.py` 和测试代码无需变更。
+
+### 1.5 前后端参数动态对齐
 前后端关键参数通过统一校验机制保持一致性：
 
 | 参数 | 前端定义 | 后端模型 | 传输路径 | 验证测试 |
@@ -47,7 +83,7 @@
 
 ### 2.1 自动化检查
 1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则)
-2. **Pytest**: `python -m pytest` (验证 294 项核心测试)
+2. **Pytest**: `python -m pytest` (验证 **348** 项核心测试)
 
 ### 2.2 Docstrings 样例
 ```python
@@ -99,7 +135,8 @@ Token 来源:
 
 ```
 tests/
-├── conftest.py                      # 共享 fixtures + 单例重置
+├── conftest.py                      # 共享 fixtures + DataManager.reset()
+├── test_bugfix_v632.py              # v6.3.2 新增 54 项测试 (BUG修复/边界/DI)
 ├── test_comprehensive_v63.py        # v6.3.1 新增 73 项测试 (CLI/MCP/Web/安全)
 ├── test_additional_coverage.py      # v6.3.0 新增 30 项边缘测试
 ├── test_dm_config.py                # 配置管理
@@ -113,3 +150,12 @@ tests/
 ├── test_frontend_contract.py        # 前端结构契约
 └── ...更多
 ```
+
+## 6. v6.3.2 变更摘要
+
+| 类别 | 变更 |
+|------|------|
+| **BUG** | fctx.py else 分支逻辑错误 / results_count 未初始化 / None 崩溃 / deprecated API |
+| **重构** | 路由层按域拆分为 3 模块 / 共享 walk_filtered 遍历 / Clipboard 去重 / DataManager DI |
+| **新增** | PathCollectionDialog 组件 / DataManager.create/reset/activate |
+| **测试** | +54 项 (总计 348) / ruff 0 errors |

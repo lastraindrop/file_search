@@ -18,6 +18,66 @@ class FileUtils:
     """Utility class for file operations."""
 
     @staticmethod
+    def walk_filtered(
+        root: pathlib.Path,
+        excludes: list[str],
+        git_spec: pathspec.PathSpec | None = None,
+        include_dirs: bool = False,
+        stop_event: object = None,
+    ):
+        """Walks a project tree yielding filtered (full_path, rel_path) tuples.
+
+        Directories are pruned based on ignore rules. Files are checked against
+        the same ignore rules. Only non-ignored entries are yielded.
+
+        Args:
+            root: Root directory to walk.
+            excludes: Manual exclusion patterns.
+            git_spec: Compiled gitignore spec.
+            include_dirs: Whether to yield directory entries.
+            stop_event: Optional threading.Event for early cancellation.
+
+        Yields:
+            Tuple of (full_path: pathlib.Path, rel_path: pathlib.Path).
+        """
+        for cur_root, dirs, files in os.walk(root):
+            if stop_event is not None and stop_event.is_set():
+                break
+
+            cur_root_path = pathlib.Path(cur_root)
+            try:
+                rel_root = cur_root_path.relative_to(root)
+            except (ValueError, RuntimeError):
+                norm_root = os.path.normcase(os.path.abspath(cur_root))
+                norm_base = os.path.normcase(os.path.abspath(root))
+                if norm_root.startswith(norm_base):
+                    rel_root = pathlib.Path(
+                        norm_root[len(norm_base):].lstrip(os.sep)
+                    )
+                else:
+                    rel_root = pathlib.Path(os.path.basename(cur_root))
+
+            dirs[:] = [
+                d
+                for d in dirs
+                if not FileUtils.should_ignore(
+                    d, rel_root / d, excludes, git_spec, True
+                )
+            ]
+
+            if include_dirs:
+                for d in dirs:
+                    yield (cur_root_path / d, rel_root / d)
+
+            for f in files:
+                full_path = cur_root_path / f
+                rel_path = rel_root / f
+                if not FileUtils.should_ignore(
+                    f, rel_path, excludes, git_spec, False
+                ):
+                    yield (full_path, rel_path)
+
+    @staticmethod
     def open_path_in_os(path: pathlib.Path) -> None:
         """Opens a file or directory using the default OS application.
 
@@ -191,25 +251,10 @@ class FileUtils:
                 ):
                     results.append(str(item))
         else:
-            for curr_root, dirs, files in os.walk(root):
-                curr_root_path = pathlib.Path(curr_root)
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if not FileUtils.should_ignore(
-                        d,
-                        (curr_root_path / d).relative_to(root),
-                        manual_excludes,
-                        git_spec,
-                        True,
-                    )
-                ]
-                for f in files:
-                    rel = (curr_root_path / f).relative_to(root)
-                    if not FileUtils.should_ignore(
-                        f, rel, manual_excludes, git_spec, False
-                    ):
-                        results.append(str(curr_root_path / f))
+            for full_path, _rel_path in FileUtils.walk_filtered(
+                root, manual_excludes, git_spec, include_dirs=False
+            ):
+                results.append(str(full_path))
         return results
 
     @staticmethod

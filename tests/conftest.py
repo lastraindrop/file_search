@@ -19,8 +19,7 @@ def _reset_singleton():
     # Force immediate GC to close unreferenced file handles
     gc.collect()
 
-    with DataManager._lock:
-        DataManager._instance = None
+    DataManager.reset()
 
     yield
 
@@ -49,8 +48,7 @@ def _reset_singleton():
                 ACTIVE_PROCESSES.pop(pid, None)
 
     # Final sweep
-    with DataManager._lock:
-        DataManager._instance = None
+    DataManager.reset()
 
     FileUtils.clear_cache()
     ACTIVE_PROCESSES.clear()
@@ -156,14 +154,12 @@ def clean_config(tmp_path):
 
     from file_cortex_core import FileUtils
     with patch('file_cortex_core.config._CONFIG_FILE', config_path):
-        # Full Reset for implementation consistency
-        DataManager._instance = None
+        DataManager.reset()
         FileUtils.clear_cache()
         dm = DataManager()
         dm.config_path = config_path
         yield dm
-        # Cleanup
-        DataManager._instance = None
+        DataManager.reset()
         FileUtils.clear_cache()
 
 @pytest.fixture
@@ -176,13 +172,13 @@ def api_client(tmp_path):
     from file_cortex_core import FileUtils
 
     with patch('file_cortex_core.config._CONFIG_FILE', config_path):
-        DataManager._instance = None
+        DataManager.reset()
         FileUtils.clear_cache()
 
         client = TestClient(app)
         yield client
 
-        DataManager._instance = None
+        DataManager.reset()
         FileUtils.clear_cache()
 
 @pytest.fixture

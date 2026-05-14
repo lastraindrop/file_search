@@ -80,6 +80,7 @@ class FileCortexApp:
         self.negative_tags: list[str] = []
         self.current_preview_path: pathlib.Path | None = None
         self.is_editing = False
+        self.results_count = 0
 
         self._init_ui()
         self._init_context_menu()
@@ -283,6 +284,15 @@ class FileCortexApp:
         color = "#ef4444" if is_error else "#10b981"
         self.lbl_status.config(text=message, foreground=color)
         self.root.after(3000, lambda: self.lbl_status.config(foreground="#555"))
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Copies text to the system clipboard.
+
+        Args:
+            text: The text to copy.
+        """
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
 
     def _init_search_tab(self) -> None:
         """Initializes the search tab with input fields and results tree."""
@@ -1282,8 +1292,7 @@ class FileCortexApp:
             self.exclude_var.get(),
             self.use_gitignore_var.get(),
         )
-        self.root.clipboard_clear()
-        self.root.clipboard_append(tree_text)
+        self._copy_to_clipboard(tree_text)
         self.show_status("结构已复制")
 
     def refresh_staging_ui(self, apply_filter: bool = False) -> None:
@@ -1462,12 +1471,13 @@ class FileCortexApp:
                 use_gitignore=use_git,
             )
         if final_text:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(final_text)
+            self._copy_to_clipboard(final_text)
             self.show_status("内容已复制")
 
     def update_group_combo(self) -> None:
         """Updates the group combo box values."""
+        if not self.current_proj_config:
+            return
         self.combo_groups["values"] = list(self.current_proj_config["groups"].keys())
 
     def on_group_changed(self, event: tk.Event) -> None:
@@ -1478,6 +1488,8 @@ class FileCortexApp:
         """Refreshes the favorites tree view."""
         for i in self.tree_fav.get_children():
             self.tree_fav.delete(i)
+        if not self.current_proj_config:
+            return
         grp = self.current_proj_config["groups"].get(self.current_group_var.get(), [])
         for ps in grp:
             p = pathlib.Path(ps)
@@ -1490,6 +1502,8 @@ class FileCortexApp:
 
     def create_group(self) -> None:
         """Creates a new favorites group."""
+        if not self.current_proj_config:
+            return
         n = simpledialog.askstring("新建组", "名:")
         if n and n not in self.current_proj_config["groups"]:
             self.current_proj_config["groups"][n] = []
@@ -1499,6 +1513,8 @@ class FileCortexApp:
 
     def load_group_to_staging(self) -> None:
         """Loads the current group to staging list."""
+        if not self.current_proj_config:
+            return
         self._add_paths_to_staging(
             self.current_proj_config["groups"].get(self.current_group_var.get(), [])
         )
@@ -1596,8 +1612,7 @@ class FileCortexApp:
                 subprocess.run(["osascript", "-e", script], check=True)
             else:
                 path_str = "\n".join([str(p) for p in paths])
-                self.root.clipboard_clear()
-                self.root.clipboard_append(path_str)
+                self._copy_to_clipboard(path_str)
                 messagebox.showinfo("提示", "Linux 下已将文件路径复制到剪切板。")
                 return
 
@@ -1628,123 +1643,22 @@ class FileCortexApp:
         Args:
             paths: List of paths to format.
         """
-        dialog = tk.Toplevel(self.root)
-        dialog.title("路径搜集与格式化")
-        dialog.geometry("380x420")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
+        from file_cortex_core.gui.path_collection import PathCollectionDialog
 
-        dialog.update_idletasks()
-        x = (
-            self.root.winfo_x()
-            + (self.root.winfo_width() // 2)
-            - (dialog.winfo_width() // 2)
+        profiles = {}
+        if self.current_proj_config:
+            profiles = self.current_proj_config.get("collection_profiles", {})
+
+        dialog = PathCollectionDialog(
+            self.root,
+            paths,
+            self.current_dir,
+            profiles,
+            status_callback=lambda count: self.lbl_status.config(
+                text=f"已成功搜集 {count} 条路径"
+            ),
         )
-        y = (
-            self.root.winfo_y()
-            + (self.root.winfo_height() // 2)
-            - (dialog.winfo_height() // 2)
-        )
-        dialog.geometry(f"+{x}+{y}")
-
-        main_f = ttk.Frame(dialog, padding=15)
-        main_f.pack(fill=tk.BOTH, expand=True)
-
-        mode_var = tk.StringVar(value="relative")
-        ttk.Label(main_f, text="路径模式:", font=("Bold", 9)).pack(anchor=tk.W)
-        ttk.Radiobutton(
-            main_f,
-            text="项目相对路径 (Relative)",
-            variable=mode_var,
-            value="relative",
-        ).pack(anchor=tk.W, padx=10)
-        ttk.Radiobutton(
-            main_f,
-            text="系统绝对路径 (Absolute)",
-            variable=mode_var,
-            value="absolute",
-        ).pack(anchor=tk.W, padx=10)
-
-        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
-
-        p_f = ttk.Frame(main_f)
-        p_f.pack(fill=tk.X, pady=5)
-        ttk.Label(p_f, text="快速预设:").pack(side=tk.LEFT)
-        profiles = self.current_proj_config.get("collection_profiles", {})
-        profile_names = list(profiles.keys())
-        preset_combo = ttk.Combobox(p_f, values=profile_names, state="readonly")
-        preset_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-
-        sym_f = ttk.Frame(main_f)
-        sym_f.pack(fill=tk.X, pady=5)
-
-        ttk.Label(sym_f, text="文件前缀 (Prefix):").grid(row=0, column=0, sticky=tk.W)
-        file_prefix_var = tk.StringVar(value="")
-        file_prefix_entry = ttk.Entry(sym_f, textvariable=file_prefix_var, width=15)
-        file_prefix_entry.grid(row=0, column=1, padx=5, pady=2)
-
-        ttk.Label(sym_f, text="目录后缀 (Suffix):").grid(row=1, column=0, sticky=tk.W)
-        dir_suffix_var = tk.StringVar(value="/")
-        dir_suffix_entry = ttk.Entry(sym_f, textvariable=dir_suffix_var, width=15)
-        dir_suffix_entry.grid(row=1, column=1, padx=5, pady=2)
-
-        ttk.Separator(main_f, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
-
-        sep_var = tk.StringVar(value="\\n")
-        ttk.Label(main_f, text="自定义分隔符:", font=("Bold", 9)).pack(anchor=tk.W)
-
-        presets = ttk.Frame(main_f)
-        presets.pack(fill=tk.X, pady=5)
-        ttk.Button(
-            presets,
-            text="换行(\\n)",
-            width=8,
-            command=lambda: sep_var.set("\\n"),
-        ).pack(side=tk.LEFT, padx=2)
-        ttk.Button(
-            presets, text="空格", width=8, command=lambda: sep_var.set(" ")
-        ).pack(side=tk.LEFT, padx=2)
-
-        entry_sep = ttk.Entry(main_f, textvariable=sep_var)
-        entry_sep.pack(fill=tk.X, pady=5)
-
-        def on_preset_select(e: tk.Event) -> None:
-            p_name = preset_combo.get()
-            prof = profiles.get(p_name)
-            if prof:
-                file_prefix_var.set(prof.get("prefix", ""))
-                dir_suffix_var.set(prof.get("suffix", ""))
-                sep_var.set(prof.get("sep", "\\n"))
-
-        preset_combo.bind("<<ComboboxSelected>>", on_preset_select)
-        if profile_names:
-            preset_combo.set(profile_names[0])
-            on_preset_select(None)
-
-        def do_copy() -> None:
-            mode = mode_var.get()
-            sep = sep_var.get()
-            f_pref = file_prefix_var.get()
-            d_suff = dir_suffix_var.get()
-            formatted = FormatUtils.collect_paths(
-                [str(p) for p in paths],
-                str(self.current_dir),
-                mode,
-                sep,
-                f_pref,
-                d_suff,
-            )
-            self.root.clipboard_clear()
-            self.root.clipboard_append(formatted)
-            self.lbl_status.config(text=f"已成功搜集 {len(paths)} 条路径")
-            dialog.destroy()
-
-        ttk.Button(
-            main_f,
-            text="✅ 确定并复制到剪切板",
-            command=do_copy,
-        ).pack(fill=tk.X, pady=10)
+        self.root.wait_window(dialog)
 
     def ctx_copy_path_to_clipboard(self) -> None:
         """Copies the selected path(s) to clipboard."""
@@ -1752,8 +1666,7 @@ class FileCortexApp:
         if not paths:
             return
         path_str = "\n".join([str(p) for p in paths])
-        self.root.clipboard_clear()
-        self.root.clipboard_append(path_str)
+        self._copy_to_clipboard(path_str)
         self.lbl_status.config(text=f"已复制 {len(paths)} 个路径到剪切板")
 
     def ctx_rename_file(self) -> None:

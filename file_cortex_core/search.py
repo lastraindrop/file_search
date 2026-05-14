@@ -222,85 +222,69 @@ def search_generator(
     content_futures: dict[Any, dict[str, Any]] = {}
 
     try:
-        for root, dirs, files in os.walk(root_path):
+        for full_path, rel_path in FileUtils.walk_filtered(
+            root_path, excludes, git_spec,
+            include_dirs=query.include_dirs,
+            stop_event=stop_event,
+        ):
             if stop_event and stop_event.is_set():
                 break
 
-            rel_root = pathlib.Path(root).relative_to(root_path)
+            is_dir = full_path.is_dir()
 
-            # Prune directories based on ignore rules
-            dirs[:] = [
-                d for d in dirs
-                if not FileUtils.should_ignore(d, rel_root / d, excludes, git_spec, True)
-            ]
+            if is_dir:
+                if path_matcher.matches(full_path.name, rel_path):
+                    count += 1
+                    meta = FileUtils.get_metadata(full_path)
+                    yield {"match_type": "📁 Folder", **meta}
+                    if count >= query.max_results:
+                        break
+                continue
 
-            if query.include_dirs:
-                for d in dirs:
-                    if path_matcher.matches(d, rel_root / d):
-                        count += 1
-                        meta = FileUtils.get_metadata(pathlib.Path(root) / d)
-                        yield {"match_type": "📁 Folder", **meta}
-                        if count >= query.max_results:
-                            dirs[:] = []
-                            break
+            try:
+                meta = FileUtils.get_metadata(full_path)
+            except Exception:
+                continue
 
-            for file in files:
-                if stop_event and stop_event.is_set():
+            if query.mode in ("smart", "exact", "regex"):
+                if path_matcher.matches(full_path.name, rel_path):
+                    count += 1
+                    yield {
+                        "match_type": "Inverse Match" if query.is_inverse else "Match",
+                        **meta,
+                    }
+                if count >= query.max_results:
+                    break
+            elif query.mode == "content" and query.text:
+                future = SHARED_SEARCH_POOL.submit(content_matcher.match_file, full_path)
+                content_futures[future] = meta
+
+                if len(content_futures) >= DEFAULT_BATCH_SIZE:
+                    done_batch = [f for f in content_futures if f.done()]
+                    if not done_batch and content_futures:
+                        try:
+                            next(as_completed(content_futures, timeout=0.01))
+                            done_batch = [f for f in content_futures if f.done()]
+                        except (StopIteration, TimeoutError):
+                            pass
+
+                    for f in done_batch:
+                        is_match, snippet = f.result()
+                        info = content_futures.pop(f)
+                        if is_match:
+                            count += 1
+                            yield {
+                                "match_type": "Content Match",
+                                "snippet": snippet,
+                                **info,
+                            }
+                            if count >= query.max_results:
+                                break
+                if count >= query.max_results:
                     break
 
-                full_path = pathlib.Path(root) / file
-                rel_path = rel_root / file
-
-                if FileUtils.should_ignore(file, rel_path, excludes, git_spec, False):
-                    continue
-
-                try:
-                    meta = FileUtils.get_metadata(full_path)
-                except Exception:
-                    continue
-
-                # Mode Logic
-                if query.mode in ("smart", "exact", "regex"):
-                    if path_matcher.matches(file, rel_path):
-                        count += 1
-                        yield {
-                            "match_type": "Inverse Match" if query.is_inverse else "Match",
-                            **meta,
-                        }
-                    if count >= query.max_results:
-                        break
-                elif query.mode == "content" and query.text:
-                    future = SHARED_SEARCH_POOL.submit(content_matcher.match_file, full_path)
-                    content_futures[future] = meta
-
-                    if len(content_futures) >= DEFAULT_BATCH_SIZE:
-                        # Process done futures to maintain result order and flow
-                        done_batch = [f for f in content_futures if f.done()]
-                        if not done_batch and content_futures:
-                            try:
-                                next(as_completed(content_futures, timeout=0.01))
-                                done_batch = [f for f in content_futures if f.done()]
-                            except (StopIteration, TimeoutError):
-                                pass
-
-                        for f in done_batch:
-                            is_match, snippet = f.result()
-                            info = content_futures.pop(f)
-                            if is_match:
-                                count += 1
-                                yield {
-                                    "match_type": "Content Match",
-                                    "snippet": snippet,
-                                    **info,
-                                }
-                                if count >= query.max_results:
-                                    break
-                    if count >= query.max_results:
-                        break
-
-            if count >= query.max_results:
-                dirs[:] = []
-                break
+        if count >= query.max_results:
+            pass
 
         # Final cleanup of remaining content futures
         for f in as_completed(content_futures):

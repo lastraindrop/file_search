@@ -5,7 +5,6 @@ Finds duplicate files based on size and SHA256 hash comparison.
 """
 
 import hashlib
-import os
 import pathlib
 import queue
 import threading
@@ -84,48 +83,23 @@ class DuplicateWorker(threading.Thread):
         size_map: dict[int, list[pathlib.Path]] = {}
 
         try:
-            for root, dirs, files in os.walk(self.root_dir):
+            for full_p, _rel_p in FileUtils.walk_filtered(
+                self.root_dir, self.excludes, self.git_spec,
+                include_dirs=False, stop_event=self.stop_event,
+            ):
                 if self.stop_event.is_set():
                     return
 
                 try:
-                    rel_root = pathlib.Path(root).relative_to(self.root_dir)
-                except (ValueError, RuntimeError):
-                    norm_root = os.path.normcase(os.path.abspath(root))
-                    norm_base = os.path.normcase(os.path.abspath(self.root_dir))
-                    if norm_root.startswith(norm_base):
-                        rel_root = pathlib.Path(
-                            norm_root[len(norm_base) :].lstrip(os.sep)
-                        )
-                    else:
-                        rel_root = pathlib.Path(os.path.basename(root))
-
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if not FileUtils.should_ignore(
-                        d, rel_root / d, self.excludes, self.git_spec, True
-                    )
-                ]
-
-                for file in files:
-                    full_p = pathlib.Path(root) / file
-                    rel_p = rel_root / file
-                    if FileUtils.should_ignore(
-                        file, rel_p, self.excludes, self.git_spec, False
-                    ):
+                    stat = full_p.stat()
+                    sz = stat.st_size
+                    if sz == 0:
                         continue
-
-                    try:
-                        stat = full_p.stat()
-                        sz = stat.st_size
-                        if sz == 0:
-                            continue
-                        if sz not in size_map:
-                            size_map[sz] = []
-                        size_map[sz].append(full_p)
-                    except Exception:
-                        continue
+                    if sz not in size_map:
+                        size_map[sz] = []
+                    size_map[sz].append(full_p)
+                except Exception:
+                    continue
 
             potential_groups = {s: p for s, p in size_map.items() if len(p) > 1}
 

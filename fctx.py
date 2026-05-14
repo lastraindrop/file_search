@@ -127,7 +127,7 @@ def main() -> None:
             else:
                 print(f"EXIT CODE: {res['exit_code']}")
 
-    else:
+    if not args.command:
         parser.print_help()
 
 

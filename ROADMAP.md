@@ -1,6 +1,6 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **版本**: 6.3.1 | **更新日期**: 2026-05-10 | **测试**: 294 passed
+> **版本**: 6.3.2 | **更新日期**: 2026-05-14 | **测试**: 348 passed
 
 ---
 
@@ -22,22 +22,34 @@
 
 ---
 
-## 阶段 6：工程化深耕与性能监控 (Planned - 2026 Q3)
+## 阶段 6：工程化深耕 (v6.3.2 — 已完成 2026-05-14)
 
-- [ ] **[PLANNED] 静态类型分析**: 集成 `mypy` 实现 100% 静态类型覆盖
-- [ ] **[PLANNED] DataManager 依赖注入重构**: 取代 Service Locator 模式
-- [ ] **[PLANNED] 前端亮色主题**: 通过 CSS 变量实现亮色/暗色主题切换
-- [ ] **[PLANNED] 拖拽支持**: 实现文件拖拽到 Staging 面板
-- [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件
-- [ ] **[PLANNED] Virtual Scroll**: Web 端引入虚拟滚动，支持万级文件树
-- [ ] **[PLANNED] 前端 E2E 测试**: Playwright/Cypress
-- [ ] **[PLANNED] Desktop GUI 拆分**: 从 1919行单体类提取 Controller/View
+- [x] **8项 BUG 修复**: fctx else 分支逻辑 / results_count 初始化 / None 崩溃 / deprecated API 替换 / ruff 配置清理
+- [x] **DataManager 依赖注入**: `create()` / `reset()` / `activate()` 三级 DI 支持
+- [x] **路由按域拆分**: `http_routes.py` (743行) → `project_routes` + `fs_routes` + `action_routes` (3模块)
+- [x] **共享遍历逻辑**: `FileUtils.walk_filtered()` 统一 4 处重复的 os.walk 模式
+- [x] **Desktop GUI 提取**: `PathCollectionDialog` 从单体类中提取为独立组件
+- [x] **Clipboard 去重**: 4 处 `clipboard_clear/append` 合并为 `_copy_to_clipboard`
+- [x] **GUI 可选导入**: 核心包 `try/except ImportError` 支持 headless 环境
+- [x] **348 项测试基线**: 新增 54 项测试，覆盖全链路回归
+
+### v6.3.x 待完成
+- [ ] CDN 资源 SRI hash
+- [ ] 前端端点集中到 `config.endpoints` (部分完成)
+- [ ] BUG-5: Favorites 组选择器选项清理
+- [ ] BUG-11: 响应式 CSS grid 冲突
+- [ ] HC-2: CSS 魔术值 → CSS 变量 + 亮色主题
 
 ---
 
 ## 阶段 7：智能化编排与插件生态 (v7.0 - 2026 Q4)
 
-- [ ] **[PLANNED] 路由拆分**: `http_routes.py` 按功能域拆分为多个路由模块
+- [ ] **[PLANNED] 前端亮色主题**: 通过 CSS 变量实现亮色/暗色主题切换
+- [ ] **[PLANNED] 静态类型分析**: 集成 `mypy` 实现 100% 静态类型覆盖
+- [ ] **[PLANNED] 拖拽支持**: 实现文件拖拽到 Staging 面板
+- [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件
+- [ ] **[PLANNED] Virtual Scroll**: Web 端引入虚拟滚动，支持万级文件树
+- [ ] **[PLANNED] 前端 E2E 测试**: Playwright/Cypress
 - [ ] **[PLANNED] 语义指纹**: 为文件生成快速哈希指纹，加速增量索引
 - [ ] **[PLANNED] 插件系统**: 定义标准 Hook 接口，支持自定义搜索/导出插件
 - [ ] **[PLANNED] 语义搜索**: 集成轻量级 Embedding 模型，实现向量相似性检索
@@ -52,16 +64,16 @@
 
 ---
 
-## v6.3.1 验收清单
+## v6.3.2 验收清单
 
 ### 测试验收
-- [x] **294 项测试全部通过**
-- [x] 测试隔离机制有效 (singleton reset + process cleanup)
+- [x] **348 项测试全部通过**
+- [x] 测试隔离机制有效 (DataManager.reset() + process cleanup)
 - [x] Windows 稳定性通过
 
 ### 代码质量验收
 - [x] **Ruff 零错误**
-- [x] 架构解耦实现
+- [x] 路由层按域拆分完成
 - [x] 前后端参数动态对齐 (tokenThreshold/preview_limit_mb/allowed_extensions/api_token/version)
 
 ### 安全验收
@@ -71,20 +83,12 @@
 
 ---
 
-## 架构一致性原则
-
-1. **SSOT**: 所有路径权限统一经过 `DataManager` 注册，严禁硬编码路径直接 I/O。
-2. **Dynamic Alignment**: 前后端参数必须保持动态对齐，UI 变更伴随 API Schema 更新。
-3. **Defense-in-Depth**: WebSocket 与 HTTP 共享同等级安全认证 Token。
-4. **Deterministic Normalization**: 所有路径处理使用标准归一化协议，消除跨平台歧义。
-
----
-
 ## 版本历史
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.3.1** | **2026-05-10** | **全量架构审计, 10项bug修复, 前后端一致性, 73项新测试, 294 passed** |
+| **6.3.2** | **2026-05-14** | **8项BUG修复, DataManager DI, 路由拆分, walk_filtered去重, 路径收集器提取, 348 passed** |
+| 6.3.1 | 2026-05-10 | 全量架构审计, 10项bug修复, 前后端一致性, 73项新测试, 294 passed |
 | 6.3.0 | 2026-04-22 | 内核解耦, WebSocket Auth, Blueprint XML, 221 测试 |
 | 6.2.0 | 2026-04-21 | 160 测试, Ruff 0 errors, MCP 完整支持 |
 | 6.0.0 | 2026-04-01 | MCP 协议, Categorizer, 蓝图生成 |
