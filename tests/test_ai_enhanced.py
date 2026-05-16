@@ -1,3 +1,5 @@
+"""Tests for AI context generation and blueprint features."""
+
 import os
 
 from file_cortex_core import ContextFormatter, PathValidator

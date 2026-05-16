@@ -11,7 +11,7 @@ class NoiseReducer:
     """Cleans code context to reduce token noise."""
 
     @staticmethod
-    def clean(content: str, max_line_length: int = 500) -> str:
+    def clean(content: str | None, max_line_length: int = 500) -> str:
         """Cleans content by removing minified blocks and noise.
 
         Args:

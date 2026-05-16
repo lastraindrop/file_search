@@ -6,9 +6,10 @@ from __future__ import annotations
 import argparse
 import os
 import pathlib
+from collections.abc import Awaitable, Callable
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,10 +38,17 @@ def _parse_allowed_origins(raw_value: str | None) -> list[str]:
     return origins or ["*"]
 
 
+def _is_wildcard_origin(origins: list[str]) -> bool:
+    """Checks if the origins list represents a wildcard (allow all)."""
+    return origins == ["*"] or "*" in origins
+
+
 ALLOWED_ORIGINS = _parse_allowed_origins(os.getenv("FCTX_ALLOWED_ORIGINS", "*"))
 
 
-async def verify_api_token(request: Request, call_next):
+async def verify_api_token(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Verifies API token for protected endpoints."""
     if not API_TOKEN:
         return await call_next(request)
@@ -54,7 +62,7 @@ async def verify_api_token(request: Request, call_next):
             )
 
         origin = request.headers.get("origin", "*")
-        if ALLOWED_ORIGINS != ["*"] and origin not in ALLOWED_ORIGINS:
+        if not _is_wildcard_origin(ALLOWED_ORIGINS) and origin not in ALLOWED_ORIGINS:
             return JSONResponse(
                 status_code=403,
                 content={"status": "error", "detail": "Origin not allowed"},
@@ -70,7 +78,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
-        allow_credentials=ALLOWED_ORIGINS != ["*"],
+        allow_credentials=not _is_wildcard_origin(ALLOWED_ORIGINS),
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -85,7 +93,7 @@ app = create_app()
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Fallback handler for unhandled server-side exceptions."""
     logger.error(f"Global Unhandled Exception: {exc}", exc_info=True)
 

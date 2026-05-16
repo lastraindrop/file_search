@@ -1,3 +1,5 @@
+"""Tests for ContextFormatter XML/Markdown export and formatting."""
+
 from file_cortex_core import ContextFormatter, NoiseReducer
 
 

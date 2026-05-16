@@ -1,3 +1,5 @@
+"""PyInstaller build script for FileCortex desktop executable."""
+
 try:
     import PyInstaller.__main__
 except ImportError:

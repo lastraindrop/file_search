@@ -116,7 +116,7 @@ def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str,
 @action_router.get("/api/global/settings")
 def get_global_settings(dm: DataManager = _dm_dep) -> dict[str, Any]:
     """Gets global settings."""
-    return dm.data.get("global_settings", {})
+    return dm.config.global_settings.model_dump()
 
 
 @action_router.post("/api/global/settings")

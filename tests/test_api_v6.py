@@ -1,3 +1,4 @@
+"""Tests for FileCortex API v6 endpoints and contracts."""
 
 import pytest
 

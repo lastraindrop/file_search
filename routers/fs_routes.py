@@ -75,12 +75,12 @@ def get_content(path: str, dm: DataManager = _dm_dep) -> dict[str, Any]:
         limit_mb = dm.config.global_settings.preview_limit_mb
         max_preview = int(round(limit_mb * 1024 * 1024))
         content = FileUtils.read_text_smart(p, max_bytes=max_preview)
+        actual_size = p.stat().st_size
 
         return {
             "content": content,
             "encoding": "utf-8",
-            "is_truncated": len(content.encode("utf-8", errors="ignore"))
-            >= max_preview,
+            "is_truncated": actual_size > max_preview,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading file: {e}") from e

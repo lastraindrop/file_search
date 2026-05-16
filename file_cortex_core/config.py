@@ -359,7 +359,7 @@ class DataManager:
                     with contextlib.suppress(Exception):
                         os.unlink(temp_path)
                 logger.error(f"Failed to save configuration: {e}")
-                raise e
+                raise
 
     def add_to_recent(self, path: str) -> None:
         """Adds a project path to the recent list, maintaining a cap.

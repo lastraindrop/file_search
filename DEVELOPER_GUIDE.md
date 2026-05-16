@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.3.2 | **更新日期**: 2026-05-14
+> **版本**: 6.3.3 | **更新日期**: 2026-05-16
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -136,6 +136,7 @@ Token 来源:
 ```
 tests/
 ├── conftest.py                      # 共享 fixtures + DataManager.reset()
+├── test_bugfix_v633.py              # v6.3.3 新增 24 项测试 (BUG修复/边界/Google Style)
 ├── test_bugfix_v632.py              # v6.3.2 新增 54 项测试 (BUG修复/边界/DI)
 ├── test_comprehensive_v63.py        # v6.3.1 新增 73 项测试 (CLI/MCP/Web/安全)
 ├── test_additional_coverage.py      # v6.3.0 新增 30 项边缘测试

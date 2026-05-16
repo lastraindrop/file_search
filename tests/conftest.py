@@ -1,3 +1,5 @@
+"""Test fixtures and configuration for FileCortex test suite."""
+
 import gc
 import os
 import subprocess

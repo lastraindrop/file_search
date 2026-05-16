@@ -1,3 +1,5 @@
+"""Frontend structure and contract verification tests."""
+
 from unittest.mock import MagicMock
 
 import pytest

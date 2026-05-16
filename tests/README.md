@@ -8,6 +8,7 @@
 
 | 层次 | 模块/文件 | 测试数 | 覆盖范围 |
 |------|-----------|--------|----------|
+| **v6.3.3 BUG修复** | `test_bugfix_v633.py` | 24 | is_truncated/CDATA/CORS/NoiseReducer/deprecated API/version |
 | **BUG修复 & 边界** | `test_bugfix_v632.py` | 54 | v6.3.2 全量回归: CLI分支/配置API/搜索/路径/文件/噪声/格式/DI/Web API |
 | **CLI 层** | `test_comprehensive_v63.py::TestCLI` | 5 | `fctx.py` open/stage/projects/拒绝系统目录 |
 | **MCP 协议层** | `test_comprehensive_v63.py::TestMCPServer` + `test_mcp_server.py` | 14 | 搜索/注册/蓝图/列表/上下文/统计 |
@@ -17,7 +18,7 @@
 | **集成层** | `test_core_integration.py` + `test_scenarios.py` + `test_ai_enhanced.py` | 25 | 编码回弹/级联回滚/完整流程/路径收集 |
 | **前端契约层** | `test_frontend_contract.py` | 7 | HTML/JS/CSS/Desktop GUI 结构/路由模块 |
 | **Duplicate** | `test_comprehensive_v63.py::TestDuplicateWorkerExtended` | 2 | 取消扫描/空目录 |
-| **总计** | | **348** | **100% 关键路径** |
+| **总计** | | **372** | **100% 关键路径** |
 
 ## v6.3.2 新增测试清单
 

@@ -129,11 +129,12 @@ class FileOps:
                         )
 
                 if rollback_errors:
-                    raise RuntimeError(
+                    msg = (
                         f"Batch rename failed and rollback was incomplete: {e}. "
                         f"Manual fix required for: {', '.join(rollback_errors)}"
-                    ) from e
-                raise e
+                    )
+                    raise RuntimeError(msg) from e
+                raise
 
         return results
 
@@ -235,13 +236,13 @@ class FileOps:
             with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
                 f.write(content)
             os.replace(temp_path, path)
-        except Exception as e:
+        except Exception:
             try:
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
             except Exception:
                 pass
-            raise e
+            raise
         return True
 
     @staticmethod

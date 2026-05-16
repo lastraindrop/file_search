@@ -1,6 +1,6 @@
-# FileCortex v6.3.2 (工作区编排助手)
+# FileCortex v6.3.3 (工作区编排助手)
 
-> **版本**: 6.3.2 | **测试**: 348 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.3.3 | **测试**: 372 passed | **代码质量**: Ruff 0 errors
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -44,8 +44,8 @@
 - [技术指南 (架构/参数对齐/防BUG)](TECHNICAL_GUIDE.md)
 - [开发者指南](DEVELOPER_GUIDE.md)
 - [项目路线图](ROADMAP.md)
-- [分析报告](ANALYSIS_REPORT.md)
-- [前端深度分析](FRONTEND_ANALYSIS.md)
+- [架构评估报告](ANALYSIS_REPORT.md)
+- [前端分析报告](FRONTEND_ANALYSIS.md)
 - [测试说明](tests/README.md)
 
 ---
@@ -91,7 +91,7 @@ python -m pytest
 
 ### 测试覆盖
 - **348 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP 及 Windows 兼容性。
-- **测试结果**: 348 passed, 0 failed
+- **测试结果**: 372 passed, 0 failed
 
 ### 代码质量检查
 ```bash

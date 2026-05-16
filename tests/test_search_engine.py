@@ -1,3 +1,5 @@
+"""Tests for the multi-mode search engine and matching logic."""
+
 import threading
 
 import pytest

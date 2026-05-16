@@ -1,24 +1,42 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **版本**: 6.3.2 | **更新日期**: 2026-05-14 | **测试**: 348 passed
+> **版本**: 6.3.3 | **更新日期**: 2026-05-16 | **测试**: 372 passed
 
 ---
 
-## 阶段 0-5：核心巩固、架构解耦与深度审计 (已完成)
+## 阶段 6.3.3：代码整肃与深度测试 (v6.3.3 — 已完成 2026-05-16)
 
-- [x] **安全架构重构**: PathValidator 路径组件精准匹配及 Web 端 XSS 防护
-- [x] **ActionBridge 安全加固**: 跨平台命令执行安全适配
-- [x] **并发搜索引擎**: ThreadPoolExecutor 并发扫描及 Tkinter UI 批次渲染
-- [x] **Schema 自动对齐与持久化**: DataManager 配置字段热补全
-- [x] **LLM 上下文对齐**: XML 导出引擎 (CDATA 封装) + 项目蓝图
-- [x] **MCP 协议集成**: mcp_server.py 支持 AI Agent 原生调用
-- [x] **内核解耦**: 物理 I/O 与 格式化逻辑彻底分离
-- [x] **配置模型化**: Pydantic V2 强类型配置校验 (SSOT)
-- [x] **搜索引擎重构**: 匹配策略类抽离，降低复杂度
-- [x] **Google 规范**: 全面采纳 Google Style 并通过 ruff 强制执行
-- [x] **前端深度分析+修复**: 12 项 BUG 修复、搜索浮层覆盖、API Token 认证修复
-- [x] **v6.3.1 全量审计**: 架构分析(SOLID/DRY/KISS) + 10项 bug 修复 + 前后端一致性校验
-- [x] **294 项测试基线**: 73 项新增测试，覆盖 CLI/MCP/Web API/安全/文件操作/参数对齐
+### BUG 修复 (8项)
+- [x] **BUG-1**: `fs_routes.py` is_truncated 改用文件实际 `st_size` 比较
+- [x] **BUG-2**: `context.py` CDATA 转义确认正确 (单次替换, 非循环)
+- [x] **BUG-3**: `web_app.py` CORS origins 增加 `_is_wildcard_origin()` 函数
+- [x] **BUG-4**: `context.py` NoiseReducer.clean 类型标注 `str` → `str | None`
+- [x] **BUG-5**: 创建 `ANALYSIS_REPORT.md` + `FRONTEND_ANALYSIS.md` 基线文档
+- [x] **BUG-6**: `file_search.py` BatchRenameWindow None 防御检查
+- [x] **BUG-7**: `action_routes.py` deprecated `dm.data.get()` → `dm.config.global_settings.model_dump()`
+- [x] **BUG-8**: `services.py` 路径切片增加空值保护
+
+### Google Python Style Guide 整肃
+- [x] **Docstrings**: 18个模块添加 Google-style 模块 docstring
+- [x] **类型标注**: `web_app.py` middleware 完整签名
+- [x] **异常处理**: 3处 `raise e` → `raise` (裸重新抛出)
+- [x] **性能**: `mcp_server.py` for/append → 列表推导式
+
+### 文档完善
+- [x] **COMPREHENSIVE_PLAN.md**: 完整架构分析 (SOLID评分/分层模型/定位对比) + BUG清单 + 执行计划
+- [x] **TECHNICAL_GUIDE.md**: 更新测试数量 + 工作原理完整叙述
+- [x] **DEVELOPER_GUIDE.md**: 更新版本 + 测试架构
+- [x] **README.md**: 更新测试数量 348→372
+
+### 测试
+- [x] **新增 24 项测试** `test_bugfix_v633.py`: is_truncated / CDATA / CORS / NoiseReducer / deprecated API / version
+- [x] **372 passed, 0 failed**
+
+---
+
+## 阶段 0-6.3.2：已完成 (历史)
+
+### v6.3.x 待完成
 
 ---
 
@@ -87,7 +105,8 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.3.2** | **2026-05-14** | **8项BUG修复, DataManager DI, 路由拆分, walk_filtered去重, 路径收集器提取, 348 passed** |
+| **6.3.3** | **2026-05-16** | **8项BUG修复, Google Style整肃, 372 passed, ruff 0 errors, 文档完善** |
+| 6.3.2 | 2026-05-14 | 8项BUG修复, DataManager DI, 路由拆分, walk_filtered去重, 路径收集器提取, 348 passed |
 | 6.3.1 | 2026-05-10 | 全量架构审计, 10项bug修复, 前后端一致性, 73项新测试, 294 passed |
 | 6.3.0 | 2026-04-22 | 内核解耦, WebSocket Auth, Blueprint XML, 221 测试 |
 | 6.2.0 | 2026-04-21 | 160 测试, Ruff 0 errors, MCP 完整支持 |

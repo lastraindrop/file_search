@@ -1,3 +1,5 @@
+"""Integration tests for FileCortex core modules."""
+
 import os
 import sys
 from unittest.mock import patch

@@ -1675,6 +1675,9 @@ class FileCortexApp:
         if not paths:
             return
         if len(paths) > 1:
+            if BatchRenameWindow is None:
+                messagebox.showerror("错误", "批量重命名组件不可用。")
+                return
             BatchRenameWindow(
                 self.root,
                 self.current_dir,

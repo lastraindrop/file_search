@@ -1,3 +1,5 @@
+"""End-to-end scenario tests for FileCortex workflows."""
+
 from file_cortex_core import PathValidator
 
 

@@ -129,10 +129,9 @@ async def get_file_context(
     if not root:
         return "Error: Unauthorized project path."
 
-    safe_paths = []
-    for p in file_paths:
-        if PathValidator.is_safe(p, root):
-            safe_paths.append(p)
+    safe_paths = [
+        p for p in file_paths if PathValidator.is_safe(p, root)
+    ]
 
     if format == "xml":
         return ContextFormatter.to_xml(safe_paths, root_dir=root)
@@ -149,10 +148,8 @@ async def list_workspaces() -> str:
     dm = get_dm()
     summary = dm.get_workspaces_summary()
     lines = ["Registered Workspaces:"]
-    for p in summary["pinned"]:
-        lines.append(f"[Pin] {p['name']} - {p['path']}")
-    for p in summary["recent"]:
-        lines.append(f"      {p['name']} - {p['path']}")
+    lines.extend(f"[Pin] {p['name']} - {p['path']}" for p in summary["pinned"])
+    lines.extend(f"      {p['name']} - {p['path']}" for p in summary["recent"])
     return "\n".join(lines)
 
 

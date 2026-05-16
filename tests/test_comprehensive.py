@@ -1,3 +1,5 @@
+"""Comprehensive core functionality tests for FileCortex."""
+
 import os
 import queue
 import sys

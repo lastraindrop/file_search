@@ -1,3 +1,5 @@
+"""Advanced file operation tests for FileCortex."""
+
 import os
 import zipfile
 

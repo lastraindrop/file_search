@@ -1,3 +1,5 @@
+"""Tests for DataManager configuration persistence and threading."""
+
 import os
 import pathlib
 import threading

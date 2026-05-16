@@ -1,3 +1,5 @@
+"""Tests for FileCortex MCP server protocol integration."""
+
 import pytest
 
 import mcp_server

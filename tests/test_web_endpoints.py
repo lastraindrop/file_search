@@ -1,3 +1,4 @@
+"""Web endpoint contract tests for FileCortex."""
 
 def test_open_nonexistent_project(api_client):
     """Verify 404/400 for invalid project paths."""

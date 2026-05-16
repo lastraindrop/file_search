@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.3.2 | **测试**: 348 passed | **ruff**: 0 errors
+> **版本**: 6.3.3 | **测试**: 372 passed | **ruff**: 0 errors
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -157,7 +157,8 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 ### 4.1 测试分层
 
 ```
-tests/                              348 项测试
+tests/                              372 项测试
+├── test_bugfix_v633.py             24 tests  ← v6.3.3 BUG修复 + 边界覆盖
 ├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
 ├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全
 ├── test_additional_coverage.py     30 tests  ← 边缘覆盖
@@ -259,6 +260,159 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| 6.3.3 | 2026-05-16 | 8 BUG修复, Google Style整肃, 24新测试, 文档完善, 372 tests |
 | 6.3.2 | 2026-05-14 | 8 BUG修复, DataManager DI, 路由拆分, walk_filtered, 348 tests |
 | 6.3.1 | 2026-05-10 | 全量审计, 10 BUG修复, 前后端一致性, 294 tests |
 | 6.3.0 | 2026-04-22 | 内核解耦, WebSocket Auth, Blueprint XML |
+
+---
+
+## 8. 完整工作原理
+
+### 8.1 请求生命周期 (Web API)
+
+```
+浏览器请求
+    ↓
+FastAPI Middleware (web_app.py:verify_api_token)
+    ├── Token 校验: X-API-Token header → os.getenv("FCTX_API_TOKEN")
+    ├── CORS 校验: Origin → _is_wildcard_origin(ALLOWED_ORIGINS)
+    └── 放行或 401/403
+    ↓
+路由层 (routers/)
+    ├── project_routes.py → 工作区注册/配置/收藏
+    ├── fs_routes.py → 文件 CRUD/预览/归档
+    └── action_routes.py → 暂存/导出/工具/设置
+    ↓
+服务层 (routers/services.py)
+    ├── get_dm() → DataManager 单例
+    ├── is_path_safe() → PathValidator 沙盒
+    └── get_valid_project_root() → 项目根解析
+    ↓
+内核层 (file_cortex_core/)
+    ├── DataManager: Pydantic V2 强类型配置, 原子 os.replace 持久化
+    ├── FileUtils: walk_filtered 统一遍历, read_text_smart 编码探测
+    ├── SearchWorker: 策略化匹配引擎
+    ├── ContextFormatter: LLM 上下文 XML/Markdown 导出
+    └── ActionBridge: 外部工具执行桥接
+```
+
+### 8.2 搜索引擎管线
+
+```
+用户输入 (query string)
+    ↓
+SearchQuery (Pydantic model) → 参数校验与归一化
+    ↓
+PathMatcher 初始化
+    ├── 解析 positive/negative tags
+    ├── 编译 regex patterns (以 / 包裹)
+    └── 分词 keywords → plain_pos + regex_pos
+    ↓
+walk_filtered() 生成器 → yield (full_path, rel_path)
+    ├── os.walk + dirs[:] 剪枝
+    ├── should_ignore() 过滤
+    │   ├── manual_excludes (fnmatch)
+    │   └── git_spec (pathspec.PathSpec)
+    └── stop_event 检查 (取消支持)
+    ↓
+匹配判断 (4模式):
+    smart: all plain keywords in path AND all regex match AND no neg keywords
+    exact: query substring in path (case-sensitive optional)
+    regex: compiled regex.search(path)
+    content: ThreadPoolExecutor 并发读取 + ContentMatcher.match_file
+    ↓
+结果队列 → UI 批次渲染 (100条/tick)
+```
+
+### 8.3 安全沙盒机制
+
+```
+PathValidator.is_safe(target, root)
+    ↓
+平台检测 (ntpath.splitdrive / UNC 前缀)
+    ├── Windows: ntpath.normpath → lower → 前缀比较
+    │   └── UNC 拦截: "\\\\" 或 "//" 开头 → False
+    └── POSIX: os.path.abspath → 前缀比较
+    ↓
+PathValidator.norm_path(p)
+    ├── os.path.abspath → / 替换
+    ├── Windows: lower() + 长路径前缀 "\\\\?\\" 移除
+    └── 尾部 / 移除 (除非驱动器根)
+    ↓
+PathValidator.validate_project(path)
+    ├── UNC 拦截
+    ├── 存在性 + 目录检查
+    ├── 敏感目录拦截 (.git, .env, __pycache__, node_modules...)
+    └── 系统目录拦截 (Windows SYSTEMROOT, POSIX /etc /usr...)
+```
+
+### 8.4 上下文生成管线
+
+```
+用户选择文件路径列表
+    ↓
+ContextFormatter.to_xml(paths, root_dir, ...)
+    ↓
+flatten_paths() → 展开目录 → 过滤 → 去重
+    ↓
+blueprint (可选) → FileUtils.generate_ascii_tree(max_depth=5)
+    ↓
+逐文件处理:
+    ├── is_binary() → 跳过
+    ├── read_text_smart() → charset_normalizer 编码探测 + lru_cache
+    ├── NoiseReducer.clean() → 超长行/Base64块 去噪 (可选)
+    ├── CDATA 转义: "]]>" → "]]]]><![CDATA[>"
+    └── 格式化: <file path="..." size="...KB">...</file>
+    ↓
+XML 输出: <instruction> + <blueprint> + <context> + 文件列表 + </context>
+```
+
+### 8.5 参数动态对齐机制
+
+前后端 8 个关键参数通过统一校验管道保持一致：
+
+```
+参数定义 (单一来源):
+  Pydantic Model (GlobalSettings / ProjectConfig)
+      ↓
+  model_dump() → 前端 defaults (state.js)
+      ↓
+  /api/global/settings → 动态获取后端默认值
+      ↓
+  HTTP Request → Pydantic Model → model_validate()
+      ↓
+  model_dump_json() → os.replace() 原子持久化
+```
+
+### 8.6 数据持久化原子性
+
+```
+DataManager.save()
+    ↓
+config.model_dump_json(indent=4)
+    ↓
+tempfile.NamedTemporaryFile (同目录)
+    ↓
+f.write(data_json)
+    ↓
+os.replace(temp, config) ← 原子替换 (Windows: 5次重试 + sleep)
+    ↓
+异常清理: os.unlink(temp)
+```
+
+### 8.7 关键编码探测 (二级缓存)
+
+```
+read_text_smart(file_path, max_bytes)
+    ↓
+stat: (mtime, size) → 缓存 key
+    ↓
+charset_normalizer.from_bytes(header[:65536])
+    ↓
+decode(encoding, errors="ignore")
+    ↓
+fallback: decode("utf-8", errors="ignore")
+```
+
+> 所有关键路径均通过单元测试覆盖。新增参数必须同步更新 5 处 (Pydantic 模型/前端 defaults/Schema/API route/测试)。

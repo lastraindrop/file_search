@@ -1,3 +1,5 @@
+"""Tests for formatting utilities and token estimation."""
+
 from file_cortex_core import FormatUtils
 
 

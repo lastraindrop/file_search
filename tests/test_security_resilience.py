@@ -1,3 +1,5 @@
+"""Security sandbox and resilience tests for FileCortex."""
+
 import os
 import threading
 from unittest.mock import patch

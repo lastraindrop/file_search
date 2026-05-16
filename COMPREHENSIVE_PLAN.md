@@ -1,213 +1,301 @@
-# FileCortex v6.3.1 Comprehensive Audit & Fix Plan
+# FileCortex v6.3.2 → v6.3.3 综合审计、BUG修复与完善计划
 
-> **审计日期**: 2026-05-10
-> **最终基线**: **`294 passed`** (`python -m pytest`), ruff clean
-> **范围**: 全量架构审计 + 逐文件 Bug 排查 + 前端/后端一致性 + 73项新增单元测试 + 文档全部刷新
+> **审计日期**: 2026-05-16 | **基线版本**: 6.3.2 | **目标版本**: 6.3.3
+> **基线测试**: 348 passed → **目标测试**: 372 passed | **ruff**: 0 errors
 
 ---
 
-## Part A: 架构工程分析 (Software Architecture Audit)
+## A. 系统架构总览
 
-### A1. SOLID 符合度
+### A.1 分层模型 (4层)
 
-| 原则 | 评分 | 分析 |
+```
+┌───────────────────────────────────────────────────────────────┐
+│  Entry Points (4)                                              │
+│  ┌─────────┐ ┌──────────────┐ ┌──────┐ ┌─────────────────┐    │
+│  │ Desktop │ │ Web (FastAPI) │ │ CLI  │ │ MCP Server      │    │
+│  │1832行   │ │ REST + WS     │ │135行 │ │ FastMCP       │    │
+│  │tkinter  │ │ 127行         │ │argparse│ │ 318行         │    │
+│  └────┬────┘ └──────┬───────┘ └──┬───┘ └───────┬─────────┘    │
+├───────┴──────────────┴────────────┴──────────────┴────────────┤
+│  Route Layer (routers/ 7 modules, ~1200行)                     │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐        │
+│  │project_routes│ │ fs_routes    │ │ action_routes    │        │
+│  │184行         │ │ 327行        │ │ 278行            │        │
+│  └──────┬───────┘ └──────┬───────┘ └────────┬─────────┘        │
+│         └────────────────┼─────────────────┘                  │
+│                   http_routes.py (27行, 合并层)                 │
+│                   ws_routes.py (227行)                          │
+│                   schemas.py (212行)                            │
+│                   services.py (108行)                           │
+├───────────────────────────────────────────────────────────────┤
+│  Core Kernel (file_cortex_core/ 10 modules, ~2800行)           │
+│  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌────────────────┐      │
+│  │ config  │ │ security │ │ search  │ │ context        │      │
+│  │596行    │ │ 204行    │ │ 376行   │ │ 203行          │      │
+│  │SSOT     │ │沙盒      │ │策略引擎 │ │ LLM格式化     │      │
+│  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
+│  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌────────────────┐      │
+│  │ file_io │ │ actions  │ │ format  │ │ duplicate      │      │
+│  │523行    │ │ 572行    │ │ 130行   │ │ 131行          │      │
+│  │遍历     │ │文件操作  │ │格式化   │ │ SHA256查重    │      │
+│  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
+│  ┌──────────────────────────────────────────────┐              │
+│  │ gui/ (3 modules, ~621行)                     │              │
+│  │ PathCollectionDialog + BatchRename + DuplicateFinder     │    │
+│  └──────────────────────────────────────────────┘              │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### A.2 架构评分矩阵
+
+| 维度 | 评分 | 亮点 | 改进空间 |
+|------|------|------|----------|
+| **SOLID 单一职责** | 8/10 | 路由按域拆分, 内核模块清晰 | `file_search.py` 1832行过大 |
+| **SOLID 开闭原则** | 7/10 | 策略模式搜索 (`PathMatcher`/`ContentMatcher`) | 导出格式硬编码 |
+| **SOLID 依赖倒置** | 8/10 | DataManager DI (singleton/create/reset/activate) | `get_dm()` 路由注入偏简单 |
+| **SOLID 接口隔离** | 7/10 | 路由按功能域拆分 | 部分端点混合 path/deprecated API |
+| **DRY** | 9/10 | `walk_filtered()` 统一4处重复遍历 | `flatten_paths` 仍有独立 os.walk |
+| **KISS** | 8/10 | 大多数模块清晰可读 | `_prepare_execution` 多平台分支复杂 |
+| **安全性** | 9/10 | UNC/Shell注入/目录遍历/Token认证 | CORS origins 比较脆弱 |
+
+### A.3 核心设计原则对齐
+
+| 原则 | 实现 | 位置 | 状态 |
+|------|------|------|------|
+| SSOT | `DataManager` Pydantic V2 驱动 | `config.py` | ✅ |
+| 路径归一化 | `PathValidator.norm_path()` | `security.py` | ✅ |
+| 防御深度 | HTTP + WebSocket 双通道 Token | `web_app.py`, `ws_routes.py` | ✅ |
+| 遍历共享 | `FileUtils.walk_filtered()` | `file_io.py` | ✅ |
+| 原子写入 | tempfile + os.replace + retry | `config.py` | ✅ |
+| 策略解耦 | `PathMatcher` + `ContentMatcher` | `search.py` | ✅ |
+| 可选导入 | `try/except ImportError` GUI | `__init__.py` | ✅ |
+
+---
+
+## B. 完整 BUG 清单
+
+### BUG-1: `routers/fs_routes.py:81-83` — 截断标志逻辑错误 (中危)
+
+**位置**: `routers/fs_routes.py:81-83`
+
+```python
+"is_truncated": len(content.encode("utf-8", errors="ignore")) >= max_preview,
+```
+
+**问题**: 当文件字节数恰好等于 `max_preview` 时，`>=` 会错误地报告截断。实际并未截断（恰好读满）。
+
+**修复**: 将 `>=` 改为 `>`。
+
+**影响文件**:
+- `routers/fs_routes.py:83`
+
+---
+
+### BUG-2: `file_cortex_core/context.py:175` — CDATA 转义需要循环替换 (中危)
+
+**位置**: `file_cortex_core/context.py:174`
+
+```python
+safe_content = content.replace("]]>", "]]]]><![CDATA[>")
+```
+
+**问题**: 对于内容 `]]>]]>`，单次 `replace` 后变为 `]]]]><![CDATA[>]]>`，其中产生了新的 `]]>`。因为替换引入的 `]]>` 中的最后部分与原内容中的 `]]>` 结合形成新实例。正确做法需要循环替换直到无变化。
+
+**修复**: 使用循环替换直到稳定。
+
+**影响文件**:
+- `file_cortex_core/context.py:174`
+
+---
+
+### BUG-3: `web_app.py:57-59` — CORS origins 比较脆弱性 (中危)
+
+**位置**: `web_app.py:57`
+
+```python
+if ALLOWED_ORIGINS != ["*"] and origin not in ALLOWED_ORIGINS:
+```
+
+**问题**: 直接列表比较 `["*"]` 在其他代码路径可能被修改。将 `"*"` 作为通配符处理更健壮。
+
+**修复**: 提取为函数，使用 `"*" in ALLOWED_ORIGINS` 检测。
+
+**影响文件**:
+- `web_app.py:31-38, 40, 57, 73`
+
+---
+
+### BUG-4: `file_cortex_core/context.py:24` — NoiseReducer.clean 类型标注不准确 (低危)
+
+**位置**: `file_cortex_core/context.py:24`
+
+```python
+def clean(content: str, max_line_length: int = 500) -> str:
+    ...
+    if content is None:
+        return ""
+```
+
+**问题**: 参数类型标注为 `str`，但函数内处理 `None`。应使用 `Optional[str]`。
+
+**修复**: 将类型标注改为 `str | None`。
+
+**影响文件**:
+- `file_cortex_core/context.py:14`
+
+---
+
+### BUG-5: `README.md` 引用不存在的文档 (低危)
+
+**位置**: `README.md:47-48`
+
+```markdown
+- [分析报告](ANALYSIS_REPORT.md)
+- [前端深度分析](FRONTEND_ANALYSIS.md)
+```
+
+**问题**: 这两个文件不存在，造成失效链接。
+
+**修复**: 创建基线文档或移除引用。
+
+**影响文件**:
+- `README.md:47-48`
+- (新建) `ANALYSIS_REPORT.md`
+- (新建) `FRONTEND_ANALYSIS.md`
+
+---
+
+### BUG-6: `file_search.py:1677-1683` — BatchRenameWindow 空值防御 (低危)
+
+**位置**: `file_search.py:1678`
+
+```python
+BatchRenameWindow(self.root, self.current_dir, paths, ...)
+```
+
+**问题**: 虽在 GUI 环境下 `BatchRenameWindow` 不会为 `None`，但缺少防御性检查。
+
+**修复**: 添加 `if BatchRenameWindow is None: return` 的防御检查。
+
+**影响文件**:
+- `file_search.py:1678`
+
+---
+
+### BUG-7 (新发现): `routers/action_routes.py:119` — `dm.data.get()` deprecated API (低危)
+
+**位置**: `routers/action_routes.py:119`
+
+```python
+return dm.data.get("global_settings", {})
+```
+
+**问题**: 使用 `dm.data` (DEPRECATED 字典视图) 而非 `dm.config.global_settings` (Pydantic 模型)。根据 DEVELOPER_GUIDE 规范应使用后者。
+
+**修复**: 使用 `dm.config.global_settings.model_dump()`。
+
+**影响文件**:
+- `routers/action_routes.py:119`
+
+---
+
+### BUG-8 (新发现): `routers/services.py:89` — 相对路径计算可能异常 (低危)
+
+**位置**: `routers/services.py:89`
+
+```python
+norm_root = PathValidator.norm_path(project_root_path)
+...
+norm_entry = PathValidator.norm_path(entry.path)
+if norm_entry.startswith(norm_root.rstrip("/") + "/"):
+    rel = pathlib.Path(norm_entry[len(norm_root) :].lstrip("/"))
+```
+
+**问题**: 当 `norm_entry == norm_root` 时，`startswith` 检查会失败 (因为添加了 `/` 后缀)，然后 `continue`。这是预期行为。但如果路径格式异常，可能产生错误切片。
+
+**修复**: 添加长度保护检查。
+
+**影响文件**:
+- `routers/services.py:85-98`
+
+---
+
+## C. 现阶段执行计划 (v6.3.3)
+
+### C.1 立即修复 (本次会话)
+
+| 序号 | 任务 | 文件 | 预估行数 |
+|------|------|------|----------|
+| 1 | BUG-1: is_truncated >= → > | `routers/fs_routes.py:83` | 1 |
+| 2 | BUG-2: CDATA 循环替换 | `file_cortex_core/context.py:174` | 3 |
+| 3 | BUG-3: CORS 脆弱性 | `web_app.py:31-38,57,73` | 8 |
+| 4 | BUG-4: None 类型标注 | `file_cortex_core/context.py:14` | 2 |
+| 5 | BUG-5: 创建缺失文档 | `ANALYSIS_REPORT.md`, `FRONTEND_ANALYSIS.md`, `README.md` | ~100 |
+| 6 | BUG-6: GUI None 防御 | `file_search.py:1677-1683` | 3 |
+| 7 | BUG-7: deprecated API 替换 | `routers/action_routes.py:119` | 1 |
+| 8 | BUG-8: 路径切片保护 | `routers/services.py:89` | 2 |
+
+### C.2 新增测试覆盖
+
+| 测试 | 覆盖内容 | 文件 |
+|------|----------|------|
+| `test_is_truncated_boundary` | BUG-1: 等于/小于/大于边界 | `test_bugfix_v633.py` (新建) |
+| `test_cdata_looping_escape` | BUG-2: 连续 `]]>` 场景 | `test_bugfix_v633.py` |
+| `test_cors_origin_wildcard_detection` | BUG-3: origin 比较 | `test_bugfix_v633.py` |
+| `test_noise_reducer_none_input` | BUG-4: None 输入 | `test_bugfix_v633.py` |
+| `test_global_settings_uses_pydantic_model` | BUG-7: 确认使用模型 | `test_bugfix_v633.py` |
+| `test_content_preview_truncation` | 截断标志端到端 | `test_bugfix_v633.py` |
+
+### C.3 验证清单
+
+- [ ] `python -m ruff check .` — 0 errors
+- [ ] `python -m pytest tests/ -v` — 全部通过 (372 passed)
+- [ ] 所有 BUG 修复点通过新增测试
+- [ ] CDN 资源链接可访问 (index.html)
+
+### C.4 版本升级
+
+| 文件 | 旧值 | 新值 |
 |------|------|------|
-| **S** 单一职责 | A- | `config.py` 同时管理日志初始化 + 配置管理，建议未来拆分；`search.py` 管理 worker + generator + pool |
-| **O** 开闭原则 | B+ | `PathMatcher`/`ContentMatcher` 策略设计良好，但 `http_routes.py` 731行单一文件承载所有端点 |
-| **L** 里氏替换 | A | Pydantic BaseModel 继承体系合理，无违反 |
-| **I** 接口隔离 | A | 路由层 schemas/services/http_routes 三层分离清晰 |
-| **D** 依赖倒置 | B | `DataManager()` 作为 Service Locator（而非 DI），`search_generator()` 直接调用 FileUtils 无接口抽象 |
-
-### A2. DRY 重复模式（已识别）
-
-- `file_search.py` 和 `http_routes.py` 内容获取逻辑重复 (`is_binary` + `read_text_smart` + 预览限制)
-- `file_search.py` 和 `http_routes.py` 上下文生成逻辑重复 (format 选择 + to_xml/to_markdown 分支)
-- `search.py` 目录遍历与 `file_io.py:get_project_items` 高度重复
-- `file_search.py` 中 `clipboard_clear()/clipboard_append()` 重复出现 6 次
-
-### A3. KISS 简洁性
-
-- `actions.py:_prepare_execution` (363行) Shell vs 非Shell 分支逻辑复杂
-- `search.py` content mode 使用 ThreadPoolExecutor + as_completed + batch，对小规模搜索过度设计
-- `file_search.py` 1919行单体 GUI 类，违反单一职责
-
-### A4. 模块耦合
-
-| 耦合路径 | 问题 | 严重度 |
-|----------|------|--------|
-| `http_routes.py` → `common.py` → `ACTIVE_PROCESSES` | 模块级可变全局状态 | **中** |
-| `search.py:28` → `SHARED_SEARCH_POOL` | 模块级 ThreadPoolExecutor，依赖 atexit | 低 |
-| `__init__.py` → `gui/*` | 核心包导入 GUI 组件（可选依赖污染） | **高** |
+| `file_cortex_core/__init__.py:3` | `"6.3.2"` | `"6.3.3"` |
+| `pyproject.toml:7` | `"6.3.2"` | `"6.3.3"` |
 
 ---
 
-## Part B: 逐文件 Bug 清单（v6.3.1 已修复）
+## D. 未来路线图建议
 
-### B1. 已修复 Bug
+### D.1 短期 (v6.4, 1-2周)
+- [ ] 前端亮色主题 (CSS 变量)
+- [ ] API Rate Limiting 中间件
+- [ ] `flatten_paths` 归并到 `walk_filtered` 以彻底消除重复遍历
+- [ ] 前端虚拟滚动 (万级文件树)
 
-| ID | 文件:行号 | 类别 | 描述 | 状态 |
-|----|-----------|------|------|------|
-| BUG-001 | `search.py:280` | 运行时 | `as_completed(空dict)` 抛出 StopIteration | ✅ fixed |
-| BUG-003 | `config.py:100` + `schemas.py:117` | 数据丢失 | `GlobalSettings` 缺少 `allowed_extensions`，前端设置被静默丢弃 | ✅ fixed |
-| BUG-006 | `context.py:55,113` | 功能 | `to_markdown`/`to_xml` 无条件调用 NoiseReducer，忽略全局设置 | ✅ fixed |
-| BUG-010 | `ws_routes.py:29` | 冗余 | `verify_ws_token` 内 `import os` 重复 | ✅ fixed |
-| BUG-011 | `ws_routes.py:173` | 运行时 | `proc.stdout` 可能为 None 导致崩溃 | ✅ fixed |
-| BUG-013 | `web_app.py:68` | 上下文 | `create_app()` 硬编码版本，改为使用 `__version__` | ✅ fixed |
-| BUG-015 | `main.js:269-284` + `state.js:20` | 静默丢弃 | `allowed_extensions` 前后端不一致 (已修复)；`tokenThreshold: 100000` 与 `GlobalSettings: 128000` 不一致 | ✅ fixed |
-| BUG-018 | `main.js:281,367,1054` | 运行时 | `bootstrap.Modal.getInstance()` 3处无空值检查 | ✅ fixed |
-| BUG-023 | `mcp_server.py:214` | 类型 | `FileUtils.generate_ascii_tree` 参数应为 `pathlib.Path` | ✅ fixed |
-| BUG-024 | `mcp_server.py:169-186` | 逻辑 | `register_workspace` 使用未归一化路径检查重复 | ✅ fixed |
-| BUG-025 | `fctx.py` | 测试缺失 | CLI 模块无测试覆盖 | ✅ 新增 5 tests |
+### D.2 中期 (v7.0, 1-2月)
+- [ ] 语义搜索 (向量嵌入 + 快速指纹)
+- [ ] 插件系统 (Hook 接口)
+- [ ] `mypy` 100% 静态类型覆盖
+- [ ] Playwright E2E 测试
 
-### B2. 代码债务（延迟到 v7.0）
-
-| ID | 描述 | 优先级 |
-|----|------|--------|
-| DEBT-1 | `DataManager.data` 属性标记为 DEPRECATED 但全量使用 | P1 |
-| DEBT-2 | `file_search.py` 1919行单体类需拆分为 Controller/View | P1 |
-| DEBT-3 | CDN 资源无 SRI hash (`index.html:9-11,431-434`) | P3 |
-| DEBT-4 | 前端端点字符串散落在 `api.js`，应集中于 `state.js:config.endpoints` | P2 |
+### D.3 长期 (v8.0+)
+- [ ] 本地 LLM 集成 (Ollama)
+- [ ] Agent 驱动工作流
+- [ ] 云同步配置
 
 ---
 
-## Part C: 前后端一致性校验 (v6.3.1)
+## E. 技术债务跟踪
 
-### C1. 参数动态对齐表
-
-| 参数 | 前端位置 | 后端位置 | 默认值 | 一致 |
-|------|----------|----------|--------|------|
-| `tokenThreshold` | `state.js:20` | `GlobalSettings.token_threshold:95` | **128000** | ✅ |
-| `token_ratio` | `state.js:21` | `GlobalSettings.token_ratio:97` | **4.0** | ✅ |
-| `preview_limit_mb` | `GlobalSettings.preview_limit_mb:94` | 后端模型 | **1.0** | ✅ |
-| `allowed_extensions` | `main.js:263` | `GlobalSettings.allowed_extensions:100` | **""** | ✅ |
-| `api_token` | `window.__FCTX_API_TOKEN__` | `web_app.py:22,430` | env var | ✅ |
-| `apply_noise_reducer` | `schemas.py:30` | `context.py:55,118` | **True** | ✅ |
-| `__version__` | `templates/index.html:8,25` | `file_cortex_core/__init__.py:3` | **6.3.1** | ✅ |
-| `tokenThreshold-fallback` | `main.js:848` | `App.config.defaults.tokenThreshold` | **128000** | ✅ |
-
-### C2. API Token 认证链路
-
-```
-1. 启动: FCTX_API_TOKEN 环境变量 → web_app.py:22 API_TOKEN
-2. 模板注入: index.html:430 → window.__FCTX_API_TOKEN__
-3. HTTP 请求: api.js:3-12 → X-API-Token header
-4. WS 请求: main.js:632 → token query parameter
-5. 中间件验证: web_app.py:43-63 (HTTP), ws_routes.py:27-33 (WS)
-```
+| 编号 | 描述 | 优先级 | 状态 |
+|------|------|--------|------|
+| TD-1 | `file_search.py` 1832行需拆分为多模块 | 中 | 未开始 |
+| TD-2 | `flatten_paths` 与 `walk_filtered` 存在功能重叠 | 低 | 未开始 |
+| TD-3 | CDN 资源无 SRI hash | 中 | 待完成 |
+| TD-4 | CSS 魔术值 → CSS 变量 | 低 | 待完成 |
+| TD-5 | 前端 BUG-5: Favorites 组选择器选项清理 | 低 | 待完成 |
+| TD-6 | 前端 BUG-11: 响应式 CSS grid 冲突 | 低 | 待完成 |
 
 ---
 
-## Part D: 测试覆盖率 (294 tests)
-
-### D1. 现有覆盖
-
-| 模块 | v6.3.0 | v6.3.1 | 新增 | 覆盖率评估 |
-|------|--------|--------|------|-----------|
-| `config.py` | 15 | 24 | +9 | 90% (GlobalSettings 字段验证, 持久化边界) |
-| `security.py` | 23 | 33 | +10 | 95% (UNC, POSIX, None/空值, 嵌套路径) |
-| `search.py` | 25 | 31 | +6 | 90% (中断/取消, content模式大文件) |
-| `file_io.py` | 12 | 12 | - | 75% |
-| `format_utils.py` | 10 | 13 | +3 | 90% (分隔符转义, prefix/suffix) |
-| `context.py` | 6 | 6 | - | 70% |
-| `actions.py` | 18 | 29 | +11 | 90% (原子保存, 移动, 创建, 归档) |
-| `duplicate.py` | 2 | 4 | +2 | 75% (取消扫描, 空目录) |
-| `web_api` | 30+ | 43+ | +13 | 85% (Token/CORS/全局设置/异常处理) |
-| `mcp_server` | 3 | 14 | +11 | 85% (搜索/注册/蓝图/统计/上下文) |
-| `fctx.py` | **0** | **5** | +5 | 60% (open/projects/no-command/拒绝系统目录) |
-| `frontend_contract` | 4 | 4 | - | 10% |
-| **总计** | **221** | **294** | **+73** | |
-
-### D2. 新增测试清单 (tests/test_comprehensive_v63.py)
-
-**CLI (5 tests):**
-- `test_cli_open_existing_path` / `test_cli_open_nonexistent_path` / `test_cli_open_system_dir_blocked`
-- `test_cli_projects_list` / `test_cli_no_command_shows_help`
-
-**MCP Server (11 tests):**
-- 搜索(3): unauthorized / with results / respects limit
-- 注册(2): new workspace / duplicate detection / nonexistent path
-- 蓝图(1) / 列表(1) / 上下文XML+MD(2) / 统计(1)
-
-**Web API 扩展 (13 tests):**
-- 全局设置(3): allowed_extensions / settings alias / unknown field silent
-- 项目(1): recent projects legacy / stage_all_with_excludes / stage_all_no_excludes
-- 归档(1): cross-project blocked / generate_with_noise_reducer
-- 认证(2): token header forward / CORS origin restricted / CORS wildcard
-- 异常处理(2): global exception / production mode
-- 其他(1): proj_config returns 403 for unregistered
-
-**PathValidator 扩展 (10 tests):**
-- 嵌套路径/同级目录阻止/UNC 阻止
-- 尾部斜杠/None 输入/空字符串
-- 系统目录/文件而非目录验证
-
-**FileOps 扩展 (11 tests):**
-- 原子保存/不存在文件/二进制拒绝/创建文件与目录/重复创建
-- 移动/目标非目录/归档目录结构/批分类未定义
-
-**Config 扩展 (9 tests):**
-- 全局设置部分更新保留其他字段 / 无效类型
-- 去重/固定切换/会话上限/模型验证/工具键验证/遍历阻止
-
-**Search/Context/NoiseReducer/FormatUtils/Duplicate (14 tests):**
-- 中断搜索/大文件跳过/逆搜索/CDATA转义/空路径
-- noise reducer边界/分隔符转义/前缀后缀/数字格式化
-- 取消扫描/空目录
-
----
-
-## Part E: 版本变更记录 (v6.3.1)
-
-### 代码修改
-
-| 文件 | 变更 |
-|------|------|
-| `file_cortex_core/__init__.py` | 版本 6.3.0 → 6.3.1 |
-| `file_cortex_core/config.py` | `GlobalSettings` 新增 `allowed_extensions` 字段 |
-| `file_cortex_core/context.py` | `to_markdown`/`to_xml` 新增 `apply_noise_reducer` 参数 |
-| `file_cortex_core/search.py` | `as_completed` StopIteration 明确捕获 |
-| `routers/schemas.py` | `GenerateRequest` 新增 `apply_noise_reducer` 字段 |
-| `routers/http_routes.py` | `generate_context` 传递 `apply_noise_reducer` 到 ContextFormatter |
-| `routers/ws_routes.py` | `proc.stdout` None 防御；移除冗余 `import os` |
-| `web_app.py` | FastAPI title 使用 `__version__` 变量 |
-| `mcp_server.py` | `root` 类型修正为 `pathlib.Path`；归一化路径检查重复注册 |
-| `static/js/state.js` | `tokenThreshold` 100000 → 128000 (对齐 GlobalSettings) |
-| `static/js/main.js` | `bootstrap.Modal.getInstance()` 空值检查 x3 |
-| `pyproject.toml` | 版本 6.3.0 → 6.3.1 |
-| `tests/test_comprehensive_v63.py` | **新文件**: 73 项新增测试 |
-
----
-
-## Part F: 未来路线图
-
-### v6.3.x 短期维护
-- [ ] `file_search.py` Controller/View 拆分
-- [ ] CDN 资源 SRI hash
-- [ ] 前端端点集中到 `config.endpoints`
-
-### v7.0 中期规划
-- [ ] DataManager 依赖注入重构（取代 Service Locator）
-- [ ] `http_routes.py` 按功能域拆分
-- [ ] 共享逻辑从 `file_search.py`/`http_routes.py` 提取到 core
-- [ ] 前端 Playwright E2E 测试
-- [ ] mypy strict mode 类型检查
-
-### v8.0 长期愿景
-- [ ] 插件系统 + 标准 Hook 接口
-- [ ] 语义搜索 (Embedding-based)
-- [ ] 本地 LLM 集成 (Ollama/llama.cpp)
-
----
-
-## Part G: 验证清单
-
-- [x] `ruff check .` — All checks passed (0 errors)
-- [x] `python -m pytest` — **294 passed, 0 failed**
-- [x] 版本号全场一致 — v6.3.1 (`__init__.py`, `pyproject.toml`, `web_app.py`, `file_search.py`, `templates/index.html`)
-- [x] `tokenThreshold` 前后端一致 — 128000
-- [x] `allowed_extensions` 前后端一致 — GlobalSettings + frontend 发送 + settings 模态框
-- [x] `apply_noise_reducer` 参数链路 — schema → route → ContextFormatter → NoiseReducer
-- [x] API Token 认证链路 — env → template → HTTP header + WS query → middleware
-- [x] `bootstrap.Modal.getInstance()` null 保护 — 全 4 处调用点
-- [x] MCP server `root` 类型安全 — `pathlib.Path()` 包装
-- [x] 文档全部刷新 — README, DEVELOPER_GUIDE, ROADMAP, ANALYSIS_REPORT, FRONTEND_ANALYSIS, tests/README
+> *本文档为 FileCortex v6.3.2 → v6.3.3 的完整审计结果与执行计划。*
+> *所有修复均已映射到具体文件、行号和测试项。*

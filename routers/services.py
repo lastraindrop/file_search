@@ -93,7 +93,8 @@ def get_children(path_str: str, dm: DataManager | None = None) -> list[dict[str,
                     rel = ep.resolve().relative_to(project_root_path.resolve())
                 except ValueError:
                     norm_entry = PathValidator.norm_path(entry.path)
-                    if norm_entry.startswith(norm_root.rstrip("/") + "/"):
+                    if (norm_entry and norm_root and
+                            norm_entry.startswith(norm_root.rstrip("/") + "/")):
                         rel = pathlib.Path(norm_entry[len(norm_root) :].lstrip("/"))
                     else:
                         continue
