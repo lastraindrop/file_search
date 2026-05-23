@@ -44,6 +44,10 @@ export const config = {
         generate: '/api/generate',
         collectPaths: '/api/fs/collect_paths',
         favorites: '/api/project/favorites',
+        manageTag: '/api/project/tag',
+        createFile: '/api/fs/create',
+        wsSearch: '/ws/search',
+        wsExecute: '/ws/actions/execute',
     }
 };
 
@@ -73,4 +77,28 @@ export function escapeHtml(str) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+export function getFileName(path) {
+    if (!path) return "";
+    const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return idx >= 0 ? path.substring(idx + 1) : path;
+}
+
+export function getFileExt(path) {
+    const name = getFileName(path);
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.substring(dot + 1).toLowerCase() : "";
+}
+
+export function buildWsUrl(path, params = {}) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const base = `${proto}//${window.location.host}${path}`;
+    const token = state.globalSettings.api_token || window.__FCTX_API_TOKEN__ || "";
+    if (token) params.token = token;
+    const qs = Object.entries(params)
+        .filter(([, v]) => v !== undefined && v !== null && v !== "")
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join("&");
+    return qs ? `${base}?${qs}` : base;
 }

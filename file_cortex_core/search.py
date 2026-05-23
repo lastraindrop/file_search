@@ -11,7 +11,7 @@ import queue
 import re
 import threading
 from collections.abc import Generator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any, Final
 
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ DEFAULT_MAX_SIZE_MB: Final = 5
 
 # Shared resource for parallel content search
 SHARED_SEARCH_POOL: Final = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
-atexit.register(SHARED_SEARCH_POOL.shutdown, wait=False)
+atexit.register(SHARED_SEARCH_POOL.shutdown, wait=True)
 
 
 class SearchQuery(BaseModel):
@@ -49,7 +49,7 @@ class PathMatcher:
 
     def __init__(self, query: SearchQuery):
         """Initializes the PathMatcher with the given search query."""
-        self.q = query
+        self.query = query
         self.flags = 0 if query.case_sensitive else re.IGNORECASE
 
         # Pre-process keywords
@@ -83,30 +83,31 @@ class PathMatcher:
 
     def matches(self, name: str, rel_path: pathlib.Path | None = None) -> bool:
         """Determines if a name/path matches the criteria."""
-        if not (self.q.text or self.all_pos or self.neg_keywords) or (
-            self.q.text.strip() in (".", "..")
+        if not (self.query.text or self.all_pos or self.neg_keywords) or (
+            self.query.text.strip() in (".", "..")
             and not (self.all_pos or self.neg_keywords)
         ):
             found = False
         else:
             target_path = str(rel_path).replace("\\", "/") if rel_path else name
-            if not self.q.case_sensitive:
+            if not self.query.case_sensitive:
                 target_path = target_path.lower()
 
             found = False
-            if self.q.mode == "smart":
+            if self.query.mode == "smart":
                 has_plain = all(k in target_path for k in self.plain_pos)
                 has_regex = all(r.search(target_path) for r in self.regex_pos)
                 has_neg = any(nk in target_path for nk in self.neg_keywords)
                 found = has_plain and has_regex and not has_neg
-            elif self.q.mode == "exact":
-                target_text = self.q.text if self.q.case_sensitive else self.q.text.lower()
+            elif self.query.mode == "exact":
+                text = self.query.text
+                target_text = text if self.query.case_sensitive else text.lower()
                 found = (target_text in target_path) if target_text else True
                 if found:
                     has_regex = all(r.search(target_path) for r in self.regex_pos)
                     has_neg = any(nk in target_path for nk in self.neg_keywords)
                     found = found and has_regex and not has_neg
-            elif self.q.mode == "regex":
+            elif self.query.mode == "regex":
                 if self.main_re:
                     found = self.main_re.search(target_path) is not None
                 else:
@@ -116,7 +117,7 @@ class PathMatcher:
                     has_neg = any(nk in target_path for nk in self.neg_keywords)
                     found = has_plain and has_regex and not has_neg
 
-        return found != self.q.is_inverse
+        return found != self.query.is_inverse
 
 
 class ContentMatcher:
@@ -124,16 +125,16 @@ class ContentMatcher:
 
     def __init__(self, query: SearchQuery, path_matcher: PathMatcher):
         """Initializes the ContentMatcher with query and path matcher."""
-        self.q = query
-        self.pm = path_matcher
+        self.query = query
+        self.path_matcher = path_matcher
 
     def match_file(self, path: pathlib.Path) -> tuple[bool, str]:
         """Scans file content for matches."""
-        if self.q.mode not in ("content", "regex") or not self.q.text.strip():
+        if self.query.mode not in ("content", "regex") or not self.query.text.strip():
             return False, ""
 
         try:
-            limit = self.q.max_size_mb * 1024 * 1024
+            limit = self.query.max_size_mb * 1024 * 1024
             if path.stat().st_size > limit:
                 return False, ""
 
@@ -141,22 +142,22 @@ class ContentMatcher:
             found = False
             snippet = ""
 
-            target_query = self.q.text if self.q.case_sensitive else self.q.text.lower()
+            target_query = self.query.text if self.query.case_sensitive else self.query.text.lower()
 
             for line in content.splitlines():
-                target_line = line if self.q.case_sensitive else line.lower()
+                target_line = line if self.query.case_sensitive else line.lower()
 
-                if self.q.mode == "regex" and self.pm.main_re:
-                    if self.pm.main_re.search(line):
+                if self.query.mode == "regex" and self.path_matcher.main_re:
+                    if self.path_matcher.main_re.search(line):
                         found = True
                         snippet = line.strip()
                         break
-                elif self.q.mode == "content" and target_query in target_line:
+                elif self.query.mode == "content" and target_query in target_line:
                     found = True
                     snippet = line.strip()
                     break
 
-            return (found != self.q.is_inverse), snippet
+            return (found != self.query.is_inverse), snippet
         except Exception as e:
             logger.error(f"Content search error in {path}: {e}")
             return False, ""
@@ -219,7 +220,7 @@ def search_generator(
     content_matcher = ContentMatcher(query, path_matcher)
 
     count = 0
-    content_futures: dict[Any, dict[str, Any]] = {}
+    content_futures: dict[Future, dict[str, Any]] = {}
 
     try:
         for full_path, rel_path in FileUtils.walk_filtered(
@@ -282,9 +283,6 @@ def search_generator(
                                 break
                 if count >= query.max_results:
                     break
-
-        if count >= query.max_results:
-            pass
 
         # Final cleanup of remaining content futures
         for f in as_completed(content_futures):

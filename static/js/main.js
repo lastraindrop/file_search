@@ -1,5 +1,4 @@
-import { state, config, escapeHtml } from './state.js';
-import * as api from './api.js';
+import { state, config, escapeHtml, getFileName, getFileExt, buildWsUrl } from './state.js';import * as api from './api.js';
 import * as ui from './ui.js';
 
 const App = {
@@ -73,9 +72,8 @@ const App = {
                 }
             }
             if (e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
-                const tabs = ['tab-tree', 'tab-search', 'tab-fav'];
-                const b = document.getElementById(tabs[parseInt(e.key)-1]);
-                if (b) b.click();
+                const sections = ['fileTree', 'searchResults', 'favorites'];
+                App.toggleSection(sections[parseInt(e.key)-1]);
             }
             if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
                 const helpModal = document.getElementById('helpModal');
@@ -373,9 +371,23 @@ const App = {
 
     previewFile: async (path) => {
         if (App.state.isEditing && App.state.currentFile !== path) {
-            if (!confirm("Discard unsaved changes and switch file?")) return;
+            ui.showActionModal({
+                title: 'Unsaved Changes',
+                confirmText: 'Discard',
+                bodyHtml: '<p>Discard unsaved changes and switch file?</p>',
+                onConfirm: async () => {
+                    App.state.isEditing = false;
+                    ui.closeActionModal();
+                    App._doPreviewFile(path);
+                }
+            });
+            return;
         }
-        
+        App._doPreviewFile(path);
+    },
+
+    _doPreviewFile: async (path) => {
+
         App.state.currentFile = path;
         App.state.isEditing = false;
         document.getElementById('fileControls').style.display = 'inline-flex';
@@ -383,7 +395,7 @@ const App = {
         document.getElementById('codeEditor').style.display = 'none';
         document.getElementById('preBlock').style.display = 'block';
 
-        const fileName = path.split(/[\\\/]/).pop();
+        const fileName = getFileName(path);
         document.getElementById('currentFileName').innerText = fileName;
         ui.updateFileMetaUI(path);
 
@@ -394,11 +406,20 @@ const App = {
             const data = await api.fetchContent(path);
             App.state.rawContent = data.content;
             
-            const ext = path.split('.').pop().toLowerCase();
+            const ext = getFileExt(path);
             codeEl.className = 'hljs h-100 d-block p-4';
             
             if (ext === 'md') {
-                codeEl.innerHTML = marked.parse(data.content);
+                const rawHtml = marked.parse(data.content);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = rawHtml;
+                tempDiv.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
+                tempDiv.querySelectorAll('[onerror],[onload],[onclick]').forEach(el => {
+                    el.removeAttribute('onerror');
+                    el.removeAttribute('onload');
+                    el.removeAttribute('onclick');
+                });
+                codeEl.innerHTML = tempDiv.innerHTML;
                 codeEl.classList.remove('hljs');
             } else if (ext === 'mermaid') {
                 codeEl.innerHTML = `<div class="mermaid">${App.escapeHtml(data.content)}</div>`;
@@ -517,7 +538,7 @@ const App = {
 
     renameFile: async () => {
         if (!App.state.currentFile) return;
-        const oldName = App.state.currentFile.split(/[\\\/]/).pop();
+        const oldName = getFileName(App.state.currentFile);
         ui.showActionModal({
             title: 'Rename file',
             confirmText: 'Rename',
@@ -549,7 +570,7 @@ const App = {
         ui.showActionModal({
             title: 'Delete file',
             confirmText: 'Delete',
-            bodyHtml: `<p class="mb-0">Delete <strong>${App.escapeHtml(App.state.currentFile.split(/[\\\/]/).pop())}</strong>? This cannot be undone.</p>`,
+            bodyHtml: `<p class="mb-0">Delete <strong>${App.escapeHtml(getFileName(App.state.currentFile))}</strong>? This cannot be undone.</p>`,
             onConfirm: async () => {
                 try {
                     await api.deleteFiles(App.state.projectPath, [App.state.currentFile]);
@@ -593,7 +614,7 @@ const App = {
                 try {
                     const dryData = await api.batchRename(App.state.projectPath, files, pattern, replacement, true);
                     const previewHtml = dryData.results.map(
-                        (r) => `<div class="small mb-1">${App.escapeHtml(r.old.split(/[\\\/]/).pop())} &rarr; ${App.escapeHtml(r.new.split(/[\\\/]/).pop())} <span class="text-muted">[${App.escapeHtml(r.status)}]</span></div>`
+                        (r) => `<div class="small mb-1">${App.escapeHtml(getFileName(r.old))} &rarr; ${App.escapeHtml(getFileName(r.new))} <span class="text-muted">[${App.escapeHtml(r.status)}]</span></div>`
                     ).join('');
                     ui.showActionModal({
                         title: 'Confirm batch rename',
@@ -620,9 +641,18 @@ const App = {
         ui.updateWorkspaceSummary();
         const query = document.getElementById('searchInput').value;
 
-        if (!query.trim()) return;
+        if (!query.trim()) {
+            ui.showToast("Enter a search query first.", "warning");
+            return;
+        }
 
         document.getElementById('btnStopSearch').style.display = 'inline-block';
+
+        const leftPanel = document.getElementById('section-searchResults');
+        if (leftPanel) leftPanel.style.display = 'block';
+        const leftToggle = document.getElementById('toggle-searchResults');
+        if (leftToggle) leftToggle.innerHTML = '&#9662;';
+
         const overlay = document.getElementById('searchOverlay');
         const list = document.getElementById('searchOverlayList');
         const count = document.getElementById('searchOverlayCount');
@@ -630,16 +660,22 @@ const App = {
         list.innerHTML = '<div class="text-center p-3 small text-muted">Searching...</div>';
         count.innerText = '...';
 
-        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const token = App.state.globalSettings.api_token || window.__FCTX_API_TOKEN__ || "";
-        const wsUrl = `${proto}//${window.location.host}/ws/search?path=${encodeURIComponent(App.state.projectPath)}&query=${encodeURIComponent(query)}&mode=${settings.mode}&inverse=${settings.inverse}&case_sensitive=${settings.caseSensitive}&include_dirs=${settings.include_dirs}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+        const wsUrl = buildWsUrl(config.endpoints.wsSearch, {
+            path: App.state.projectPath,
+            query: query,
+            mode: settings.mode,
+            inverse: settings.inverse,
+            case_sensitive: settings.caseSensitive,
+            include_dirs: settings.includeDirs
+        });
 
         if (App.state.socket) App.state.socket.close();
         App.state.socket = new WebSocket(wsUrl);
         let resultCount = 0;
         App.state.socket.onopen = () => { list.innerHTML = ''; };
         App.state.socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+            let data;
+            try { data = JSON.parse(event.data); } catch { return; }
             if (data.status === "DONE") {
                 if (resultCount === 0) {
                     list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">?</div><div>No results found.</div></div>';
@@ -710,7 +746,7 @@ const App = {
         bsModal.show();
 
         const paths = Array.from(App.state.staging);
-        modalBody.innerHTML = `<div class="p-4 text-center">Preparing to execute ${toolName} on ${paths.length} items...</div>`;
+        modalBody.innerHTML = `<div class="p-4 text-center">Preparing to execute ${App.escapeHtml(toolName)} on ${paths.length} items...</div>`;
         
         let stopBtn = document.getElementById('btnStopTool');
         if (!stopBtn) {
@@ -725,30 +761,40 @@ const App = {
 
         const runNext = async (index) => {
             if (index >= paths.length) {
-                modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-success fw-bold">✨ All ${paths.length} tasks completed.</div>`;
-                if (confirm("Tasks finished. Clear staging?")) {
-                    App.state.staging.clear();
-                    ui.renderStaging();
-                    App.syncStagingToBackend();
-                }
+                modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-success fw-bold">All ${paths.length} tasks completed.</div>`;
+                ui.showActionModal({
+                    title: 'Tasks Complete',
+                    confirmText: 'Clear Staging',
+                    bodyHtml: `<p>All ${paths.length} tasks finished successfully. Clear the staging list?</p>`,
+                    onConfirm: async () => {
+                        App.state.staging.clear();
+                        ui.renderStaging();
+                        App.syncStagingToBackend();
+                        ui.closeActionModal();
+                    }
+                });
                 return;
             }
 
             const path = paths[index];
-            const fileName = path.split(/[\\\/]/).pop();
+            const fileName = getFileName(path);
             const logId = `tool-log-${index}`;
             
-            modalBody.innerHTML += `<div class="p-2 border-bottom border-secondary x-small text-muted bg-dark">(${index+1}/${paths.length}) Executing on: ${fileName}</div>
+            modalBody.innerHTML += `<div class="p-2 border-bottom border-secondary x-small text-muted bg-dark">(${index+1}/${paths.length}) Executing on: ${App.escapeHtml(fileName)}</div>
                                    <pre id="${logId}" class="m-0 p-3" style="background:#000; color:#0f0; font-family:monospace; min-height:150px; white-space:pre-wrap; font-size: 12px;"></pre>`;
             
             const outputDiv = document.getElementById(logId);
-            const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProto}//${window.location.host}/ws/actions/execute?project_path=${encodeURIComponent(App.state.projectPath)}&tool_name=${encodeURIComponent(toolName)}&path=${encodeURIComponent(path)}`;
+            const wsUrl = buildWsUrl(config.endpoints.wsExecute, {
+                project_path: App.state.projectPath,
+                tool_name: toolName,
+                path: path
+            });
             
             return new Promise((resolve) => {
                 const socket = new WebSocket(wsUrl);
                 socket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
+                    let data;
+                    try { data = JSON.parse(event.data); } catch { return; }
                     if (data.pid) {
                         App.state.activePid = data.pid;
                         stopBtn.style.display = 'block';
@@ -767,7 +813,10 @@ const App = {
                         resolve();
                     }
                 };
-                socket.onerror = () => { resolve(); };
+                socket.onerror = () => {
+                    if (outputDiv) outputDiv.innerText += '\n[Connection error]';
+                    resolve();
+                };
             }).then(() => runNext(index + 1));
         };
 
@@ -789,23 +838,92 @@ const App = {
         App.syncStagingToBackend();
     },
 
+    addTag: async () => {
+        if (!App.state.currentFile || !App.state.projectPath) return;
+        ui.showActionModal({
+            title: 'Add Tag',
+            confirmText: 'Add',
+            bodyHtml: '<input type="text" id="tagInputField" class="form-control form-control-sm" placeholder="Enter tag name..." autofocus>',
+            onConfirm: async () => {
+                const tag = document.getElementById('tagInputField')?.value?.trim();
+                if (!tag) return;
+                try {
+                    await api.manageTag(App.state.projectPath, App.state.currentFile, tag, 'add');
+                    if (!App.state.projConfig.tags) App.state.projConfig.tags = {};
+                    if (!App.state.projConfig.tags[App.state.currentFile]) App.state.projConfig.tags[App.state.currentFile] = [];
+                    if (!App.state.projConfig.tags[App.state.currentFile].includes(tag)) {
+                        App.state.projConfig.tags[App.state.currentFile].push(tag);
+                    }
+                    ui.updateFileMetaUI(App.state.currentFile);
+                    ui.closeActionModal();
+                } catch (e) { ui.showToast('Tag add failed: ' + e.message, 'danger'); }
+            }
+        });
+    },
+
+    removeTag: async (tag) => {
+        if (!App.state.currentFile || !App.state.projectPath) return;
+        try {
+            await api.manageTag(App.state.projectPath, App.state.currentFile, tag, 'remove');
+            const tags = App.state.projConfig.tags?.[App.state.currentFile];
+            if (tags) {
+                const idx = tags.indexOf(tag);
+                if (idx !== -1) tags.splice(idx, 1);
+            }
+            ui.updateFileMetaUI(App.state.currentFile);
+        } catch (e) { ui.showToast('Tag remove failed: ' + e.message, 'danger'); }
+    },
+
     removeFromStaging: (path) => {
         App.state.staging.delete(path);
         ui.renderStaging();
         App.syncStagingToBackend();
     },
 
-    syncStagingToBackend: async () => {
-        if (!App.state.projectPath) return;
-        try {
-            await api.saveProjectSettings(App.state.projectPath, { "staging_list": Array.from(App.state.staging) });
-        } catch (e) { console.warn("Staging sync failed", e); }
-    },
+    syncStagingToBackend: (() => {
+        let timer = null;
+        return () => {
+            if (!App.state.projectPath) return;
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(async () => {
+                try {
+                    await api.saveProjectSettings(App.state.projectPath, { "staging_list": Array.from(App.state.staging) });
+                } catch (e) { console.warn("Staging sync failed", e); }
+            }, 500);
+        };
+    })(),
 
     addToFavorites: async () => {
         if (!App.state.currentFile) return;
         const group = document.getElementById('favGroupSelect').value || "Default";
         await App.toggleFavorite(App.state.currentFile, 'add', group);
+    },
+
+    createFile: () => {
+        if (!App.state.projectPath) return ui.showToast('Open a project first', 'warning');
+        ui.showActionModal({
+            title: 'New File',
+            confirmText: 'Create',
+            bodyHtml: `
+                <input type="text" id="newFileName" class="form-control form-control-sm mb-2" placeholder="filename.ext">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="newFileIsDir">
+                    <label class="form-check-label small text-muted" for="newFileIsDir">Create as folder</label>
+                </div>
+            `,
+            onConfirm: async () => {
+                const name = document.getElementById('newFileName')?.value?.trim();
+                const isDir = document.getElementById('newFileIsDir')?.checked || false;
+                if (!name) return ui.showToast('Name is required', 'warning');
+                try {
+                    const parent = App.state.currentFile || App.state.projectPath;
+                    const data = await api.createFile(parent, name, isDir);
+                    ui.showToast(`Created ${name}`);
+                    App.refreshProject();
+                    ui.closeActionModal();
+                } catch (e) { ui.showToast('Create failed: ' + e.message, 'danger'); }
+            }
+        });
     },
 
     toggleFavorite: async (path, action, group = null) => {
@@ -1003,11 +1121,18 @@ const App = {
 
     clearStaging: () => {
         if (App.state.staging.size === 0) return;
-        if (!confirm("Clear whole staging list?")) return;
-        App.state.staging.clear();
-        ui.renderStaging();
-        App.syncStagingToBackend();
-        ui.showToast("Staging cleared");
+        ui.showActionModal({
+            title: 'Clear Staging',
+            confirmText: 'Clear All',
+            bodyHtml: `<p>Clear the entire staging list (${App.state.staging.size} items)?</p>`,
+            onConfirm: async () => {
+                App.state.staging.clear();
+                ui.renderStaging();
+                App.syncStagingToBackend();
+                ui.closeActionModal();
+                ui.showToast("Staging cleared");
+            }
+        });
     },
 
     stageAll: async () => {
@@ -1167,6 +1292,15 @@ const App = {
         } catch (e) {
             throw e;
         }
+    },
+
+    toggleSection: (sectionId) => {
+        const body = document.getElementById(`section-${sectionId}`);
+        const toggle = document.getElementById(`toggle-${sectionId}`);
+        if (!body) return;
+        const isHidden = body.style.display === 'none';
+        body.style.display = isHidden ? 'block' : 'none';
+        if (toggle) toggle.innerHTML = isHidden ? '&#9662;' : '&#9656;';
     }
 };
 

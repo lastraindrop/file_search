@@ -19,7 +19,7 @@ from file_cortex_core import (
     FormatUtils,
     logger,
 )
-from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK
+from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK, register_process, unregister_process
 from routers.schemas import (
     CategorizeRequest,
     GenerateRequest,
@@ -199,8 +199,10 @@ def api_execute_tool(
 
             try:
                 proc = ActionBridge.create_process(template, p, project_root)
-                with PROCESS_LOCK:
-                    ACTIVE_PROCESSES[proc.pid] = proc
+                if not register_process(proc.pid, proc):
+                    proc.kill()
+                    results.append({"path": p, "error": "Too many active processes"})
+                    continue
 
                 try:
                     exec_timeout = int(os.getenv("FCTX_EXEC_TIMEOUT", "300"))
@@ -216,13 +218,9 @@ def api_execute_tool(
                         }
                     )
                 except subprocess.TimeoutExpired:
-                    if os.name == "nt":
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                            capture_output=True,
-                        )
-                    else:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    from file_cortex_core.process_utils import terminate_process
+
+                    terminate_process(proc.pid)
                     proc.communicate()
                     results.append(
                         {
@@ -236,8 +234,7 @@ def api_execute_tool(
                     proc.kill()
                     results.append({"path": p, "error": f"Process error: {e}"})
                 finally:
-                    with PROCESS_LOCK:
-                        ACTIVE_PROCESSES.pop(proc.pid, None)
+                    unregister_process(proc.pid)
             except Exception as e:
                 results.append({"path": p, "error": f"Execution failed to start: {e}"})
 
@@ -261,13 +258,9 @@ def api_terminate_process(req: ProcessTerminateRequest) -> dict[str, Any]:
 
         logger.info(f"AUDIT - Terminating process {req.pid}")
         try:
-            if os.name == "nt":
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(req.pid)],
-                    capture_output=True,
-                )
-            else:
-                os.killpg(os.getpgid(req.pid), signal.SIGTERM)
+            from file_cortex_core.process_utils import terminate_process
+
+            terminate_process(req.pid)
             return {"status": "ok"}
         except Exception as e:
             try:

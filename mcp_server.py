@@ -12,6 +12,8 @@ from file_cortex_core import (
     ContextFormatter,
     DataManager,
     FileUtils,
+    FormatUtils,
+    NoiseReducer,
     PathValidator,
     logger,
     search_generator,

@@ -139,3 +139,121 @@ def test_websocket_search_case_sensitive_no_match(project_client, mock_project):
             payloads.append(data)
 
     assert payloads == []
+
+
+def test_index_html_uses_collapsible_sections_not_tabs(api_client):
+    """Phase 2: Left panel should use collapsible sections, not Bootstrap tabs."""
+    html = api_client.get("/").text
+    assert "leftTabs" not in html
+    assert "panel-tree" not in html
+    assert "panel-search" not in html
+    assert "panel-fav" not in html
+    assert "section-fileTree" in html
+    assert "section-searchResults" in html
+    assert "section-favorites" in html
+    assert "toggleSection" in html
+
+
+def test_index_html_has_staging_col_md3(api_client):
+    """Phase 2: Staging panel should be col-md-3 (widened from col-md-2)."""
+    html = api_client.get("/").text
+    assert 'class="col-md-3 glass-panel border-start' in html
+    assert 'panel-right' in html
+
+
+def test_main_js_has_toggle_section(api_client):
+    """Phase 2: toggleSection should exist in main.js."""
+    js = api_client.get("/static/js/main.js").text
+    assert "toggleSection" in js
+    assert "section-" in js
+
+
+def test_main_js_has_buildWsUrl(api_client):
+    """Phase 1: buildWsUrl centralized WS URL construction."""
+    js = api_client.get("/static/js/main.js").text
+    assert "buildWsUrl" in js
+
+
+def test_state_js_exports_getFileName(api_client):
+    """Phase 1: state.js exports getFileName and getFileExt utilities."""
+    js = api_client.get("/static/js/state.js").text
+    assert "export function getFileName" in js or "export const getFileName" in js
+    assert "export function getFileExt" in js or "export const getFileExt" in js
+    assert "export function buildWsUrl" in js or "export const buildWsUrl" in js
+
+
+def test_main_js_no_split_pop_for_filenames(api_client):
+    """Phase 1: main.js should use getFileName instead of split/pop for path extraction."""
+    js = api_client.get("/static/js/main.js").text
+    import re
+    matches = re.findall(r'\.split\(/\[', js)
+    assert len(matches) == 0, "Found raw .split(/[ in main.js — should use getFileName()"
+
+
+def test_ui_js_imports_getFileName(api_client):
+    """Phase 1: ui.js should import getFileName from state.js."""
+    js = api_client.get("/static/js/ui.js").text
+    assert "getFileName" in js
+
+
+def test_main_js_no_native_confirm(api_client):
+    """Phase 1: main.js should not use native confirm() calls."""
+    js = api_client.get("/static/js/main.js").text
+    import re
+    matches = re.findall(r'(?<![a-zA-Z])confirm\(', js)
+    assert len(matches) == 0, "Found native confirm() in main.js — should use actionModal"
+
+
+def test_main_js_has_debounced_sync(api_client):
+    """Phase 4: syncStagingToBackend should use debounce pattern."""
+    js = api_client.get("/static/js/main.js").text
+    assert "setTimeout" in js
+    assert "clearTimeout" in js
+
+
+def test_index_html_has_sri_integrity(api_client):
+    """Phase 3: CDN resources should have integrity hashes."""
+    html = api_client.get("/").text
+    assert "integrity=" in html
+    assert "sha384-" in html
+
+
+def test_index_html_pinned_cdn_versions(api_client):
+    """Phase 3: marked and mermaid should be pinned to specific versions."""
+    html = api_client.get("/").text
+    assert "marked@" in html
+    assert "mermaid@" in html
+
+
+def test_main_js_has_tag_management(api_client):
+    """Phase 3: main.js should have addTag and removeTag methods."""
+    js = api_client.get("/static/js/main.js").text
+    assert "addTag" in js
+    assert "removeTag" in js
+
+
+def test_main_js_has_create_file(api_client):
+    """Phase 3: main.js should have createFile method."""
+    js = api_client.get("/static/js/main.js").text
+    assert "createFile" in js
+
+
+def test_index_html_has_new_file_button(api_client):
+    """Phase 3: Files section header should have a +New button."""
+    html = api_client.get("/").text
+    assert "App.createFile" in html
+
+
+def test_index_html_keyboard_help_updated(api_client):
+    """Phase 2: Help modal should say Toggle Sections, not Switch Tabs."""
+    html = api_client.get("/").text
+    assert "Toggle Sections" in html
+    assert "Switch Tabs" not in html
+
+
+def test_css_has_section_styles(api_client):
+    """Phase 2: CSS should have collapsible section styles."""
+    css = api_client.get("/static/css/style.css").text
+    assert "section-header" in css
+    assert "section-toggle" in css
+    assert "cursor-pointer" in css

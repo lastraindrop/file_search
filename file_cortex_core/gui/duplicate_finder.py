@@ -155,11 +155,10 @@ class DuplicateFinderWindow(tk.Toplevel):
                         st = p.stat()
                         mtime = st.st_mtime
                         dt_fmt = FormatUtils.format_datetime(mtime)
-                        rel = (
-                            p.relative_to(self.current_dir)
-                            if self.current_dir in p.parents
-                            else p.name
-                        )
+                        try:
+                            rel = p.relative_to(self.current_dir)
+                        except ValueError:
+                            rel = p.name
                         self.tree.insert(
                             group_id,
                             "end",

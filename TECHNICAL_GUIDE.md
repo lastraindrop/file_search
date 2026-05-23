@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.3.3 | **测试**: 372 passed | **ruff**: 0 errors
+> **版本**: 6.4.0 | **测试**: 479 passed | **日期**: 2026-05-24 | **ruff**: 0 errors
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -39,6 +39,10 @@
 │  │ file_io │ │ actions  │ │ format  │ │ duplicate      │      │
 │  │walk_filt│ │FileOps   │ │FormatU  │ │ SHA256 worker  │      │
 │  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
+│  ┌──────────────────┐                                          │
+│  │ process_utils    │  ← v6.4.0: 跨平台进程终止                │
+│  │terminate/cleanup │                                          │
+│  └──────────────────┘                                          │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,6 +56,7 @@
 | **遍历共享** | `FileUtils.walk_filtered()` 统一所有目录遍历 | `file_io.py` |
 | **原子写入** | 配置保存使用 tempfile + os.replace + Windows 锁重试 | `config.py` |
 | **策略解耦** | `PathMatcher` / `ContentMatcher` 匹配逻辑与遍历分离 | `search.py` |
+| **进程终止统一** | `process_utils.py` 统一跨平台进程终止 (Windows/POSIX) | `process_utils.py` |
 
 ---
 
@@ -63,7 +68,7 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 
 ### 2.2 对齐清单
 
-以下 8 个关键参数必须在前后端保持一致。每次代码变更后，运行 `pytest` 会自动验证这些参数。
+以下 10 个关键参数必须在前后端保持一致。每次代码变更后，运行 `pytest` 会自动验证这些参数。
 
 | # | 参数 | 前端位置 | 后端模型 | API 传输 |
 |---|------|----------|----------|----------|
@@ -75,15 +80,17 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 | 6 | `apply_noise_reducer` | `schemas.py:30` | `GenerateRequest.apply_noise_reducer` | `POST /api/generate` |
 | 7 | `__version__` | `index.html` `{{ version }}` | `__init__.py:3` | Jinja2 注入 |
 | 8 | `max_search_size_mb` | `state.js` (10) | `ProjectConfig.max_search_size_mb` | `POST /api/project/settings` |
+| 9 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL |
+| 10 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/execute` | WebSocket URL |
 
 ### 2.3 添加新参数的规范流程
 
-添加新参数时，必须按以下顺序更新 **5 处**：
+添加新参数时，必须按以下顺序更新 **6 处**：
 
 ```
 1. file_cortex_core/config.py        ← Pydantic 模型字段定义
 2. routers/schemas.py                ← Request Schema (前端→API)
-3. static/js/state.js                ← 前端 defaults / 读取逻辑
+3. static/js/state.js                ← 前端 defaults / config.endpoints
 4. templates/index.html              ← 模板变量注入（如需要）
 5. routers/http_routes.py / fs_routes.py / action_routes.py  ← API 处理逻辑
 6. tests/                            ← 新增参数传递链路测试
@@ -98,12 +105,121 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 | `test_api_generate_with_noise_reducer` | `test_comprehensive_v63.py` | noise_reducer 参数链路 |
 | `test_api_token_header_forward` | `test_comprehensive_v63.py` | API Token HTTP 认证 |
 | `test_api_index_page_injects_version` | `test_comprehensive_v63.py` | 版本号模板注入 |
+| `test_ws_search_endpoint` | `test_web_endpoints.py` | WebSocket wsSearch 端点 |
+| `test_ws_execute_endpoint` | `test_web_endpoints.py` | WebSocket wsExecute 端点 |
 
 ---
 
-## 3. 常见 BUG 模式与预防
+## 3. v6.4.0 重构深度解析
 
-### 3.1 参数不一致
+### 3.1 进程终止架构 (process_utils.py)
+
+v6.4.0 之前，跨平台进程终止逻辑在 3 处独立实现，存在以下问题：
+- `action_routes.py` — 工具执行超时后的进程清理
+- `ws_routes.py` — WebSocket 断开后的子进程清理
+- `common.py` — 测试隔离时的进程清理
+
+每处实现仅细微差异（命令差异、日志消息不同），存在退化风险。
+
+**v6.4.0 统一方案** (`file_cortex_core/process_utils.py`):
+
+```python
+def terminate_process(proc, timeout: float = 3.0) -> bool:
+    """Cross-platform process termination.
+    
+    Platform-aware cleanup:
+    - Windows: taskkill /F /T /PID <pid> (process trees)
+    - POSIX: SIGTERM → wait(timeout) → SIGKILL fallback
+    """
+
+def cleanup_processes(processes: list, timeout: float = 3.0):
+    """Bulk cleanup of tracked subprocesses (e.g., on shutdown)."""
+```
+
+调用点统一为 `terminate_process(proc)` / `cleanup_processes(staging_processes)`，从 3 处 ~40 行重复代码减少为 2 个共享函数调用。
+
+**设计决策**:
+- Windows 使用 `taskkill /T` 确保子进程树全部终止
+- POSIX 采用 send-signal-then-kill 双阶段策略
+- 超时参数可配置（默认 3 秒）
+- 返回值指示终止成功/失败，调用方自行决定错误处理策略
+
+### 3.2 前端 XSS 防御策略
+
+v6.4.0 审计发现在 3 个层面存在 XSS 漏洞风险：
+
+| 层面 | 漏洞 | 修复 |
+|------|------|------|
+| Markdown 渲染 | `marked.parse()` 无 sanitization 选项 | 添加 `marked.parse(content, { sanitize: true })` 配置 |
+| DOM 操作 | 用户内容直接赋值 `element.innerHTML` | 包装 `escapeHtml()` 函数，对所有用户输入转义 `& < > " '` |
+| API 调用 | 分散 `fetch()` 调用，参数构建不一致 | 集中化 `_post()` / `_postJson()` 辅助函数，统一编码/转义 |
+
+**escapeHtml 实现**:
+```javascript
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+```
+
+所有涉及用户生成内容的 DOM 操作（搜索结果、标签名称、文件内容预览）均通过此包装器。
+
+### 3.3 API 层一致性
+
+v6.4.0 对 `static/js/api.js` 进行了重构，引入集中化请求模式：
+
+```javascript
+// 标准 POST (表单编码)
+async _post(url, data) {
+    const formData = new URLSearchParams(data);
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString(),
+    });
+    return resp.json();
+}
+
+// JSON POST
+async _postJson(url, json) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(json),
+    });
+    return resp.json();
+}
+```
+
+**变更统计**: 12 处分散 `fetch()` 调用 → 2 个集中化辅助方法，消除参数构建不一致带来的潜在注入风险。
+
+### 3.4 类型标注改进
+
+| 文件 | 改进 |
+|------|------|
+| `schemas.py` | 2 处 `dict`/`list` → `dict[str, Any]`/`list[str]` |
+| `config.py` | 3 处 `dict`/`list` → 参数化泛型 |
+| `services.py` | 2 处 `dict`/`list` → 参数化泛型 |
+| `ws_routes.py` | 2 处 `dict`/`Queue` → `dict[str, Any]`/`Queue[bytes]` |
+| `search.py` | 2 处 `Queue` + 命名修复 (`self.q`→`self.query`, `self.pm`→`self.path_matcher`) |
+| `actions.py` | 1 处 `dict` → `dict[str, Any]` |
+| `path_collection.py` | 2 处 `list`/`dict` → 参数化泛型 |
+| `file_io.py` | `stop_event: object` → `threading.Event \| None` |
+
+总共 14 处裸泛型修正，覆盖 7 个文件。
+
+### 3.5 CSS 与可访问性清理
+
+- **CSS**: `.pulse-warning` 类添加（修复 token 警告动画失效）；重复 `.summary-bar` 规则合并；未使用的 `.staging-item` 和 `.search-result-item:hover` 移除
+- **可访问性**: toast 容器 `aria-live="polite"`；项目路径输入 `aria-label`
+- **SRI**: Bootstrap CSS/JS 和 highlight.js CDN 资源添加 `integrity` 属性；`marked@12.0.0` 和 `mermaid@10.9.0` 版本 pin 锁定
+
+---
+
+## 4. 常见 BUG 模式与预防
+
+### 4.1 参数不一致
 
 **模式**: 前/后端默认值不同，设置被静默丢弃。
 
@@ -114,7 +230,7 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 - 前端通过 `/api/global/settings` 动态获取后端默认值，而非硬编码
 - 新增参数必须同步更新「参数对齐清单」并添加测试
 
-### 3.2 NoneType 崩溃
+### 4.2 NoneType 崩溃
 
 **模式**: `self.current_proj_config["groups"]` 当 `current_proj_config` 为 None 时崩溃。
 
@@ -124,7 +240,7 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 - 依赖项目数据的方法首行添加 `if not self.current_proj_config: return`
 - 在 `__init__` 中将可变属性显式初始化为安全默认值（如 `self.results_count = 0`）
 
-### 3.3 分支逻辑错误
+### 4.3 分支逻辑错误
 
 **模式**: `if/else` 链中最后一个 `else` 覆盖了前面的 `if` 分支。
 
@@ -134,7 +250,7 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 - 使用 `if/elif/else` 互斥链
 - 在最后用 `if not args.command:` 独立检查无命令状态
 
-### 3.4 弃用 API 使用
+### 4.4 弃用 API 使用
 
 **模式**: 新代码使用 `dm.data["projects"]`（dict API）而非 `dm.config.projects`（Pydantic model）。
 
@@ -144,20 +260,32 @@ v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token
 - `DEVELOPER_GUIDE.md` 明确标注 `.data` 为 DEPRECATED
 - Code review 检查：`dm.data[` 只应出现在 `DataManager` 自身实现中
 
-### 3.5 可选导入污染
+### 4.5 可选导入污染
 
 **模式**: `__init__.py` 无条件 `from .gui import *` 导致 headless 环境 (Web/CLI/MCP) 被迫依赖 tkinter。
 
 **预防**: 使用 `try/except ImportError` 包装 GUI 导入，headless 环境下设为 None。
 
+### 4.6 WebSocket 消息解析
+
+**模式**: `JSON.parse(event.data)` 无异常保护，恶意/损坏数据导致静默断开。
+
+**根因**: WebSocket 协议不保证消息格式，任何对端都可发送任意文本。
+
+**预防**:
+- 所有 `onmessage` 中 `JSON.parse()` 必须包装在 try/catch 中
+- 解析失败应记录日志并跳过该消息（而非断开连接）
+- `onerror` 不应静默返回 success (false)，应抛出或记录错误
+
 ---
 
-## 4. 测试架构
+## 5. 测试架构
 
-### 4.1 测试分层
+### 5.1 测试分层
 
 ```
-tests/                              372 项测试
+tests/                              479 项测试
+├── test_bugfix_v640.py             95 tests  ← v6.4.0 新增 (类型标注/进程终止/XSS/WS健壮性/端点/前端)
 ├── test_bugfix_v633.py             24 tests  ← v6.3.3 BUG修复 + 边界覆盖
 ├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
 ├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全
@@ -169,7 +297,7 @@ tests/                              372 项测试
 ├── test_fileops_advanced.py         9 tests  ← 文件操作完整覆盖
 ├── test_dm_config.py                7 tests  ← DataManager 持久化/并发
 ├── test_web_api_advanced.py        21 tests  ← 创建/归档/重命名/设置/Token
-├── test_web_endpoints.py            9 tests  ← 端点契约
+├── test_web_endpoints.py           12 tests  ← 端点契约 (含 WS wsSearch/wsExecute)
 ├── test_core_integration.py        11 tests  ← 集成测试
 ├── test_context_formatter.py        6 tests  ← XML/MD 导出
 ├── test_mcp_server.py               3 tests  ← MCP 协议
@@ -182,7 +310,7 @@ tests/                              372 项测试
 └── conftest.py                              ← 共享 fixture + DataManager.reset()
 ```
 
-### 4.2 测试隔离
+### 5.2 测试隔离
 
 所有测试共享统一的隔离策略：
 
@@ -196,7 +324,7 @@ def _reset_singleton():
     # ... 清理活跃进程 + DataManager.reset()
 ```
 
-### 4.3 关键 Fixture
+### 5.3 关键 Fixture
 
 | Fixture | 用途 |
 |---------|------|
@@ -209,9 +337,9 @@ def _reset_singleton():
 
 ---
 
-## 5. DataManager 依赖注入
+## 6. DataManager 依赖注入
 
-### 5.1 使用场景
+### 6.1 使用场景
 
 ```python
 from file_cortex_core import DataManager
@@ -230,7 +358,7 @@ with DataManager.activate(custom_dm):
 DataManager.reset()
 ```
 
-### 5.2 最佳实践
+### 6.2 最佳实践
 
 - **路由层**: 使用 `Depends(get_dm)` 作为 FastAPI 依赖
 - **核心模块**: 接受 `dm: DataManager | None = None` 参数，默认为 `DataManager()`
@@ -238,7 +366,7 @@ DataManager.reset()
 
 ---
 
-## 6. walk_filtered 遍历
+## 7. walk_filtered 遍历
 
 `FileUtils.walk_filtered()` 统一了项目中所有 `os.walk` 调用：
 
@@ -256,10 +384,11 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 ---
 
-## 7. 版本历史
+## 8. 版本历史
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **6.4.0** | **2026-05-24** | **process_utils提取, 14类型标注, 3处XSS修复, api.js集中化, 前端可折叠面板, SRI哈希, tag管理, file创建, actionModal, 479 tests** |
 | 6.3.3 | 2026-05-16 | 8 BUG修复, Google Style整肃, 24新测试, 文档完善, 372 tests |
 | 6.3.2 | 2026-05-14 | 8 BUG修复, DataManager DI, 路由拆分, walk_filtered, 348 tests |
 | 6.3.1 | 2026-05-10 | 全量审计, 10 BUG修复, 前后端一致性, 294 tests |
@@ -267,9 +396,9 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 ---
 
-## 8. 完整工作原理
+## 9. 完整工作原理
 
-### 8.1 请求生命周期 (Web API)
+### 9.1 请求生命周期 (Web API)
 
 ```
 浏览器请求
@@ -294,10 +423,11 @@ FastAPI Middleware (web_app.py:verify_api_token)
     ├── FileUtils: walk_filtered 统一遍历, read_text_smart 编码探测
     ├── SearchWorker: 策略化匹配引擎
     ├── ContextFormatter: LLM 上下文 XML/Markdown 导出
-    └── ActionBridge: 外部工具执行桥接
+    ├── ActionBridge: 外部工具执行桥接
+    └── process_utils: 跨平台进程终止 (Windows/POSIX)
 ```
 
-### 8.2 搜索引擎管线
+### 9.2 搜索引擎管线
 
 ```
 用户输入 (query string)
@@ -325,7 +455,7 @@ walk_filtered() 生成器 → yield (full_path, rel_path)
 结果队列 → UI 批次渲染 (100条/tick)
 ```
 
-### 8.3 安全沙盒机制
+### 9.3 安全沙盒机制
 
 ```
 PathValidator.is_safe(target, root)
@@ -347,7 +477,7 @@ PathValidator.validate_project(path)
     └── 系统目录拦截 (Windows SYSTEMROOT, POSIX /etc /usr...)
 ```
 
-### 8.4 上下文生成管线
+### 9.4 上下文生成管线
 
 ```
 用户选择文件路径列表
@@ -368,9 +498,33 @@ blueprint (可选) → FileUtils.generate_ascii_tree(max_depth=5)
 XML 输出: <instruction> + <blueprint> + <context> + 文件列表 + </context>
 ```
 
-### 8.5 参数动态对齐机制
+### 9.5 进程终止管线 (v6.4.0)
 
-前后端 8 个关键参数通过统一校验管道保持一致：
+```
+工具执行超时 / WebSocket 断开 / 测试清理
+    ↓
+process_utils.terminate_process(proc, timeout=3.0)
+    ↓
+平台检测:
+    ├── Windows: subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)])
+    │   └── /T → 终止整个进程树
+    └── POSIX: proc.terminate() (SIGTERM)
+        ├── proc.wait(timeout) → 成功
+        └── TimeoutExpired → proc.kill() (SIGKILL)
+    ↓
+返回 bool (True=成功终止, False=超时/失败)
+    ↓
+cleanup_processes(process_list) → 批量清理, 记录日志
+```
+
+调用点 (v6.4.0 统一):
+- `action_routes.py` → `terminate_process(process)`
+- `ws_routes.py` → `terminate_process(proc)`
+- `common.py` → `cleanup_processes(staging_processes)` on shutdown
+
+### 9.6 参数动态对齐机制
+
+前后端 10 个关键参数通过统一校验管道保持一致：
 
 ```
 参数定义 (单一来源):
@@ -385,7 +539,7 @@ XML 输出: <instruction> + <blueprint> + <context> + 文件列表 + </context>
   model_dump_json() → os.replace() 原子持久化
 ```
 
-### 8.6 数据持久化原子性
+### 9.7 数据持久化原子性
 
 ```
 DataManager.save()
@@ -401,7 +555,7 @@ os.replace(temp, config) ← 原子替换 (Windows: 5次重试 + sleep)
 异常清理: os.unlink(temp)
 ```
 
-### 8.7 关键编码探测 (二级缓存)
+### 9.8 关键编码探测 (二级缓存)
 
 ```
 read_text_smart(file_path, max_bytes)
@@ -415,4 +569,56 @@ decode(encoding, errors="ignore")
 fallback: decode("utf-8", errors="ignore")
 ```
 
-> 所有关键路径均通过单元测试覆盖。新增参数必须同步更新 5 处 (Pydantic 模型/前端 defaults/Schema/API route/测试)。
+> 所有关键路径均通过单元测试覆盖。新增参数必须同步更新 6 处 (Pydantic 模型/前端 defaults+endpoints/Schema/API route/测试)。
+
+---
+
+## 10. 前端安全架构 (v6.4.0)
+
+### 10.1 API 请求集中化
+
+```
+前端 API 调用 (12处 fetch → 2个辅助方法)
+    ↓
+api._post(url, data)
+    ├── URLSearchParams 表单编码 → 统一 Content-Type
+    └── fetch() → resp.json()
+    ↓
+api._postJson(url, json)
+    ├── JSON.stringify() 序列化 → 统一 Content-Type: application/json
+    └── fetch() → resp.json()
+```
+
+所有端点 URL 来自 `state.js:config.endpoints` 单一来源。
+
+### 10.2 XSS 防御数据流
+
+```
+用户输入 (搜索框/标签名/文件名)
+    ↓
+后端返回 (JSON 或 HTML 片段)
+    ↓
+前端渲染:
+    ├── Markdown 内容 → marked.parse(content, { sanitize: true })
+    ├── HTML 文本 → escapeHtml(str) → 创建 textNode 再读 innerHTML
+    ├── DOM 属性 → textContent 赋值 (非 innerHTML)
+    └── CDN 资源 → SRI integrity 哈希校验
+    ↓
+浏览器渲染 (安全)
+```
+
+### 10.3 WebSocket 健壮性
+
+```
+WebSocket onmessage
+    ↓
+try:
+    data = JSON.parse(event.data)
+    ↓
+    消息路由 (search_result / execute_output / error)
+    ↓
+    UI 更新
+except (SyntaxError, TypeError):
+    console.error("Invalid WS message", event.data)
+    // 跳过该消息，不中断连接
+```

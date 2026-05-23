@@ -1,4 +1,4 @@
-import { state, config, escapeHtml } from './state.js';
+import { state, config, escapeHtml, getFileName } from './state.js';
 
 export function showToast(message, type = 'success') {
     const container = document.querySelector('.toast-container');
@@ -38,7 +38,7 @@ export function renderWorkspaces(data) {
             const btn = document.createElement('button');
             btn.className = 'btn btn-outline-info btn-sm text-truncate w-100 mb-1';
             btn.style.height = '32px';
-            btn.innerText = state.isSidebarExpanded ? item.name : item.name[0].toUpperCase();
+            btn.innerText = state.isSidebarExpanded ? item.name : (item.name ? item.name[0].toUpperCase() : "?");
             btn.title = item.path;
             btn.onclick = () => {
                 document.getElementById('projectPath').value = item.path;
@@ -62,10 +62,20 @@ export function updateFileMetaUI(path) {
     const matchedTags = tags[path] || [];
     matchedTags.forEach(tag => {
         const span = document.createElement('span');
-        span.className = 'badge bg-info text-dark small';
+        span.className = 'badge bg-info text-dark small me-1';
+        span.style.cursor = 'pointer';
+        span.title = 'Click to remove';
         span.innerText = tag;
+        span.onclick = () => window.App.removeTag(tag);
         tagContainer.appendChild(span);
     });
+    const addBtn = document.createElement('span');
+    addBtn.className = 'badge bg-outline-light small text-muted border border-secondary';
+    addBtn.style.cursor = 'pointer';
+    addBtn.innerText = '+';
+    addBtn.title = 'Add tag';
+    addBtn.onclick = () => window.App.addTag();
+    tagContainer.appendChild(addBtn);
 }
 
 export function renderStaging() {
@@ -84,7 +94,7 @@ export function renderStaging() {
         const nameSpan = document.createElement('span');
         nameSpan.className = 'text-truncate small cursor-pointer';
         nameSpan.title = path;
-        nameSpan.innerText = path.split(/[\\\/]/).pop();
+        nameSpan.innerText = getFileName(path);
         nameSpan.onclick = () => window.App.previewFile(path);
 
         const removeBtn = document.createElement('button');
@@ -143,7 +153,7 @@ export function renderFavorites() {
         const infoDiv = document.createElement('div');
         infoDiv.className = 'text-truncate flex-grow-1';
         infoDiv.innerHTML = `
-            <div class="fw-bold text-info small">${escapeHtml(path.split(/[\\\/]/).pop())}</div>
+            <div class="fw-bold text-info small">${escapeHtml(getFileName(path))}</div>
             <div class="text-muted" style="font-size:0.75rem">${escapeHtml(path)}</div>
         `;
         infoDiv.onclick = () => window.App.previewFile(path);
@@ -207,7 +217,7 @@ export function updateWorkspaceSummary() {
 
     if (projectName) {
         projectName.innerText = projectPath
-            ? projectPath.split(/[\\\/]/).pop()
+            ? getFileName(projectPath)
             : 'No workspace loaded';
         projectName.title = projectPath || '';
     }
@@ -235,49 +245,55 @@ export function closeActionModal() {
 }
 
 export function renderSearchResultItem(data, overlayMode = false) {
-    const list = overlayMode
-        ? document.getElementById('searchOverlayList')
-        : document.getElementById('searchResultsList');
-    if (!list) return;
-    const item = document.createElement('div');
-    item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer d-flex align-items-center';
-    item.setAttribute('data-path', data.path);
-    item.style.cursor = 'pointer';
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'flex-grow-1 overflow-hidden';
-    const snippetHtml = data.snippet ? `<div class="x-small text-warning mt-1 text-truncate border-start border-warning ps-2" style="background: rgba(255,193,7,0.05)">${escapeHtml(data.snippet)}</div>` : "";
-    contentDiv.innerHTML = `
-        <div class="d-flex justify-content-between align-items-center">
-            <div class="fw-bold text-info">${escapeHtml(data.name)}</div>
-            <div class="text-muted x-small" style="font-size:0.7rem">${data.mtime_fmt || ''}</div>
-        </div>
-        <div class="small text-muted text-truncate">${escapeHtml(data.path)}</div>
-        ${snippetHtml}
-    `;
-    item.appendChild(contentDiv);
-
+    const targets = [];
+    const leftList = document.getElementById('searchResultsList');
+    if (leftList) targets.push({ list: leftList, withStageBtn: true });
     if (overlayMode) {
-        const stageBtn = document.createElement('button');
-        stageBtn.className = 'btn btn-sm btn-link text-success p-0 ms-2';
-        stageBtn.innerHTML = '&#43;';
-        stageBtn.title = 'Stage this file';
-        stageBtn.onclick = (e) => {
-            e.stopPropagation();
-            window.App.state.staging.add(data.path);
-            window.App.syncStagingToBackend();
-            window.App.updateWorkspaceSummary();
-            showToast('Added to staging');
-        };
-        item.appendChild(stageBtn);
+        const overlayList = document.getElementById('searchOverlayList');
+        if (overlayList) targets.push({ list: overlayList, withStageBtn: true });
     }
 
-    item.onclick = () => window.App.previewFile(data.path);
-    item.oncontextmenu = (e) => {
-        e.preventDefault();
-        window.App.showContextMenu(e, data.path);
-    };
-    list.appendChild(item);
+    targets.forEach(({ list, withStageBtn }) => {
+        const item = document.createElement('div');
+        item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer d-flex align-items-center';
+        item.setAttribute('data-path', data.path);
+        item.style.cursor = 'pointer';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'flex-grow-1 overflow-hidden';
+        const snippetHtml = data.snippet ? `<div class="x-small text-warning mt-1 text-truncate border-start border-warning ps-2" style="background: rgba(255,193,7,0.05)">${escapeHtml(data.snippet)}</div>` : "";
+        contentDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="fw-bold text-info">${escapeHtml(data.name)}</div>
+                <div class="text-muted x-small" style="font-size:0.7rem">${escapeHtml(data.mtime_fmt || '')}</div>
+            </div>
+            <div class="small text-muted text-truncate">${escapeHtml(data.path)}</div>
+            ${snippetHtml}
+        `;
+        item.appendChild(contentDiv);
+
+        if (withStageBtn) {
+            const stageBtn = document.createElement('button');
+            stageBtn.className = 'btn btn-sm btn-link text-success p-0 ms-2';
+            stageBtn.innerHTML = '&#43;';
+            stageBtn.title = 'Stage this file';
+            stageBtn.onclick = (e) => {
+                e.stopPropagation();
+                window.App.state.staging.add(data.path);
+                window.App.syncStagingToBackend();
+                window.App.updateWorkspaceSummary();
+                showToast('Added to staging');
+            };
+            item.appendChild(stageBtn);
+        }
+
+        item.onclick = () => window.App.previewFile(data.path);
+        item.oncontextmenu = (e) => {
+            e.preventDefault();
+            window.App.showContextMenu(e, data.path);
+        };
+        list.appendChild(item);
+    });
 }
 
 export function renderTree(node, options = {}) {

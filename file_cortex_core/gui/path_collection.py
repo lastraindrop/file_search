@@ -4,6 +4,7 @@
 import pathlib
 import tkinter as tk
 from tkinter import ttk
+from typing import Any
 
 from ..format_utils import FormatUtils
 
@@ -16,7 +17,7 @@ class PathCollectionDialog(tk.Toplevel):
         parent: tk.Tk,
         paths: list[pathlib.Path],
         current_dir: pathlib.Path,
-        profiles: dict,
+        profiles: dict[str, Any],
         status_callback=None,
     ) -> None:
         """Initializes the path collection dialog.

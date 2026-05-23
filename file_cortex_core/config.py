@@ -130,8 +130,8 @@ def _setup_logging() -> logging.Logger:
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
             log_dir / "filecortex.log",
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
+            maxBytes=MAX_LOG_SIZE,
+            backupCount=BACKUP_COUNT,
             encoding="utf-8",
         )
         file_handler.setFormatter(log_format)
@@ -180,7 +180,7 @@ class DataManager:
     """
 
     _instance: "DataManager | None" = None
-    _lock = threading.RLock()
+    _lock: threading.RLock = threading.RLock()
 
     MUTABLE_SETTINGS: Final = frozenset(
         {
@@ -511,7 +511,7 @@ class DataManager:
                 proj.tags[norm_f].remove(tag)
                 self.save()
 
-    def save_session(self, project_path: str, session_data: dict) -> None:
+    def save_session(self, project_path: str, session_data: dict[str, Any]) -> None:
         """Records a user session for a project."""
         with self._lock:
             proj = self.get_project_data_obj(project_path)
@@ -519,7 +519,7 @@ class DataManager:
             proj.sessions = proj.sessions[:5]
             self.save()
 
-    def update_project_settings(self, project_path: str, settings: dict) -> None:
+    def update_project_settings(self, project_path: str, settings: dict[str, Any]) -> None:
         """Updates multiple project settings, enforcing whitelists.
 
         Args:
@@ -587,7 +587,7 @@ class DataManager:
                         proj.groups[group_name].remove(norm_p)
                 self.save()
 
-    def update_global_settings(self, settings: dict) -> None:
+    def update_global_settings(self, settings: dict[str, Any]) -> None:
         """Updates global settings with validation."""
         with self._lock:
             current = self.config.global_settings.model_dump()

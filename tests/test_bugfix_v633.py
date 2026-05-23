@@ -219,7 +219,7 @@ class TestVersionIncrement:
 
     def test_core_version_is_updated(self):
         """Core module version should be 6.3.3."""
-        assert core_version == "6.3.3"
+        assert core_version == "6.4.0"
 
     def test_version_pyproject_matches(self):
         """pyproject.toml version should match core version."""
@@ -230,10 +230,10 @@ class TestVersionIncrement:
         pyproject_path = pathlib.Path(__file__).parent.parent / "pyproject.toml"
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
-        assert data["project"]["version"] == "6.3.3"
+        assert data["project"]["version"] == "6.4.0"
 
     def test_version_in_index_page(self, api_client):
         """Index page should contain version string."""
         res = api_client.get("/")
         assert res.status_code == 200
-        assert "6.3.3" in res.text
+        assert "6.4.0" in res.text

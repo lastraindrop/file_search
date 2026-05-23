@@ -1,12 +1,12 @@
-# FileCortex v6.3.3 (工作区编排助手)
+# FileCortex v6.4.0 (工作区编排助手)
 
-> **版本**: 6.3.3 | **测试**: 372 passed | **代码质量**: Ruff 0 errors
+> **版本**: 6.4.0 | **日期**: 2026-05-24 | **测试**: 479 passed | **代码质量**: Ruff 0 errors
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
 - **Engineering Excellence**: 基于 **Pydantic V2** 与 **Google Style** 构建的健壮内核。
 
-## 主要功能 (v6.3.1)
+## 主要功能 (v6.4.0)
 
 ### 微内核架构
 - **强类型配置**: Pydantic 模型驱动的 `DataManager`，实现配置的自愈与严谨校验。
@@ -37,15 +37,20 @@
 - **查重工具**: 大小预筛 + SHA256 策略。
 - **快速分类**: 自定义类别目录移动。
 
+### 前端增强 (v6.4.0)
+- **标签管理 (Tag Management)**: 前端 UI 支持添加/移除标签。
+- **文件创建 (File Creation)**: 文件创建模态框，支持从 UI 直接创建新文件。
+- **可折叠面板 (Collapsible Left Panel)**: 左面板从 Bootstrap 标签页重构为可折叠区域，提升操作效率。
+- **SRI 哈希 (Subresource Integrity)**: 所有 CDN 资源 (Bootstrap CSS/JS, highlight.js) 添加 SRI 哈希；marked@12.0.0 和 mermaid@10.9.0 版本锁定。
+
 ---
 
 ## 详细文档
-- [综合审计与修复计划](COMPREHENSIVE_PLAN.md)
+- [综合审计与执行计划](COMPREHENSIVE_PLAN_V7.md)
+- [代码质量审计报告](CODE_QUALITY_PLAN.md)
 - [技术指南 (架构/参数对齐/防BUG)](TECHNICAL_GUIDE.md)
 - [开发者指南](DEVELOPER_GUIDE.md)
 - [项目路线图](ROADMAP.md)
-- [架构评估报告](ANALYSIS_REPORT.md)
-- [前端分析报告](FRONTEND_ANALYSIS.md)
 - [测试说明](tests/README.md)
 
 ---
@@ -90,8 +95,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **348 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP 及 Windows 兼容性。
-- **测试结果**: 372 passed, 0 failed
+- **479 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP 及 Windows 兼容性。
+- **测试结果**: 479 passed, 0 failed
 
 ### 代码质量检查
 ```bash
@@ -114,6 +119,7 @@ file_cortex_core/          # 微内核逻辑包
 ├── search.py           # SearchWorker (搜索引擎)
 ├── actions.py          # FileOps, ActionBridge (执行桥接)
 ├── duplicate.py        # DuplicateWorker (SHA256 查重)
+├── process_utils.py    # 跨平台进程终止工具 (统一 3 处重复逻辑)
 └── gui/                # GUI 组件 (BatchRename, DuplicateFinder)
 
 routers/                  # 模块化路由层 (v6.3.2 按域拆分)
@@ -127,10 +133,10 @@ routers/                  # 模块化路由层 (v6.3.2 按域拆分)
 └── common.py           # 共享状态与进程管理
 
 static/js/                # ES6 模块化前端
-├── main.js             # 流程控制
-├── state.js            # 状态中心 + 配置常量
-├── api.js              # API 封装
-└── ui.js               # UI 渲染驱动
+├── main.js             # 流程控制 + debounced syncStagingToBackend
+├── state.js            # 状态中心 + config.endpoints 集中管理
+├── api.js              # API 封装 (_post / _postJson 集中化)
+└── ui.js               # UI 渲染驱动 (含 actionModal / tag 管理 / file creation)
 
 file_search.py           # Tkinter 桌面版
 web_app.py              # FastAPI Web 入口
@@ -143,7 +149,7 @@ build_exe.py            # PyInstaller 打包脚本
 
 ## 参数动态对齐
 
-前后端关键参数已统一校验，确保一致性（详见 [COMPREHENSIVE_PLAN.md](COMPREHENSIVE_PLAN.md) Part C）：
+前后端关键参数已统一校验，确保一致性（详见 [COMPREHENSIVE_PLAN_V7.md](COMPREHENSIVE_PLAN_V7.md) Part C）：
 
 | 参数 | 前端 | 后端 | 默认 |
 |------|------|------|------|
@@ -152,6 +158,8 @@ build_exe.py            # PyInstaller 打包脚本
 | `preview_limit_mb` | settings modal | `GlobalSettings` | 1.0 |
 | `allowed_extensions` | settings modal | `GlobalSettings` | "" |
 | `api_token` | `window.__FCTX_API_TOKEN__` | env `FCTX_API_TOKEN` | - |
+| `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
+| `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/execute` | - |
 
 ---
 

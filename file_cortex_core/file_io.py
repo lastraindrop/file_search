@@ -5,6 +5,7 @@ import contextlib
 import fnmatch
 import os
 import pathlib
+import threading
 from functools import lru_cache
 from typing import Any
 
@@ -23,7 +24,7 @@ class FileUtils:
         excludes: list[str],
         git_spec: pathspec.PathSpec | None = None,
         include_dirs: bool = False,
-        stop_event: object = None,
+        stop_event: threading.Event | None = None,
     ):
         """Walks a project tree yielding filtered (full_path, rel_path) tuples.
 
@@ -263,6 +264,7 @@ class FileUtils:
         root_dir: str | None = None,
         manual_excludes: list[str] | None = None,
         use_gitignore: bool = True,
+        stop_event: threading.Event | None = None,
     ) -> list[str]:
         """Expands directories to files recursively.
 
@@ -271,6 +273,7 @@ class FileUtils:
             root_dir: Root directory for reference.
             manual_excludes: Exclusion patterns.
             use_gitignore: Whether to respect .gitignore.
+            stop_event: Optional threading.Event to cancel expansion.
 
         Returns:
             Sorted list of unique file paths.
@@ -295,6 +298,9 @@ class FileUtils:
                 unique_files.add(str(p))
             elif p.is_dir():
                 for curr_root, dirs, files in os.walk(p):
+                    if stop_event is not None and stop_event.is_set():
+                        break
+
                     curr_root_path = pathlib.Path(curr_root).resolve()
 
                     valid_dirs = []

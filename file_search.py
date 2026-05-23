@@ -359,7 +359,7 @@ class FileCortexApp:
 
         self.tree_search = ttk.Treeview(
             tree_container,
-            columns=("file", "path", "size", "mtime", "ext"),
+            columns=("abs_path", "file", "path", "size", "mtime", "ext"),
             show="headings",
             selectmode="extended",
         )
@@ -402,14 +402,6 @@ class FileCortexApp:
         self.tree_search.column("ext", width=60)
 
         self.tree_search.column("#0", width=0, stretch=False)
-        self.tree_search["columns"] = (
-            "abs_path",
-            "file",
-            "path",
-            "size",
-            "mtime",
-            "ext",
-        )
         self.tree_search.column("abs_path", width=0, stretch=False)
 
         self.tree_search.bind("<<TreeviewSelect>>", self.on_tree_select_preview)
@@ -1097,11 +1089,10 @@ class FileCortexApp:
                 try:
                     path_str = res["path"]
                     p = pathlib.Path(path_str)
-                    rel = (
-                        p.relative_to(self.current_dir)
-                        if self.current_dir in p.parents
-                        else p.name
-                    )
+                    try:
+                        rel = p.relative_to(self.current_dir)
+                    except ValueError:
+                        rel = p.name
 
                     sz_str = FormatUtils.format_size(res["size"])
                     dt = FormatUtils.format_datetime(res["mtime"])
@@ -1530,8 +1521,8 @@ class FileCortexApp:
             self.preview_frame.config(text="📄 内容预览 (编辑中)")
         else:
             try:
-                content = self.preview_text.get("1.0", tk.END)
-                FileOps.save_content(str(self.current_preview_path), content[:-1])
+                content = self.preview_text.get("1.0", "end-1c")
+                FileOps.save_content(str(self.current_preview_path), content)
                 self.is_editing = False
                 self.preview_text.config(state=tk.DISABLED)
                 self.btn_edit_save.config(text="✏️ 开启编辑")
@@ -1605,8 +1596,9 @@ class FileCortexApp:
                 ]
                 subprocess.run(cmd + [str(p) for p in paths], check=True)
             elif sys.platform == "darwin":
+                safe_paths = [str(p).replace("\\", "\\\\").replace('"', '\\"') for p in paths]
                 path_list = ",".join(
-                    ['POSIX file "{}"'.format(str(p).replace('"', '\\"')) for p in paths]
+                    ['POSIX file "{}"'.format(sp) for sp in safe_paths]
                 )
                 script = f'tell app "Finder" to set the clipboard to {{{path_list}}}'
                 subprocess.run(["osascript", "-e", script], check=True)
@@ -1812,7 +1804,7 @@ class FileCortexApp:
             return
         is_pinned = PathValidator.norm_path(
             str(self.current_dir)
-        ) in self.data_mgr.data.get("pinned_projects", [])
+        ) in self.data_mgr.config.pinned_projects
         self.btn_pin.config(text="⭐" if is_pinned else "☆")
 
     def open_duplicate_finder(self) -> None:

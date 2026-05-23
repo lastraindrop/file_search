@@ -173,7 +173,11 @@ class FileOps:
         if not path.exists():
             raise FileNotFoundError("Target path does not exist.")
 
-        def _handle_readonly(func: Any, path: str, exc_info: tuple) -> None:
+        def _handle_readonly(
+            func: Any,
+            path: str,
+            exc_info: tuple[type[BaseException], BaseException, ...],
+        ) -> None:
             os.chmod(path, stat.S_IWRITE)
             func(path)
 
@@ -430,12 +434,7 @@ class ActionBridge:
                 template, path_str, project_root
             )
 
-            timeout = int(
-                os.environ.get(
-                    "FCTX_EXEC_TIMEOUT",
-                    DataManager().data.get("execution_timeout", 300),
-                )
-            )
+            timeout = int(os.environ.get("FCTX_EXEC_TIMEOUT", "300"))
 
             logger.info(
                 f"AUDIT - Executing external tool (Shell={is_shell}): "
@@ -464,18 +463,9 @@ class ActionBridge:
                         "status": "success",
                     }
                 except subprocess.TimeoutExpired:
-                    if os.name == "nt":
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                            capture_output=True,
-                        )
-                    else:
-                        import signal
+                    from .process_utils import terminate_process
 
-                        try:
-                            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                        except Exception:
-                            proc.kill()
+                    terminate_process(proc.pid)
                     stdout, stderr = proc.communicate()
                     return {
                         "stdout": stdout,

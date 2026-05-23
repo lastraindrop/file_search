@@ -36,6 +36,7 @@ body {
     align-items: center;
     background: rgba(2, 6, 23, 0.55);
     backdrop-filter: blur(14px);
+    padding: 0.25rem 1.25rem;
 }
 
 .summary-primary,
@@ -137,11 +138,6 @@ body {
     color: var(--text-muted);
 }
 
-.summary-bar {
-    background: rgba(2, 6, 23, 0.3);
-    padding: 0.25rem 1.25rem !important;
-}
-
 .summary-label {
     font-weight: 300;
     opacity: 0.7;
@@ -149,7 +145,7 @@ body {
 }
 
 /* Tree & List Items */
-.tree-node, .staging-item {
+.tree-node {
     padding: 8px 12px;
     border-radius: 8px;
     margin: 2px 4px;
@@ -291,16 +287,38 @@ body {
     animation: pulse 2s infinite;
 }
 
+.pulse-warning {
+    animation: pulseWarning 2s infinite;
+}
+
 @keyframes pulse {
     0% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.4); }
     70% { box-shadow: 0 0 0 10px rgba(14, 165, 233, 0); }
     100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
 }
 
+@keyframes pulseWarning {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
 .x-small { font-size: 0.7rem !important; }
 .tracking-wider { letter-spacing: 0.05em; }
 .uppercase { text-transform: uppercase; }
 .backdrop-blur { backdrop-filter: blur(10px); background: rgba(2, 6, 23, 0.4); }
+
+.cursor-pointer { cursor: pointer; }
+.min-h-0 { min-height: 0; }
+
+.section-header:hover {
+    background: rgba(56, 189, 248, 0.06);
+}
+
+.section-toggle {
+    font-size: 0.65rem;
+    transition: transform 0.2s;
+}
 
 /* Improved contrast for modals */
 .modal-content.glass-panel {
@@ -348,11 +366,6 @@ body {
 .btn-xs {
     font-size: 0.7rem;
     padding: 0.15rem 0.4rem;
-}
-
-.search-result-item:hover {
-    background: rgba(56, 189, 248, 0.06);
-    cursor: pointer;
 }
 
 .empty-state {

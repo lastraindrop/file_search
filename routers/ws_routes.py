@@ -6,14 +6,14 @@ import asyncio
 import contextlib
 import os
 import pathlib
-import signal
-import subprocess
 import threading
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from file_cortex_core import ActionBridge, DataManager, FormatUtils, logger, search_generator
-from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK
+from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK, register_process, unregister_process
 from routers.services import (
     get_dm,
     get_project_config_for_path,
@@ -64,7 +64,7 @@ async def websocket_search(
     p = pathlib.Path(path)
     excludes = proj_config.get("excludes", "")
 
-    result_queue: asyncio.Queue = asyncio.Queue()
+    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue()
     main_loop = asyncio.get_running_loop()
     stop_event = threading.Event()
 
@@ -156,7 +156,7 @@ async def websocket_action_stream(
         return
 
     current_pid = [None]
-    result_queue: asyncio.Queue = asyncio.Queue()
+    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue()
     main_loop = asyncio.get_running_loop()
 
     def run_stream() -> None:
@@ -164,8 +164,12 @@ async def websocket_action_stream(
         try:
             proc = ActionBridge.create_process(template, path, project_root)
             current_pid[0] = proc.pid
-            with PROCESS_LOCK:
-                ACTIVE_PROCESSES[proc.pid] = proc
+            if not register_process(proc.pid, proc):
+                main_loop.call_soon_threadsafe(
+                    result_queue.put_nowait, {"error": "Too many active processes"}
+                )
+                main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+                return
 
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"pid": proc.pid})
 
@@ -174,8 +178,7 @@ async def websocket_action_stream(
                     main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
 
             proc.wait()
-            with PROCESS_LOCK:
-                ACTIVE_PROCESSES.pop(proc.pid, None)
+            unregister_process(proc.pid)
             main_loop.call_soon_threadsafe(
                 result_queue.put_nowait, {"exit_code": proc.returncode}
             )
@@ -183,8 +186,7 @@ async def websocket_action_stream(
             main_loop.call_soon_threadsafe(result_queue.put_nowait, {"error": str(e)})
         finally:
             if proc and proc.pid:
-                with PROCESS_LOCK:
-                    ACTIVE_PROCESSES.pop(proc.pid, None)
+                unregister_process(proc.pid)
             main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
 
     stream_task = asyncio.create_task(asyncio.to_thread(run_stream))
@@ -204,19 +206,11 @@ async def websocket_action_stream(
                 "due to WebSocket disconnect"
             )
             try:
-                if os.name == "nt":
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(pid)],
-                        capture_output=True,
-                    )
-                else:
-                    try:
-                        os.killpg(os.getpgid(pid), signal.SIGTERM)
-                    except Exception:
-                        os.kill(pid, signal.SIGTERM)
+                from file_cortex_core.process_utils import terminate_process
 
-                with PROCESS_LOCK:
-                    ACTIVE_PROCESSES.pop(pid, None)
+                terminate_process(pid)
+
+                unregister_process(pid)
             except Exception as e:
                 logger.error(f"Cleanup failed for pid {pid}: {e}")
     except Exception as e:

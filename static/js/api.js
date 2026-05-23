@@ -24,6 +24,19 @@ export async function _fetch(url, options = {}) {
     return res;
 }
 
+async function _post(url, data) {
+    return await _fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+}
+
+async function _postJson(url, data) {
+    const res = await _post(url, data);
+    return await res.json();
+}
+
 export async function loadWorkspaces() {
     try {
         const res = await _fetch(config.endpoints.workspaces);
@@ -34,12 +47,7 @@ export async function loadWorkspaces() {
 }
 
 export async function openProject(path) {
-    const res = await _fetch(config.endpoints.openProject, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ path: path })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.openProject, { path });
 }
 
 export async function fetchProjectConfig(path) {
@@ -48,11 +56,7 @@ export async function fetchProjectConfig(path) {
 }
 
 export async function saveProjectSettings(path, settings) {
-    return await _fetch(config.endpoints.projectSettings, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: path, settings: settings })
-    });
+    await _post(config.endpoints.projectSettings, { project_path: path, settings });
 }
 
 export async function fetchGlobalSettings() {
@@ -61,18 +65,11 @@ export async function fetchGlobalSettings() {
 }
 
 export async function saveGlobalSettings(body) {
-    return await _fetch(config.endpoints.globalSettings, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-    });
+    await _post(config.endpoints.globalSettings, body);
 }
 
 export async function fetchChildren(path) {
-    const res = await _fetch(config.endpoints.fsChildren, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ path: path })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.fsChildren, { path });
 }
 
 export async function fetchContent(path) {
@@ -81,121 +78,73 @@ export async function fetchContent(path) {
 }
 
 export async function saveFileNote(projectPath, filePath, note) {
-    return await _fetch(config.endpoints.fileNote, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, file_path: filePath, note: note })
-    });
+    await _post(config.endpoints.fileNote, { project_path: projectPath, file_path: filePath, note });
 }
 
 export async function archiveFiles(projectRoot, paths, outputName) {
-    return await _fetch(config.endpoints.archive, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ paths: paths, output_name: outputName, project_root: projectRoot })
-    });
+    await _post(config.endpoints.archive, { paths, output_name: outputName, project_root: projectRoot });
 }
 
 export async function renameFile(projectPath, oldPath, newName) {
-    return await _fetch(config.endpoints.rename, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, path: oldPath, new_name: newName })
-    });
+    await _post(config.endpoints.rename, { project_path: projectPath, path: oldPath, new_name: newName });
 }
 
 export async function batchRename(projectPath, paths, pattern, replacement, dryRun = true) {
-    const res = await _fetch(config.endpoints.batchRename, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, paths: paths, pattern: pattern, replacement: replacement, dry_run: dryRun })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.batchRename, { project_path: projectPath, paths, pattern, replacement, dry_run: dryRun });
 }
 
 export async function deleteFiles(projectPath, paths) {
-    return await _fetch(config.endpoints.delete, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, paths: paths })
-    });
+    await _post(config.endpoints.delete, { project_path: projectPath, paths });
 }
 
 export async function moveFiles(srcPaths, dstDir) {
-    const res = await _fetch(config.endpoints.move, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ src_paths: srcPaths, dst_dir: dstDir })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.move, { src_paths: srcPaths, dst_dir: dstDir });
 }
 
 export async function saveFileContent(path, content) {
-    return await _fetch(config.endpoints.save, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ path: path, content: content })
-    });
+    await _post(config.endpoints.save, { path, content });
 }
 
 export async function stageAll(projectPath, mode = 'files', applyExcludes = true) {
-    const res = await _fetch(config.endpoints.stageAll, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, mode: mode, apply_excludes: applyExcludes })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.stageAll, { project_path: projectPath, mode, apply_excludes: applyExcludes });
 }
 
 export async function categorizeFiles(projectPath, paths, categoryName) {
-    const res = await _fetch(config.endpoints.categorize, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, paths: paths, category_name: categoryName })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.categorize, { project_path: projectPath, paths, category_name: categoryName });
 }
 
 export async function terminateProcess(pid) {
-    return await _fetch(config.endpoints.terminate, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ pid: pid })
-    });
+    await _post(config.endpoints.terminate, { pid });
 }
 
 export async function togglePin(path) {
-    const res = await _fetch(config.endpoints.pin, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ path: path })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.pin, { path });
 }
 
 export async function fetchStats(projectPath, paths) {
-    const res = await _fetch(config.endpoints.stats, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ paths: paths, project_path: projectPath })
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.stats, { paths, project_path: projectPath });
 }
 
 export async function generateContext(params) {
-    const res = await _fetch(config.endpoints.generate, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(params)
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.generate, params);
 }
 
 export async function collectPaths(params) {
-    const res = await _fetch(config.endpoints.collectPaths, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(params)
-    });
-    return await res.json();
+    return await _postJson(config.endpoints.collectPaths, params);
 }
 
 export async function openInOs(projectPath, path) {
-    return await _fetch(config.endpoints.openPathInOs, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, path: path })
-    });
+    await _post(config.endpoints.openPathInOs, { project_path: projectPath, path });
 }
 
 export async function toggleFavorite(projectPath, path, action, group) {
-    return await _fetch(config.endpoints.favorites, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project_path: projectPath, group_name: group, file_paths: [path], action: action })
-    });
+    await _post(config.endpoints.favorites, { project_path: projectPath, group_name: group, file_paths: [path], action });
+}
+
+export async function manageTag(projectPath, filePath, tag, action) {
+    await _post(config.endpoints.manageTag, { project_path: projectPath, file_path: filePath, tag, action });
+}
+
+export async function createFile(parentPath, name, isDir = false) {
+    return await _postJson(config.endpoints.createFile, { parent_path: parentPath, name, is_dir: isDir });
 }

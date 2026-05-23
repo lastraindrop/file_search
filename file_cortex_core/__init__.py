@@ -1,6 +1,6 @@
 """FileCortex Core - AI-powered workspace orchestration and file management."""
 
-__version__ = "6.3.3"
+__version__ = "6.4.0"
 
 from .actions import ActionBridge, FileOps
 from .config import DataManager, get_app_dir, logger
@@ -8,6 +8,7 @@ from .context import ContextFormatter, NoiseReducer
 from .duplicate import DuplicateWorker
 from .file_io import FileUtils
 from .format_utils import FormatUtils
+from .process_utils import terminate_process
 from .search import SearchWorker, search_generator
 from .security import PathValidator
 
@@ -32,6 +33,7 @@ __all__ = [
     "NoiseReducer",
     "logger",
     "get_app_dir",
+    "terminate_process",
     "BatchRenameWindow",
     "DuplicateFinderWindow",
     "PathCollectionDialog",

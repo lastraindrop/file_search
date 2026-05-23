@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -116,7 +116,7 @@ class GlobalSettingsRequest(BaseModel):
     enable_noise_reducer: bool | None = None
     theme: str | None = None
     token_ratio: float | None = None
-    settings: dict | None = None
+    settings: dict[str, Any] | None = None
 
 
 class FavoriteRequest(BaseModel):
@@ -132,28 +132,28 @@ class SessionRequest(BaseModel):
     """Request model for saving sessions."""
 
     project_path: str
-    data: dict
+    data: dict[str, Any]
 
 
 class ProjectSettingsRequest(BaseModel):
     """Request model for updating project settings."""
 
     project_path: str
-    settings: dict
+    settings: dict[str, Any]
 
 
 class ToolsUpdateRequest(BaseModel):
     """Request model for updating custom tools."""
 
     project_path: str
-    tools: dict
+    tools: dict[str, Any]
 
 
 class CategoriesUpdateRequest(BaseModel):
     """Request model for updating categories."""
 
     project_path: str
-    categories: dict
+    categories: dict[str, Any]
 
 
 class PathCollectionRequest(BaseModel):
