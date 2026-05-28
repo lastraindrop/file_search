@@ -7,13 +7,12 @@ import contextlib
 import os
 import pathlib
 import threading
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from file_cortex_core import ActionBridge, DataManager, FormatUtils, logger, search_generator
-from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK, register_process, unregister_process
+from routers.common import register_process, unregister_process
 from routers.services import (
     get_dm,
     get_project_config_for_path,
@@ -114,7 +113,7 @@ async def websocket_search(
         stop_event.set()
         search_task.cancel()
     except Exception as e:
-        logger.error(f"Search error: {e}")
+        logger.exception("Search error")
         search_task.cancel()
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
@@ -211,10 +210,10 @@ async def websocket_action_stream(
                 terminate_process(pid)
 
                 unregister_process(pid)
-            except Exception as e:
-                logger.error(f"Cleanup failed for pid {pid}: {e}")
+            except Exception:
+                logger.exception(f"Cleanup failed for pid {pid}")
     except Exception as e:
-        logger.error(f"Action stream error: {e}")
+        logger.exception("Action stream error")
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
     finally:

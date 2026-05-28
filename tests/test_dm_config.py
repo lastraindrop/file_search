@@ -17,8 +17,8 @@ def test_dm_singleton_and_defaults(clean_config):
     dm = clean_config
     dm2 = DataManager()
     assert dm is dm2
-    assert "global_settings" in dm.data
-    assert isinstance(dm.data["projects"], dict)
+    assert dm.config.global_settings is not None
+    assert isinstance(dm.config.projects, dict)
 
 def test_core_exports_include_get_app_dir():
     """Public package exports should include get_app_dir consistently."""
@@ -38,10 +38,8 @@ def test_dm_save_load_symmetry(clean_config, mock_project):
     dm.update_project_settings(p_str, {"excludes": "*.log *.bak", "max_search_size_mb": 99})
     dm.save()
 
-    # Re-instantiate
     DataManager.reset()
     dm_new = DataManager()
-    dm_new.config_path = dm.config_path
     dm_new.load()
 
     proj = dm_new.get_project_data(p_str)
@@ -66,7 +64,7 @@ def test_dm_save_concurrency_stress(clean_config, mock_project):
 
     # Reload and ensure not corrupted
     dm.load()
-    assert len(dm.data["projects"]) >= 1
+    assert len(dm.config.projects) >= 1
 
 # -----------------------------------------------------------------------------
 # 3. Project Ops (Groups, Favorites, categories)
@@ -114,9 +112,8 @@ def test_dm_global_settings_and_history(clean_config, mock_project):
         os.makedirs(p_path, exist_ok=True)
 
     dm.add_to_recent(p_path)
-    found_recent = [PathValidator.norm_path(x) for x in dm.data["recent_projects"]]
+    found_recent = [PathValidator.norm_path(x) for x in dm.config.recent_projects]
     assert p_path in found_recent
 
-    # Global settings update
     dm.update_global_settings({"preview_limit_mb": 4.0})
-    assert dm.data["global_settings"]["preview_limit_mb"] == 4.0
+    assert dm.config.global_settings.preview_limit_mb == 4.0

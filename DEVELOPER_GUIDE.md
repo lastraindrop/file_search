@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.4.0 | **更新日期**: 2026-05-24
+> **版本**: 6.5.0 | **更新日期**: 2026-05-29 | **测试**: 597 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -36,23 +36,25 @@ DataManager.reset()
 ### 1.3 核心模块
 *   `file_cortex_core.security`: `PathValidator` 提供唯一性路径归一化协议。
 *   `file_cortex_core.search`: 匹配逻辑与文件系统遍历完全解耦，策略化设计。
-*   `file_cortex_core.context`: AI 上下文生成（Markdown/XML），支持 `apply_noise_reducer` 参数控制去噪。
+*   `file_cortex_core.context`: AI 上下文生成（Markdown/XML），支持 `apply_noise_reducer` 参数控制去噪；OOM 保护 (500文件/50MB上限)。
 *   `file_cortex_core.file_io`: `FileUtils.walk_filtered()` — 统一的项目目录遍历生成器，所有 os.walk 调用点共享。
-*   `file_cortex_core.process_utils`: 跨平台进程终止工具 — 从 `action_routes.py`, `ws_routes.py`, `common.py` 三处重复逻辑中提取，统一 `terminate_process()` / `cleanup_processes()` 模式。
+*   `file_cortex_core.process_utils`: 跨平台进程终止工具。
+*   `file_cortex_core.actions`: `FileOps` (文件操作) + `ActionBridge` (工具桥接)，支持 DataManager DI。
+*   `file_cortex_core.config`: `DataManager` (SSOT 配置中心) + `GlobalSettings`/`ProjectConfig` (Pydantic 模型)。
 
-### 1.4 路由层架构 (v6.3.2)
+### 1.4 路由层架构
 HTTP 路由已按功能域拆分：
 
 ```
 routers/
-├── http_routes.py        # 合并层 (27 行, 向后兼容)
-├── project_routes.py     # 工作区/项目管理 (201 行)
-├── fs_routes.py          # 文件系统 CRUD (310 行)
-├── action_routes.py      # 暂存/工具执行/上下文/设置 (252 行, 进程终止逻辑已提取)
+├── http_routes.py        # 合并层 (向后兼容)
+├── project_routes.py     # 工作区/项目管理
+├── fs_routes.py          # 文件系统 CRUD
+├── action_routes.py      # 暂存/工具执行/上下文/设置
 ├── ws_routes.py          # WebSocket 搜索/工具流
 ├── schemas.py            # Pydantic 请求模型
 ├── services.py           # 业务逻辑服务层
-└── common.py             # 共享状态与进程管理
+└── common.py             # ProcessManager (线程安全进程容器, 容量限制50)
 ```
 
 所有子路由通过 `http_routes.py` 合并为单一 `router` 对象，`web_app.py` 和测试代码无需变更。
@@ -62,12 +64,12 @@ routers/
 
 | 参数 | 前端定义 | 后端模型 | 传输路径 | 验证测试 |
 |------|----------|----------|----------|----------|
-| `token_threshold` | `state.js:20` (128000) | `GlobalSettings.token_threshold` | `/api/global/settings` | `test_global_settings_handles_settings_alias` |
-| `preview_limit_mb` | `main.js:260` | `GlobalSettings.preview_limit_mb` | `/api/global/settings` | `test_global_settings_roundtrip` |
-| `allowed_extensions` | `main.js:263` | `GlobalSettings.allowed_extensions` | `/api/global/settings` | `test_global_settings_handles_allowed_extensions` |
-| `apply_noise_reducer` | `schemas.py:30` | `GenerateRequest` | `/api/generate` | `test_api_generate_with_noise_reducer` |
-| `api_token` | `index.html:430` → `window.__FCTX_API_TOKEN__` | `web_app.py:22` | HTTP `X-API-Token` + WS `token` | `test_api_token_header_forward` |
-| 版本号 | `index.html:8,25` → `{{ version }}` | `file_cortex_core/__init__.py:3` | Jinja2 模板注入 | `test_api_index_page_injects_version` |
+| `token_threshold` | `state.js` (128000) | `GlobalSettings.token_threshold` | `/api/global/settings` | `test_global_settings_handles_settings_alias` |
+| `preview_limit_mb` | `main.js` | `GlobalSettings.preview_limit_mb` | `/api/global/settings` | `test_global_settings_roundtrip` |
+| `allowed_extensions` | `main.js` | `GlobalSettings.allowed_extensions` | `/api/global/settings` | `test_global_settings_handles_allowed_extensions` |
+| `apply_noise_reducer` | `schemas.py` | `GenerateRequest` | `/api/generate` | `test_api_generate_with_noise_reducer` |
+| `api_token` | `window.__FCTX_API_TOKEN__` | `web_app.py` | HTTP `X-API-Token` + WS `token` | `test_api_token_header_forward` |
+| 版本号 | `index.html` `{{ version }}` | `file_cortex_core/__init__.py` | Jinja2 模板注入 | `test_api_index_page_injects_version` |
 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL | `test_ws_search_endpoint` |
 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/execute` | WebSocket URL | `test_ws_execute_endpoint` |
 
@@ -85,8 +87,8 @@ routers/
 本项目严格执行 **Google Python Style Guide**。
 
 ### 2.1 自动化检查
-1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则)
-2. **Pytest**: `python -m pytest` (验证 **479** 项核心测试)
+1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则 + Google pydocstyle)
+2. **Pytest**: `python -m pytest` (验证 **597** 项核心测试)
 
 ### 2.2 Docstrings 样例
 ```python
@@ -112,15 +114,17 @@ def example_method(path: str) -> bool:
 - [ ] 版本号统一（`__init__.py`, `pyproject.toml`）
 - [ ] 所有 WebSocket 处理器中 `JSON.parse()` 已用 try/catch 保护
 - [ ] 所有 `innerHTML` 赋值已用 `escapeHtml()` 包装器保护
+- [ ] `logger.exception()` 而非 `logger.error(f"...{e}")` 用于异常日志
+- [ ] 公共函数完成完整类型注解 (参数 + 返回值)
 
 ---
 
 ## 3. 安全基线
 *   **路径沙盒**: 所有外部路径输入必须通过 `PathValidator.is_safe`。
 *   **注入防御**: `ActionBridge` 使用 `subprocess.run(list_args)` 避免 shell 注入风险。
-*   **Token 审计**: 生产环境下所有 `/api/` 及 `/ws/` 请求均需通过 Token 校验（HTTP `X-API-Token` header + WebSocket `token` query param）。
-*   **XSS 防御 (前端)**: `marked.parse()` 配置 sanitizer 选项；所有用户控制的 `innerHTML` 赋值经过 `escapeHtml()` 包装器处理；集中化 `_post()`/`_postJson()` 降低分散 fetch 调用引入注入的风险。
-*   **WebSocket 健壮性**: 所有 `onmessage` 中 `JSON.parse()` 使用 try/catch 保护；`onerror` 不再静默返回 false success。
+*   **Token 审计**: 生产环境下所有 `/api/` 及 `/ws/` 请求均需通过 Token 校验。
+*   **XSS 防御 (前端)**: `marked.parse()` 配置 sanitizer 选项；所有用户控制的 `innerHTML` 赋值经过 `escapeHtml()` 包装器。
+*   **WebSocket 健壮性**: 所有 `onmessage` 中 `JSON.parse()` 使用 try/catch 保护。
 
 ---
 
@@ -128,17 +132,17 @@ def example_method(path: str) -> bool:
 
 ```
 客户端请求:
-  HTTP:  Header X-API-Token → web_app.py:49 middleware → 验证
-  WS:    query ?token=xxx     → ws_routes.py:27 verify_ws_token → 验证
+  HTTP:  Header X-API-Token → web_app.py middleware → 验证
+  WS:    query ?token=xxx     → ws_routes.py verify_ws_token → 验证
 
 Token 来源:
-  window.__FCTX_API_TOKEN__  ← index.html:430 Jinja2 注入  ← web_app.py:105 api_token
+  window.__FCTX_API_TOKEN__  ← index.html Jinja2 注入 ← web_app.py api_token
   state.globalSettings.api_token  (备用路径，通常为空)
 ```
 
 ---
 
-## 5. 前端架构 (v6.4.0)
+## 5. 前端架构
 
 ### 5.1 API 层模式
 `static/js/api.js` 采用集中化的请求辅助方法：
@@ -151,13 +155,9 @@ async _post(url, data) { ... }
 async _postJson(url, json) { ... }
 ```
 
-所有 API 端点调用通过这两个辅助方法统一管理，消除分散的 `fetch()` 调用。
-
 ### 5.2 端点集中管理
-所有后端端点 URL 集中在 `static/js/state.js` 的 `config.endpoints` 对象中：
-- 4 个新 WebSocket 端点 key 已添加
-- `wsSearch`, `wsExecute` 等通过 `config.endpoints` 统一引用
-- 新增端点只需修改一处，前端全局生效
+所有后端端点 URL 集中在 `static/js/state.js` 的 `config.endpoints` 对象中。
+新增端点只需修改一处，前端全局生效。
 
 ### 5.3 关键 UI 模式
 - **actionModal**: 自定义确认对话框组件，替代所有原生 `confirm()` 调用
@@ -173,29 +173,41 @@ async _postJson(url, json) { ... }
 ```
 tests/
 ├── conftest.py                      # 共享 fixtures + DataManager.reset()
-├── test_bugfix_v633.py              # v6.3.3 新增 24 项测试 (BUG修复/边界/Google Style)
-├── test_bugfix_v632.py              # v6.3.2 新增 54 项测试 (BUG修复/边界/DI)
-├── test_comprehensive_v63.py        # v6.3.1 新增 73 项测试 (CLI/MCP/Web/安全)
-├── test_additional_coverage.py      # v6.3.0 新增 30 项边缘测试
-├── test_dm_config.py                # 配置管理
+├── test_v8_comprehensive.py         # v6.4.0+/v6.5.0 新增 77 项测试 (DI/OOM/CLI/ProcessManager)
+├── test_coverage_fill.py            # v6.5.0 新增 20 项测试 (process_utils/ProcessManager)
+├── test_frontend_contract.py        # v6.5.0 新增 8 项前端契约测试 (共 31 项)
+├── test_bugfix_v7.py                # v6.4.0 回归测试 (BUF/前端/WebSocket)
+├── test_bugfix_v633.py              # v6.3.3 BUG修复 + 边界覆盖
+├── test_bugfix_v632.py              # v6.3.2 BUG修复 + 边界覆盖
+├── test_comprehensive_v63.py        # v6.3.1 全量 CLI/MCP/Web/安全测试
+├── test_comprehensive.py            # 核心功能 + 高级边界
+├── test_dm_config.py                # 配置管理 (dm.data→dm.config 迁移验证)
 ├── test_security_resilience.py      # 安全沙盒
-├── test_search_engine.py            # 搜索引擎
+├── test_search_engine.py            # 搜索引擎矩阵
 ├── test_fileops_advanced.py         # 文件操作
 ├── test_web_api_advanced.py         # Web API
 ├── test_web_endpoints.py            # Web 端点
 ├── test_core_integration.py         # 集成测试
 ├── test_mcp_server.py               # MCP 协议
-├── test_frontend_contract.py        # 前端结构契约
-└── ...更多
+├── test_additional_coverage.py      # 边缘覆盖
+├── test_ai_enhanced.py              # AI 上下文/Blueprint
+├── test_api_v6.py                   # API 版本演进
+├── test_context_formatter.py        # XML/MD 导出
+├── test_utils_format.py             # 格式化/Token估算
+├── test_scenarios.py                # 端到端场景
+└── test_search_engine.py            # 搜索引擎
 ```
 
-## 7. v6.4.0 变更摘要
+## 7. v6.5.0 变更摘要
 
 | 类别 | 变更 |
 |------|------|
-| **安全** | 3 处 XSS 修复 (marked sanitization, escapeHtml, api.js 集中化); WS JSON.parse try/catch; WS onerror 修复 |
-| **重构** | process_utils.py 跨平台进程终止 (3 处去重); api.js _post/_postJson 集中化 |
-| **类型** | 14 处裸泛型 → 参数化泛型 (7 文件); self.q→self.query 等命名修复; stop_event 类型修正 |
-| **前端** | 可折叠左面板; staging 加宽 col-md-3; tag 管理; file 创建; SRI 哈希; confirm→actionModal; debounced sync |
-| **CSS/HTML** | .pulse-warning 添加; 重复 CSS 合并; 未使用规则移除; aria-live/aria-label 可访问性 |
-| **测试** | +107 项 (总计 479) / ruff 0 errors |
+| **Google Style 审计** | 23 处 logger f-string 异常日志→`logger.exception()`；22 处冗余 `as e` 清理；8 处类型注解补全；5 文件 import 排序修复；2 处 `__main__`→`main()` 规范化；1 处 `format` 遮蔽修复 |
+| **CLI 增强** | `fctx search` (smart/exact/regex/content) + `fctx export` (markdown/xml, --output) |
+| **OOM 保护** | `context.py` 新增 `MAX_EXPORT_FILES=500` + `MAX_TOTAL_CONTENT_BYTES=50MB` |
+| **进程管理** | `routers/common.py` ProcessManager 封装 (线程安全、容量50、旧API别名) |
+| **前端修复** | 8 项修复 (stageAll CRITICAL BUG、上下文菜单越界、bulkActions 死代码、tree-node 选择器污染等) |
+| **测试** | +118 项 (总计 597) / ruff 0 errors / Google Style 全项通过 |
+| **弃用 API** | 14 处 `dm.data[...]` → `dm.config.xxx` 迁移 |
+| **硬编码** | 版本号 `"6.5.0"` → `core_version` 动态导入；默认值 `== 128000` → `GlobalSettings()` |
+| **线程安全** | `SearchWorker`/`DuplicateWorker` daemon=True 构造器传参 |

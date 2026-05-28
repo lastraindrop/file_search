@@ -7,13 +7,12 @@ generation capabilities for AI assistants.
 
 import os
 import pathlib
+from collections.abc import Callable
 
 from file_cortex_core import (
     ContextFormatter,
     DataManager,
     FileUtils,
-    FormatUtils,
-    NoiseReducer,
     PathValidator,
     logger,
     search_generator,
@@ -33,7 +32,7 @@ except ImportError:
             self.name = name
             self._tools = {}
 
-        def tool(self, name: str = None, description: str = ""):
+        def tool(self, name: str = None, description: str = "") -> Callable:
             """Registers a tool decorator."""
             def decorator(func):
                 tool_name = name or func.__name__
@@ -44,7 +43,7 @@ except ImportError:
                 return func
             return decorator
 
-        def run(self, host: str = None, port: int = None):
+        def run(self, host: str = None, port: int = None) -> None:
             """Prints server info (mock)."""
             if host or port:
                 print(
@@ -65,7 +64,7 @@ def get_mcp() -> FastMCP:
         _mcp_instance = FastMCP("FileCortex")
     return _mcp_instance
 
-def get_dm():
+def get_dm() -> DataManager:
     """Returns a DataManager singleton instance."""
     return DataManager()
 
@@ -115,14 +114,14 @@ async def search_files(
 async def get_file_context(
     project_path: str,
     file_paths: list[str],
-    format: str = "xml",
+    fmt: str = "xml",
 ) -> str:
     """Retrieves the content of specified files formatted for LLM context.
 
     Args:
         project_path: The project root path.
         file_paths: List of file paths to retrieve.
-        format: Output format - "xml" or "markdown".
+        fmt: Output format - "xml" or "markdown".
 
     Returns:
         Formatted file contents as a string.
@@ -135,7 +134,7 @@ async def get_file_context(
         p for p in file_paths if PathValidator.is_safe(p, root)
     ]
 
-    if format == "xml":
+    if fmt == "xml":
         return ContextFormatter.to_xml(safe_paths, root_dir=root)
     return ContextFormatter.to_markdown(safe_paths, root_dir=root)
 
@@ -270,8 +269,8 @@ async def get_file_stats(
                 f"  {path.name}: {FormatUtils.format_size(size)}, "
                 f"{tokens} tokens, mtime={FormatUtils.format_datetime(stat.st_mtime)}"
             )
-        except Exception as e:
-            logger.error(f"MCP Stat error for {p}: {e}")
+        except Exception:
+            logger.exception(f"MCP Stat error for {p}")
             lines.append(f"  {path.name}: Error retrieving stats")
 
     lines.append(f"\nTotal: {FormatUtils.format_size(total_size)}, {total_tokens} tokens")

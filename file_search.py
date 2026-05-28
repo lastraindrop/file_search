@@ -89,8 +89,8 @@ class FileCortexApp:
         if last_dir and os.path.exists(last_dir):
             try:
                 self.load_project(last_dir)
-            except Exception as e:
-                logger.error(f"Failed to auto-load last project {last_dir}: {e}")
+            except Exception:
+                logger.exception(f"Failed to auto-load last project {last_dir}")
 
     def _init_ui(self) -> None:
         """Initializes the user interface components."""
@@ -918,8 +918,8 @@ class FileCortexApp:
                     0,
                     lambda: self._update_stats_ui(item_count, count, total_tokens),
                 )
-            except Exception as e:
-                logger.error(f"Stats calculation failed: {e}")
+            except Exception:
+                logger.exception("Stats calculation failed")
 
         threading.Thread(target=run_calc, daemon=True).start()
 
@@ -941,8 +941,8 @@ class FileCortexApp:
                 f"| 估算 {FormatUtils.format_number(token_count)} Tokens",
                 foreground=color,
             )
-        except Exception as e:
-            logger.error(f"UI Stats update error: {e}")
+        except Exception:
+            logger.exception("UI Stats update error")
 
     def add_search_tag(self, *args: tuple) -> None:
         """Adds a search tag from the search entry."""
@@ -1109,8 +1109,8 @@ class FileCortexApp:
                             res["ext"],
                         ),
                     )
-                except Exception as e:
-                    logger.error(f"Error processing search result: {e}")
+                except Exception:
+                    logger.exception("Error processing search result")
                 processed_in_this_tick += 1
             self.root.after(SEARCH_POLL_MS, self.process_queue)
         except queue.Empty:
@@ -1172,8 +1172,8 @@ class FileCortexApp:
                 if not vals:
                     return
                 full_path = pathlib.Path(vals[0])
-            except (IndexError, ValueError) as e:
-                logger.error(f"Failed to resolve preview path from search: {e}")
+            except (IndexError, ValueError):
+                logger.exception("Failed to resolve preview path from search")
                 return
         elif tree == self.tree_proj:
             full_path = self.get_tree_path(sel[0])
@@ -1598,7 +1598,7 @@ class FileCortexApp:
             elif sys.platform == "darwin":
                 safe_paths = [str(p).replace("\\", "\\\\").replace('"', '\\"') for p in paths]
                 path_list = ",".join(
-                    ['POSIX file "{}"'.format(sp) for sp in safe_paths]
+                    [f'POSIX file "{sp}"' for sp in safe_paths]
                 )
                 script = f'tell app "Finder" to set the clipboard to {{{path_list}}}'
                 subprocess.run(["osascript", "-e", script], check=True)
@@ -1821,7 +1821,12 @@ class FileCortexApp:
         )
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Launches the desktop GUI application."""
     root = tk.Tk()
-    app = FileCortexApp(root)
+    app = FileCortexApp(root)  # noqa: F841
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

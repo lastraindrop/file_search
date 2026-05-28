@@ -8,6 +8,8 @@ context XML/MD formatting, search modes, gitignore, token estimation,
 path collection, and project root resolution.
 """
 
+# ruff: noqa: D102, I001
+
 import os
 import pathlib
 import threading
@@ -586,6 +588,7 @@ class TestProcessManager:
 
     def test_register_and_unregister(self):
         from unittest.mock import MagicMock
+
         from routers.common import (
             ACTIVE_PROCESSES,
             PROCESS_LOCK,
@@ -604,12 +607,12 @@ class TestProcessManager:
 
     def test_register_at_capacity(self):
         from unittest.mock import MagicMock
-        from routers.common import (
+
+        from routers.common import (  # noqa: I001
             ACTIVE_PROCESSES,
             PROCESS_LOCK,
             MAX_ACTIVE_PROCESSES,
             register_process,
-            unregister_process,
         )
         with PROCESS_LOCK:
             ACTIVE_PROCESSES.clear()
@@ -712,6 +715,7 @@ class TestVersion:
 
     def test_version_matches_pyproject(self):
         import tomllib
+
         from file_cortex_core import __version__
         pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
         if pyproject.exists():

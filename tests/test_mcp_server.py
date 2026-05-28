@@ -28,7 +28,7 @@ async def test_mcp_get_file_context_xml(clean_config, mock_project):
     file_path = str(mock_project / "src" / "main.py")
 
     await mcp_server.register_workspace(project_path)
-    result = await mcp_server.get_file_context(project_path, [file_path], format="xml")
+    result = await mcp_server.get_file_context(project_path, [file_path], fmt="xml")
 
     assert "<context>" in result
     assert "main.py" in result

@@ -6,6 +6,7 @@ import fnmatch
 import os
 import pathlib
 import threading
+from collections.abc import Generator
 from functools import lru_cache
 from typing import Any
 
@@ -25,7 +26,7 @@ class FileUtils:
         git_spec: pathspec.PathSpec | None = None,
         include_dirs: bool = False,
         stop_event: threading.Event | None = None,
-    ):
+    ) -> Generator[tuple[pathlib.Path, pathlib.Path], None, None]:
         """Walks a project tree yielding filtered (full_path, rel_path) tuples.
 
         Directories are pruned based on ignore rules. Files are checked against
@@ -96,8 +97,8 @@ class FileUtils:
                 subprocess.run(["open", p_str], check=True)
             else:
                 subprocess.run(["xdg-open", p_str], check=True)
-        except Exception as e:
-            logger.error(f"Failed to open path {p_str}: {e}")
+        except Exception:
+            logger.exception(f"Failed to open path {p_str}")
 
     @staticmethod
     def is_binary(file_path: pathlib.Path) -> bool:
@@ -185,8 +186,8 @@ class FileUtils:
             try:
                 with open(gitignore_path, encoding="utf-8") as f:
                     lines = f.readlines()
-            except Exception as e:
-                logger.warning(f"Failed to read gitignore at {gitignore_path}: {e}")
+            except Exception:
+                logger.warning(f"Failed to read gitignore at {gitignore_path}", exc_info=True)
         return pathspec.PathSpec.from_lines("gitwildmatch", lines)
 
     @staticmethod
@@ -414,6 +415,7 @@ class FileUtils:
                 return f.read().decode("utf-8", errors="ignore")
         except Exception:
             return ""
+        return ""
 
     @staticmethod
     def get_language_tag(suffix: str) -> str:
@@ -519,11 +521,11 @@ class FileUtils:
                         _build_tree(entry.path, new_prefix, depth + 1)
             except PermissionError:
                 logger.warning(f"Permission denied: {path}")
-            except Exception as e:
-                logger.error(f"Tree generation error at {path}: {e}")
+            except Exception:
+                logger.exception(f"Tree generation error at {path}")
 
         try:
             _build_tree(root_dir)
-        except Exception as e:
-            logger.error(f"Tree generation failed: {e}")
+        except Exception:
+            logger.exception("Tree generation failed")
         return "\n".join(lines)

@@ -38,7 +38,7 @@ class DuplicateWorker(threading.Thread):
             result_queue: Queue for reporting results.
             stop_event: Event to signal cancellation.
         """
-        super().__init__()
+        super().__init__(daemon=True)
         self.root_dir = pathlib.Path(root_dir)
         self.excludes = [
             e.lower().strip() for e in manual_excludes.split() if e.strip()
@@ -48,7 +48,6 @@ class DuplicateWorker(threading.Thread):
         )
         self.result_queue = result_queue
         self.stop_event = stop_event
-        self.daemon = True
 
     def _get_hash(
         self, file_path: pathlib.Path, chunk_size: int = 1024 * 1024
@@ -73,8 +72,8 @@ class DuplicateWorker(threading.Thread):
                         break
                     m.update(data)
             return m.hexdigest()
-        except Exception as e:
-            logger.error(f"Hashing failed for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"Hashing failed for {file_path}")
             return None
 
     def run(self) -> None:
@@ -127,5 +126,5 @@ class DuplicateWorker(threading.Thread):
             logger.info("AUDIT - Duplicate scan complete.")
 
         except Exception as e:
-            logger.error(f"Duplicate scan failed: {e}")
+            logger.exception("Duplicate scan failed")
             self.result_queue.put(("ERROR", str(e)))

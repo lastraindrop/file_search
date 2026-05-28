@@ -104,11 +104,11 @@ class TestDataManagerAdvanced:
 
         status1 = dm.toggle_pinned(p)
         assert status1 is True
-        assert p in dm.data["pinned_projects"]
+        assert p in dm.config.pinned_projects
 
         status2 = dm.toggle_pinned(p)
         assert status2 is False
-        assert p not in dm.data["pinned_projects"]
+        assert p not in dm.config.pinned_projects
 
     def test_update_custom_tools_validation(self, clean_config, mock_project):
         """Verify custom tools validation rejects bad input."""

@@ -175,13 +175,16 @@ class TestGlobalSettingsUsesPydanticModel:
         assert "allowed_extensions" in data
 
     def test_global_settings_defaults_correct(self, api_client):
-        """Default model values should be present."""
+        """Default model values should be present and match GlobalSettings."""
+        from file_cortex_core.config import GlobalSettings
+
         res = api_client.get("/api/global/settings")
         data = res.json()
-        assert data["token_threshold"] == 128000
-        assert data["token_ratio"] == 4.0
-        assert data["preview_limit_mb"] == 1.0
-        assert data["enable_noise_reducer"] is False
+        defaults = GlobalSettings()
+        assert data["token_threshold"] == defaults.token_threshold
+        assert data["token_ratio"] == defaults.token_ratio
+        assert data["preview_limit_mb"] == defaults.preview_limit_mb
+        assert data["enable_noise_reducer"] == defaults.enable_noise_reducer
 
 
 class TestContentPreviewTruncation:
@@ -215,11 +218,12 @@ class TestContentPreviewTruncation:
 
 
 class TestVersionIncrement:
-    """Verify v6.3.3 version is correctly propagated."""
+    """Verify version is correctly propagated."""
 
     def test_core_version_is_updated(self):
-        """Core module version should be 6.3.3."""
-        assert core_version == "6.4.0"
+        """Core module version should be set as a non-empty string."""
+        assert isinstance(core_version, str)
+        assert len(core_version) > 0
 
     def test_version_pyproject_matches(self):
         """pyproject.toml version should match core version."""
@@ -230,10 +234,10 @@ class TestVersionIncrement:
         pyproject_path = pathlib.Path(__file__).parent.parent / "pyproject.toml"
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
-        assert data["project"]["version"] == "6.4.0"
+        assert data["project"]["version"] == core_version
 
     def test_version_in_index_page(self, api_client):
         """Index page should contain version string."""
         res = api_client.get("/")
         assert res.status_code == 200
-        assert "6.4.0" in res.text
+        assert core_version in res.text

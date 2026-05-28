@@ -318,7 +318,10 @@ class FileOps:
 
     @staticmethod
     def batch_categorize(
-        project_path: str, paths: list[str], category_name: str
+        project_path: str,
+        paths: list[str],
+        category_name: str,
+        data_mgr: DataManager | None = None,
     ) -> list[str]:
         """Categorizes files into a project category directory.
 
@@ -326,12 +329,13 @@ class FileOps:
             project_path: Project root path.
             paths: Files to categorize.
             category_name: Category name.
+            data_mgr: Optional DataManager instance for DI.
 
         Returns:
             List of new file paths.
         """
-        data_mgr = DataManager()
-        proj = data_mgr.get_project_data(project_path)
+        dm = data_mgr or DataManager()
+        proj = dm.get_project_data(project_path)
         cat_dir_rel = proj["quick_categories"].get(category_name)
         if not cat_dir_rel:
             raise ValueError(f"Category '{category_name}' not defined.")
@@ -350,8 +354,8 @@ class FileOps:
             try:
                 new_p = FileOps.move_file(p_str, str(target_dir))
                 moved.append(new_p)
-            except Exception as e:
-                logger.error(f"Failed to categorize {p_str}: {e}")
+            except Exception:
+                logger.exception(f"Failed to categorize {p_str}")
         return moved
 
 
@@ -475,7 +479,7 @@ class ActionBridge:
                         "status": "timeout",
                     }
         except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
+            logger.exception("Tool execution failed")
             return {
                 "stdout": "",
                 "stderr": str(e),
@@ -552,7 +556,7 @@ class ActionBridge:
             yield {"exit_code": exit_code}
 
         except Exception as e:
-            logger.error(f"Tool streaming failed: {e}")
+            logger.exception("Tool streaming failed")
             yield {"error": str(e)}
         finally:
             if process and process.poll() is None:

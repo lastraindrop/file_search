@@ -168,13 +168,13 @@ def test_main_js_has_toggle_section(api_client):
     assert "section-" in js
 
 
-def test_main_js_has_buildWsUrl(api_client):
+def test_main_js_has_buildWsUrl(api_client):  # noqa: N802
     """Phase 1: buildWsUrl centralized WS URL construction."""
     js = api_client.get("/static/js/main.js").text
     assert "buildWsUrl" in js
 
 
-def test_state_js_exports_getFileName(api_client):
+def test_state_js_exports_getFileName(api_client):  # noqa: N802
     """Phase 1: state.js exports getFileName and getFileExt utilities."""
     js = api_client.get("/static/js/state.js").text
     assert "export function getFileName" in js or "export const getFileName" in js
@@ -190,7 +190,7 @@ def test_main_js_no_split_pop_for_filenames(api_client):
     assert len(matches) == 0, "Found raw .split(/[ in main.js — should use getFileName()"
 
 
-def test_ui_js_imports_getFileName(api_client):
+def test_ui_js_imports_getFileName(api_client):  # noqa: N802
     """Phase 1: ui.js should import getFileName from state.js."""
     js = api_client.get("/static/js/ui.js").text
     assert "getFileName" in js
@@ -257,3 +257,49 @@ def test_css_has_section_styles(api_client):
     assert "section-header" in css
     assert "section-toggle" in css
     assert "cursor-pointer" in css
+
+
+class TestFrontendBugFixes:
+    """Verify frontend bug fixes applied correctly in v6.5.0."""
+
+    def test_bulk_actions_not_force_hidden(self, api_client):
+        """FrontFix-1: bulkActions div should NOT have `!important` on display."""
+        html = api_client.get("/").text
+        assert 'display:none !important' not in html
+
+    def test_no_global_tree_node_query(self, api_client):
+        """FrontFix-4: ui.js should scope tree-node query to container, not document."""
+        js = api_client.get("/static/js/ui.js").text
+        assert "document.querySelectorAll('.tree-node')" not in js
+        assert "querySelectorAll('.tree-node')" in js  # scoped version OK
+
+    def test_stage_all_uses_fixed_mode(self, api_client):
+        """FrontFix-2: stageAll should pass 'files' mode, not search mode."""
+        js = api_client.get("/static/js/main.js").text
+        assert "api.stageAll(App.state.projectPath, 'files', true)" in js
+
+    def test_context_menu_overflow_guard(self, api_client):
+        """FrontFix-6: showContextMenu should have viewport boundary checks."""
+        js = api_client.get("/static/js/main.js").text
+        assert "window.innerWidth" in js
+        assert "window.innerHeight" in js
+
+    def test_search_results_cleared_on_new_search(self, api_client):
+        """FrontFix-3: startSearch should clear left panel search results."""
+        js = api_client.get("/static/js/main.js").text
+        assert "leftList.innerHTML = ''" in js
+
+    def test_create_key_value_row_sanitized(self, api_client):
+        """FrontFix-7: _createKeyValueRow should sanitize key for DOM id."""
+        js = api_client.get("/static/js/main.js").text
+        assert "replace(/[^a-zA-Z0-9_-]/g" in js
+
+    def test_note_overlay_positioning(self, api_client):
+        """FrontFix-6: noteOverlay should not have hardcoded absolute positioning."""
+        html = api_client.get("/").text
+        assert 'start-50 translate-middle-x' in html
+
+    def test_bulk_actions_uses_normal_display(self, api_client):
+        """FrontFix-1: updateBulkUI should use normal style.display, not setProperty important."""
+        js = api_client.get("/static/js/main.js").text
+        assert "style.setProperty('display'" not in js

@@ -3,7 +3,7 @@ import { state, config, escapeHtml, getFileName } from './state.js';
 export function showToast(message, type = 'success') {
     const container = document.querySelector('.toast-container');
     if (!container) return;
-    
+
     const toastEl = document.createElement('div');
     toastEl.className = `toast align-items-center text-bg-${type} border-0 animate-in mb-2`;
     toastEl.setAttribute('role', 'alert');
@@ -49,7 +49,7 @@ export function renderWorkspaces(data) {
     };
     renderList(data.pinned || [], 'pinnedProjectsList');
     renderList(data.recent || [], 'recentProjectsList');
-    
+
     const isPinned = (data.pinned || []).some(p => p.path === state.projectPath);
     updatePinUI(isPinned);
 }
@@ -392,7 +392,10 @@ export function renderTree(node, options = {}) {
     } else {
         header.onclick = (e) => {
             e.stopPropagation();
-            document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+            const treeContainer = header.closest('.section-body, #fileTreeRoot');
+            if (treeContainer) {
+                treeContainer.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+            }
             header.classList.add('active');
             window.App.previewFile(node.path);
         };

@@ -3,6 +3,7 @@
 
 import pathlib
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
 
@@ -18,7 +19,7 @@ class PathCollectionDialog(tk.Toplevel):
         paths: list[pathlib.Path],
         current_dir: pathlib.Path,
         profiles: dict[str, Any],
-        status_callback=None,
+        status_callback: Callable[[int], None] | None = None,
     ) -> None:
         """Initializes the path collection dialog.
 

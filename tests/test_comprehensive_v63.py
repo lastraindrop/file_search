@@ -187,7 +187,7 @@ class TestMCPServer:
             get_file_context(
                 str(mock_project),
                 [str(mock_project / "src" / "main.py")],
-                format="xml",
+                fmt="xml",
             )
         )
         assert "<context>" in result or "Error" in result
@@ -205,7 +205,7 @@ class TestMCPServer:
             get_file_context(
                 str(mock_project),
                 [str(mock_project / "README.md")],
-                format="markdown",
+                fmt="markdown",
             )
         )
         assert "```" in result or "Error" in result
@@ -589,9 +589,10 @@ class TestConfigExtended:
         """Updating one global setting preserves others."""
         dm = clean_config
         dm.update_global_settings({"preview_limit_mb": 5.0})
-        settings = dm.data["global_settings"]
-        assert settings["preview_limit_mb"] == 5.0
-        assert settings["token_threshold"] == 128000  # default preserved
+        gs = dm.config.global_settings
+        assert gs.preview_limit_mb == 5.0
+        from file_cortex_core.config import GlobalSettings
+        assert gs.token_threshold == GlobalSettings().token_threshold
 
     def test_update_global_settings_invalid_type(self, clean_config):
         """Invalid type for global setting field triggers validation error."""
@@ -612,7 +613,7 @@ class TestConfigExtended:
         dm.add_to_recent(str(p2))
         dm.add_to_recent(str(p1))  # duplicate
 
-        paths = dm.data["recent_projects"]
+        paths = dm.config.recent_projects
         assert paths[0] == PathValidator.norm_path(str(p1))  # most recent
         assert paths.count(PathValidator.norm_path(str(p1))) == 1  # no duplicate
 
@@ -624,10 +625,10 @@ class TestConfigExtended:
         path = str(p)
 
         assert dm.toggle_pinned(path) is True
-        assert PathValidator.norm_path(path) in dm.data["pinned_projects"]
+        assert PathValidator.norm_path(path) in dm.config.pinned_projects
 
         assert dm.toggle_pinned(path) is False
-        assert PathValidator.norm_path(path) not in dm.data["pinned_projects"]
+        assert PathValidator.norm_path(path) not in dm.config.pinned_projects
 
     def test_save_session_cap(self, clean_config, mock_project):
         """Session list is capped at 5 entries."""

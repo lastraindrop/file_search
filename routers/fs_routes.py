@@ -220,7 +220,7 @@ def api_save(req: FileSaveRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Save error: {e}")
+        logger.exception("Save error")
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -323,5 +323,5 @@ def collect_paths_api(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Path collection error: {e}")
+        logger.exception("Path collection error")
         raise HTTPException(status_code=500, detail=str(e)) from e

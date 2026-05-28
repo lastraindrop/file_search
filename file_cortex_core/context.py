@@ -2,9 +2,13 @@
 """Context generation and noise reduction for FileCortex."""
 
 import pathlib
+from typing import Final
 
 from .config import logger
 from .file_io import FileUtils
+
+MAX_EXPORT_FILES: Final = 500
+MAX_TOTAL_CONTENT_BYTES: Final = 50 * 1024 * 1024  # 50 MB
 
 
 class NoiseReducer:
@@ -59,6 +63,7 @@ class ContextFormatter:
         manual_excludes: list[str] | None = None,
         use_gitignore: bool = True,
         apply_noise_reducer: bool = False,
+        max_files: int = MAX_EXPORT_FILES,
     ) -> str:
         """Converts files to markdown format.
 
@@ -69,6 +74,7 @@ class ContextFormatter:
             manual_excludes: Exclusion patterns.
             use_gitignore: Whether to respect .gitignore.
             apply_noise_reducer: Whether to apply noise reduction to content.
+            max_files: Maximum number of files to include (OOM protection).
 
         Returns:
             Markdown formatted string.
@@ -77,13 +83,32 @@ class ContextFormatter:
             paths, root_dir, manual_excludes, use_gitignore
         )
 
+        if len(all_files) > max_files:
+            logger.warning(
+                f"Export truncated: {len(all_files)} files found, "
+                f"limiting to {max_files}."
+            )
+            all_files = all_files[:max_files]
+
         blocks = []
+        total_bytes = 0
         if prompt_prefix:
             blocks.append(f"{prompt_prefix}\n\n---\n\n")
 
         root = pathlib.Path(root_dir).resolve() if root_dir else None
 
         for f_str in all_files:
+            if total_bytes >= MAX_TOTAL_CONTENT_BYTES:
+                logger.warning(
+                    f"Export truncated at {total_bytes} bytes "
+                    f"(limit: {MAX_TOTAL_CONTENT_BYTES})."
+                )
+                blocks.append(
+                    f"\n> [Export truncated: reached {MAX_TOTAL_CONTENT_BYTES // (1024*1024)}MB "
+                    f"content limit. {len(all_files) - len(blocks)} files skipped.]\n"
+                )
+                break
+
             p = pathlib.Path(f_str)
             if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
                 continue
@@ -103,10 +128,11 @@ class ContextFormatter:
                 if apply_noise_reducer:
                     content = NoiseReducer.clean(content)
 
+                total_bytes += len(content.encode("utf-8", errors="replace"))
                 header = f"File: {rel_path} ({size_kb:.1f} KB)\n"
                 blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
-            except Exception as e:
-                logger.error(f"Failed to format file {f_str} for context: {e}")
+            except Exception:
+                logger.exception(f"Failed to format file {f_str} for context")
 
         return "".join(blocks)
 
@@ -119,6 +145,7 @@ class ContextFormatter:
         use_gitignore: bool = True,
         include_blueprint: bool = True,
         apply_noise_reducer: bool = True,
+        max_files: int = MAX_EXPORT_FILES,
     ) -> str:
         """Converts files to XML format with CDATA and optional blueprint.
 
@@ -130,6 +157,7 @@ class ContextFormatter:
             use_gitignore: Whether to respect .gitignore.
             include_blueprint: Whether to include project structure blueprint.
             apply_noise_reducer: Whether to apply noise reduction to content.
+            max_files: Maximum number of files to include (OOM protection).
 
         Returns:
             XML formatted string.
@@ -138,7 +166,15 @@ class ContextFormatter:
             paths, root_dir, manual_excludes, use_gitignore
         )
 
+        if len(all_files) > max_files:
+            logger.warning(
+                f"Export truncated: {len(all_files)} files found, "
+                f"limiting to {max_files}."
+            )
+            all_files = all_files[:max_files]
+
         blocks = []
+        total_bytes = 0
         if prompt_prefix:
             blocks.append(f"<instruction>\n{prompt_prefix}\n</instruction>\n\n")
 
@@ -154,6 +190,17 @@ class ContextFormatter:
         blocks.append("<context>\n")
 
         for f_str in all_files:
+            if total_bytes >= MAX_TOTAL_CONTENT_BYTES:
+                logger.warning(
+                    f"Export truncated at {total_bytes} bytes "
+                    f"(limit: {MAX_TOTAL_CONTENT_BYTES})."
+                )
+                blocks.append(
+                    f"  <!-- Export truncated: reached "
+                    f"{MAX_TOTAL_CONTENT_BYTES // (1024*1024)}MB limit. -->\n"
+                )
+                break
+
             p = pathlib.Path(f_str)
             if not p.exists() or not p.is_file() or FileUtils.is_binary(p):
                 continue
@@ -170,6 +217,8 @@ class ContextFormatter:
                 content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
                 if apply_noise_reducer:
                     content = NoiseReducer.clean(content)
+
+                total_bytes += len(content.encode("utf-8", errors="replace"))
 
                 safe_content = content.replace("]]>", "]]]]><![CDATA[>")
 

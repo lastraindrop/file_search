@@ -104,6 +104,6 @@ def get_children(path_str: str, dm: DataManager | None = None) -> list[dict[str,
                 children.append(get_node_info(pathlib.Path(entry.path), project_root))
     except (PermissionError, OSError):
         logger.error(f"Permission denied for directory: {path_str}")
-    except Exception as e:
-        logger.error(f"Error listing children for {path_str}: {e}")
+    except Exception:
+        logger.exception(f"Error listing children for {path_str}")
     return children

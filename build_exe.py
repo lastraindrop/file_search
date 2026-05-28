@@ -13,7 +13,7 @@ import os
 import shutil
 
 
-def build():
+def main() -> None:
     """Builds the desktop executable using PyInstaller."""
     # 确保在当前目录下运行
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,4 +63,4 @@ def build():
         os.remove(spec_file)
 
 if __name__ == "__main__":
-    build()
+    main()

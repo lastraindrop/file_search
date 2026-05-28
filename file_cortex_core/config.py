@@ -4,6 +4,8 @@
 Manages application and project configuration with atomic persistence.
 """
 
+from __future__ import annotations
+
 import contextlib
 import json
 import logging
@@ -13,6 +15,7 @@ import pathlib
 import tempfile
 import threading
 import time
+from collections.abc import Generator
 from typing import Any, Final
 
 from pydantic import BaseModel, Field
@@ -23,6 +26,7 @@ from .security import PathValidator
 APP_NAME: Final = "FileCortex"
 MAX_LOG_SIZE: Final = 10 * 1024 * 1024  # 10MB
 BACKUP_COUNT: Final = 5
+MAX_SAVE_RETRIES: Final = 5
 
 
 class SearchSettings(BaseModel):
@@ -154,8 +158,8 @@ def get_app_dir() -> pathlib.Path:
     app_dir = home / ".filecortex"
     try:
         app_dir.mkdir(exist_ok=True)
-    except OSError as e:
-        logger.error(f"Failed to create app directory: {e}")
+    except OSError:
+        logger.exception("Failed to create app directory")
     return app_dir
 
 
@@ -179,7 +183,7 @@ class DataManager:
     testing and dependency injection scenarios.
     """
 
-    _instance: "DataManager | None" = None
+    _instance: DataManager | None = None
     _lock: threading.RLock = threading.RLock()
 
     MUTABLE_SETTINGS: Final = frozenset(
@@ -193,7 +197,7 @@ class DataManager:
         }
     )
 
-    def __new__(cls) -> "DataManager":
+    def __new__(cls) -> DataManager:
         """Creates or returns the singleton instance.
 
         For dependency injection scenarios where a standalone instance is
@@ -214,7 +218,7 @@ class DataManager:
         self.load()
 
     @classmethod
-    def create(cls) -> "DataManager":
+    def create(cls) -> DataManager:
         """Creates a standalone DataManager instance (non-singleton).
 
         Useful for dependency injection, testing, and scenarios where
@@ -240,7 +244,9 @@ class DataManager:
 
     @classmethod
     @contextlib.contextmanager
-    def activate(cls, instance: "DataManager | None" = None):
+    def activate(
+        cls, instance: DataManager | None = None
+    ) -> Generator[DataManager, None, None]:
         """Temporarily sets a DataManager instance as the active singleton.
 
         Args:
@@ -296,8 +302,8 @@ class DataManager:
                             norm_k = PathValidator.norm_path(k)
                             if norm_k:
                                 normalized_projects[norm_k] = v
-                        except Exception as e:
-                            logger.error(f"Failed to normalize project key '{k}': {e}")
+                        except Exception:
+                            logger.exception(f"Failed to normalize project key '{k}'")
                     raw_data["projects"] = normalized_projects
 
                 # Validate against schema
@@ -321,8 +327,8 @@ class DataManager:
                     if p
                 ]
 
-            except Exception as e:
-                logger.error(f"Failed to load or validate configuration: {e}")
+            except Exception:
+                logger.exception("Failed to load or validate configuration")
 
     def save(self) -> None:
         """Atomically persists the current configuration to disk."""
@@ -344,21 +350,21 @@ class DataManager:
                     f.write(data_json)
 
                 # Atomic replacement with retries for Windows locking issues
-                for attempt in range(BACKUP_COUNT):
+                for attempt in range(MAX_SAVE_RETRIES):
                     try:
                         os.replace(temp_path, config_file)
                         temp_path = None
                         break
                     except PermissionError:
-                        if attempt == BACKUP_COUNT - 1:
+                        if attempt == MAX_SAVE_RETRIES - 1:
                             raise
                         time.sleep(0.05 * (attempt + 1))
 
-            except Exception as e:
+            except Exception:
                 if temp_path and os.path.exists(temp_path):
                     with contextlib.suppress(Exception):
                         os.unlink(temp_path)
-                logger.error(f"Failed to save configuration: {e}")
+                logger.exception("Failed to save configuration")
                 raise
 
     def add_to_recent(self, path: str) -> None:

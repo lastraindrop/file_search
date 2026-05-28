@@ -9,6 +9,7 @@ import os
 import pathlib
 import queue
 import re
+import sys
 import threading
 from collections.abc import Generator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -26,7 +27,10 @@ DEFAULT_MAX_SIZE_MB: Final = 5
 
 # Shared resource for parallel content search
 SHARED_SEARCH_POOL: Final = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
-atexit.register(SHARED_SEARCH_POOL.shutdown, wait=True)
+atexit.register(
+    SHARED_SEARCH_POOL.shutdown, wait=False,
+    **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
+)
 
 
 class SearchQuery(BaseModel):
@@ -158,8 +162,8 @@ class ContentMatcher:
                     break
 
             return (found != self.query.is_inverse), snippet
-        except Exception as e:
-            logger.error(f"Content search error in {path}: {e}")
+        except Exception:
+            logger.exception(f"Content search error in {path}")
             return False, ""
 
 
@@ -330,7 +334,7 @@ class SearchWorker(threading.Thread):
         negative_tags: list[str] | None = None,
     ) -> None:
         """Initializes the background worker."""
-        super().__init__()
+        super().__init__(daemon=True)
         self.root_dir = root_dir
         self.search_text = search_text
         self.search_mode = search_mode
@@ -345,7 +349,6 @@ class SearchWorker(threading.Thread):
         self.max_size_mb = max_size_mb
         self.positive_tags = positive_tags
         self.negative_tags = negative_tags
-        self.daemon = True
 
     def run(self) -> None:
         """Executes the search and feeds the result queue."""

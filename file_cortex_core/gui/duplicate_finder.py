@@ -167,11 +167,11 @@ class DuplicateFinderWindow(tk.Toplevel):
                         )
                 except queue.Empty:
                     break
-                except Exception as e:
-                    logger.error(f"Duplicate result processing error: {e}")
+                except Exception:
+                    logger.exception("Duplicate result processing error")
                     continue
-        except Exception as e:
-            logger.error(f"Poll results loop failure: {e}")
+        except Exception:
+            logger.exception("Poll results loop failure")
 
         self.after(200, self.poll_results)
 
@@ -191,7 +191,11 @@ class DuplicateFinderWindow(tk.Toplevel):
             items = []
             for child in children:
                 vals = self.tree.item(child)["values"]
-                items.append((float(vals[3]), child))
+                if vals and len(vals) > 3:
+                    try:
+                        items.append((float(vals[3]), child))
+                    except (ValueError, TypeError):
+                        continue
 
             # Sort by time
             items.sort(key=lambda x: x[0])

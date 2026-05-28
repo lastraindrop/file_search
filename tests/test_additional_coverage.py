@@ -294,4 +294,4 @@ class TestConfigEdgeCases:
             p = tmp_path / f"proj_{i}"
             p.mkdir(exist_ok=True)
             dm.add_to_recent(str(p))
-        assert len(dm.data["recent_projects"]) <= 15
+        assert len(dm.config.recent_projects) <= 15

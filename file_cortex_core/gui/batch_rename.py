@@ -4,6 +4,7 @@
 import pathlib
 import re
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import (
     messagebox,
     ttk,
@@ -20,7 +21,7 @@ class BatchRenameWindow(tk.Toplevel):
         parent: tk.Tk,
         project_root: pathlib.Path,
         selected_paths: list[pathlib.Path],
-        callback=None,
+        callback: Callable[[], None] | None = None,
     ) -> None:
         """Initializes the batch rename window.
 

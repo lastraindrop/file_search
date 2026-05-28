@@ -100,7 +100,7 @@
             </div>
         </section>
 
-        <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light" style="display:none !important;">
+        <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center" style="display:none;">
             <div>
                 <input type="checkbox" id="selectAllCb" class="form-check-input me-1" onchange="App.toggleSelectAll(this.checked)">
                 <small id="selectedCount" class="fw-bold text-primary">0</small>
@@ -178,7 +178,7 @@
                     </div>
                 </div>
 
-                <div id="noteOverlay" class="glass-panel p-3 m-3 position-absolute start-0 end-0 translate-middle-y shadow-lg" style="display:none; z-index:100; top: 100px;">
+                <div id="noteOverlay" class="glass-panel p-3 m-3 position-absolute start-50 translate-middle-x shadow-lg" style="display:none; z-index:100; top: 80px; width: 90%; max-width: 500px;">
                     <h6>File Notes</h6>
                     <textarea id="noteInput" class="form-control mb-2" rows="3"></textarea>
                     <div class="d-flex justify-content-end gap-2">

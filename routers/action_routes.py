@@ -152,7 +152,7 @@ def api_stage_all(
         added = dm.batch_stage(root, items)
         return {"status": "ok", "added_count": added}
     except Exception as e:
-        logger.error(f"Stage All failed: {e}")
+        logger.exception("Stage All failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

@@ -5,17 +5,17 @@ const App = {
     state,
     config,
     escapeHtml,
-    
+
     // API Bindings
     ...api,
-    
+
     // UI Bindings
     ...ui,
 
     init: async () => {
         await App.loadGlobalSettings();
         await App.loadWorkspaces();
-        
+
         const searchInput = document.getElementById('searchInput');
         let searchTimer;
         if (searchInput) {
@@ -34,7 +34,7 @@ const App = {
                 }
             });
         }
-        
+
         // Context Menu Handler
         window.addEventListener('click', () => App.hideContextMenu());
         window.addEventListener('contextmenu', (e) => {
@@ -44,7 +44,7 @@ const App = {
                 App.showContextMenu(e, target.getAttribute('data-path'));
             }
         });
-        
+
         // Editor Shortcuts
         const editor = document.getElementById('codeEditor');
         if (editor) {
@@ -62,7 +62,7 @@ const App = {
                 }
             });
         }
-        
+
         // Global Shortcuts
         window.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 's') {
@@ -87,7 +87,7 @@ const App = {
         const excludeIn = document.getElementById('excludeInput');
         if (savedExcludes && excludeIn) excludeIn.value = savedExcludes;
         App.restoreSearchUiState();
-        
+
         ['searchMode', 'searchIncludeDirs', 'searchCaseSensitive', 'searchInverse', 'excludeInput', 'searchInput']
             .forEach((id) => {
                 const el = document.getElementById(id);
@@ -98,11 +98,11 @@ const App = {
                     App.updateWorkspaceSummary();
                 });
             });
-        
+
         // Restore sidebar state
         const sidebarState = localStorage.getItem(App.config.storageKeys.sidebarExpanded);
         if (sidebarState === 'true') App.toggleSidebar();
-        
+
         // Auto-load last project if exists
         const lastProj = localStorage.getItem(App.config.storageKeys.lastProjectPath);
         if (lastProj) {
@@ -180,10 +180,10 @@ const App = {
             const pathInput = document.getElementById('projectPath');
             if (pathInput) pathInput.value = p;
             localStorage.setItem(App.config.storageKeys.lastProjectPath, p);
-            
+
             App.state.projConfig = await api.fetchProjectConfig(p);
             App.state.collectionProfiles = App.state.projConfig.collection_profiles || {};
-            
+
             // Restore UI Settings from Config
             if (App.state.projConfig.excludes) {
                 const exInput = document.getElementById('excludeInput');
@@ -201,7 +201,7 @@ const App = {
                 if (dirCb) dirCb.checked = Boolean(searchSettings.include_dirs);
             }
             App.persistSearchUiState();
-            
+
             App.updateTemplateList();
             App.updateProfileList();
             App.state.staging = new Set(App.state.projConfig.staging_list || []);
@@ -310,7 +310,8 @@ const App = {
     _createKeyValueRow: (prefix, key, value) => {
         const row = document.createElement('div');
         row.className = 'd-flex gap-1 mb-1 align-items-center';
-        row.id = `kv-row-${prefix}-${key}`;
+        const safeId = `${prefix}_${key}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        row.id = `kv-row-${safeId}`;
         row.innerHTML = `
             <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-key" style="width:30%" value="${App.escapeHtml(key)}" placeholder="Name">
             <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-value" style="width:55%" value="${App.escapeHtml(value)}" placeholder="Value">
@@ -401,14 +402,14 @@ const App = {
 
         const codeEl = document.getElementById('codePreview');
         codeEl.innerText = "Loading...";
-        
+
         try {
             const data = await api.fetchContent(path);
             App.state.rawContent = data.content;
-            
+
             const ext = getFileExt(path);
             codeEl.className = 'hljs h-100 d-block p-4';
-            
+
             if (ext === 'md') {
                 const rawHtml = marked.parse(data.content);
                 const tempDiv = document.createElement('div');
@@ -653,6 +654,9 @@ const App = {
         const leftToggle = document.getElementById('toggle-searchResults');
         if (leftToggle) leftToggle.innerHTML = '&#9662;';
 
+        const leftList = document.getElementById('searchResultsList');
+        if (leftList) leftList.innerHTML = '';
+
         const overlay = document.getElementById('searchOverlay');
         const list = document.getElementById('searchOverlayList');
         const count = document.getElementById('searchOverlayCount');
@@ -737,17 +741,17 @@ const App = {
 
     executeToolOnStaged: async (toolName) => {
         if (App.state.staging.size === 0) return ui.showToast("Add files to staging first.", 'warning');
-        
+
         const modalWrapper = document.getElementById('toolResultModal');
         const modalBody = document.getElementById('toolResultModalBody');
         const modalHeader = document.querySelector('#toolResultModal .modal-header');
-        
+
         const bsModal = new bootstrap.Modal(modalWrapper);
         bsModal.show();
 
         const paths = Array.from(App.state.staging);
         modalBody.innerHTML = `<div class="p-4 text-center">Preparing to execute ${App.escapeHtml(toolName)} on ${paths.length} items...</div>`;
-        
+
         let stopBtn = document.getElementById('btnStopTool');
         if (!stopBtn) {
             stopBtn = document.createElement('button');
@@ -779,17 +783,17 @@ const App = {
             const path = paths[index];
             const fileName = getFileName(path);
             const logId = `tool-log-${index}`;
-            
+
             modalBody.innerHTML += `<div class="p-2 border-bottom border-secondary x-small text-muted bg-dark">(${index+1}/${paths.length}) Executing on: ${App.escapeHtml(fileName)}</div>
                                    <pre id="${logId}" class="m-0 p-3" style="background:#000; color:#0f0; font-family:monospace; min-height:150px; white-space:pre-wrap; font-size: 12px;"></pre>`;
-            
+
             const outputDiv = document.getElementById(logId);
             const wsUrl = buildWsUrl(config.endpoints.wsExecute, {
                 project_path: App.state.projectPath,
                 tool_name: toolName,
                 path: path
             });
-            
+
             return new Promise((resolve) => {
                 const socket = new WebSocket(wsUrl);
                 socket.onmessage = (event) => {
@@ -895,7 +899,9 @@ const App = {
 
     addToFavorites: async () => {
         if (!App.state.currentFile) return;
-        const group = document.getElementById('favGroupSelect').value || "Default";
+        const select = document.getElementById('favGroupSelect');
+        let group = "Default";
+        if (select && select.value) group = select.value;
         await App.toggleFavorite(App.state.currentFile, 'add', group);
     },
 
@@ -1055,11 +1061,7 @@ const App = {
         if (countLabel) countLabel.innerText = count;
         const bulkActions = document.getElementById('bulkActions');
         if (bulkActions) {
-            if (count > 0) {
-                bulkActions.style.setProperty('display', 'flex', 'important');
-            } else {
-                bulkActions.style.setProperty('display', 'none', 'important');
-            }
+            bulkActions.style.display = count > 0 ? 'flex' : 'none';
         }
     },
 
@@ -1138,9 +1140,7 @@ const App = {
     stageAll: async () => {
         if (!App.state.projectPath) return;
         try {
-            const settings = App.getSearchUiSettings();
-            const mode = settings.mode === 'content' ? 'files' : settings.mode;
-            const data = await api.stageAll(App.state.projectPath, mode, true);
+            const data = await api.stageAll(App.state.projectPath, 'files', true);
             await App.refreshProject();
             ui.showToast(`Staged ${data.added_count} files`);
         } catch (e) { ui.showToast("Stage All failed: " + e.message, 'danger'); }
@@ -1198,9 +1198,15 @@ const App = {
         state.contextPath = path;
         const menu = document.getElementById('customContextMenu');
         if (menu) {
+            let left = e.clientX;
+            let top = e.clientY;
+            const menuW = 180;
+            const menuH = 200;
+            if (left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
+            if (top + menuH > window.innerHeight) top = window.innerHeight - menuH - 10;
             menu.style.display = 'block';
-            menu.style.left = e.clientX + 'px';
-            menu.style.top = e.clientY + 'px';
+            menu.style.left = Math.max(0, left) + 'px';
+            menu.style.top = Math.max(0, top) + 'px';
         }
     },
 
@@ -1213,15 +1219,15 @@ const App = {
     ctxAction: async (action) => {
         const path = state.contextPath;
         if (!path) return;
-        
+
         switch (action) {
-            case 'stage': 
+            case 'stage':
                 App.state.staging.add(path);
                 ui.renderStaging();
                 App.syncStagingToBackend();
                 ui.showToast("Added to Staging");
                 break;
-            case 'fav': 
+            case 'fav':
                 const savedFile = App.state.currentFile;
                 App.state.currentFile = path;
                 await App.addToFavorites();
