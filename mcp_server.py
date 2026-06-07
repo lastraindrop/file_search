@@ -168,9 +168,15 @@ async def register_workspace(
     Returns:
         A confirmation message with the registered path.
     """
-    path = PathValidator.norm_path(project_path)
-    if not os.path.isdir(path):
-        return f"Error: Path '{path}' does not exist or is not a directory."
+    try:
+        validated = PathValidator.validate_project(project_path)
+        path = str(validated)
+    except FileNotFoundError as e:
+        return f"Error: {e}"
+    except NotADirectoryError as e:
+        return f"Error: {e}"
+    except PermissionError as e:
+        return f"Error: {e}"
 
     root = get_dm().resolve_project_root(path)
     if root:

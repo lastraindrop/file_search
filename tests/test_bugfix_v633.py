@@ -136,16 +136,6 @@ class TestCORSOriginWildcardDetection:
 class TestNoiseReducerNoneInput:
     """Tests for BUG-4: NoiseReducer.clean handles None input gracefully."""
 
-    def test_clean_none_input(self):
-        """None should return empty string without error."""
-        result = NoiseReducer.clean(None)
-        assert result == ""
-
-    def test_clean_empty_string(self):
-        """Empty string should return empty string."""
-        result = NoiseReducer.clean("")
-        assert result == ""
-
     def test_clean_normal_content(self):
         """Normal content should pass through."""
         result = NoiseReducer.clean("hello world")

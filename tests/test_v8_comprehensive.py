@@ -599,9 +599,9 @@ class TestWebAPIBoundary:
         res = api_client.get("/api/content", params={"path": str(f)})
         assert res.status_code == 403
 
-    def test_api_generate_with_empty_files(self, api_client, mock_project):
-        """Generate endpoint handles empty file list."""
-        res = api_client.post(
+    def test_api_generate_with_empty_files(self, project_client, mock_project):
+        """Generate endpoint handles empty file list with registered project."""
+        res = project_client.post(
             "/api/generate",
             json={
                 "files": [],

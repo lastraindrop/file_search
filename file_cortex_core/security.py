@@ -66,6 +66,12 @@ class PathValidator:
 
                 target_norm = ntpath.normpath(target_norm_raw).replace("/", "\\").lower()
 
+                # Resolve symlinks to prevent symlink traversal attacks
+                root_norm = str(pathlib.Path(root_norm).resolve()).replace("/", "\\").lower()
+                target_norm = (
+                    str(pathlib.Path(target_norm).resolve()).replace("/", "\\").lower()
+                )
+
                 # Boundary check
                 root_prefix = root_norm.rstrip("\\") + "\\"
                 return target_norm == root_norm or target_norm.startswith(root_prefix)
@@ -78,6 +84,10 @@ class PathValidator:
                 target_norm_raw = os.path.join(root_norm, target_norm_raw)
 
             target_norm = os.path.abspath(target_norm_raw)
+
+            # Resolve symlinks to prevent symlink traversal attacks
+            root_norm = str(pathlib.Path(root_norm).resolve())
+            target_norm = str(pathlib.Path(target_norm).resolve())
 
             root_prefix = root_norm.rstrip(os.sep) + os.sep
             return target_norm == root_norm or target_norm.startswith(root_prefix)

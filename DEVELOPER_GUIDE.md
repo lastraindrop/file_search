@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.5.0 | **更新日期**: 2026-05-29 | **测试**: 597 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.0 | **更新日期**: 2026-06-07 | **测试**: 629 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -88,7 +88,7 @@ routers/
 
 ### 2.1 自动化检查
 1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则 + Google pydocstyle)
-2. **Pytest**: `python -m pytest` (验证 **597** 项核心测试)
+2. **Pytest**: `python -m pytest` (验证 **629** 项核心测试)
 
 ### 2.2 Docstrings 样例
 ```python
@@ -211,3 +211,14 @@ tests/
 | **弃用 API** | 14 处 `dm.data[...]` → `dm.config.xxx` 迁移 |
 | **硬编码** | 版本号 `"6.5.0"` → `core_version` 动态导入；默认值 `== 128000` → `GlobalSettings()` |
 | **线程安全** | `SearchWorker`/`DuplicateWorker` daemon=True 构造器传参 |
+
+### v6.5.0 安全加固与前端优化 (2026-06-07)
+
+| 类别 | 变更摘要 |
+|------|----------|
+| **安全修复** | 5 项：符号链接遍历防护 (BUG-1)、访问控制绕过修复 (BUG-2)、DataManager 线程安全 (BUG-3/4)、MCP/CLI 入口统一验证 (BUG-5/11) |
+| **后端修复** | 3 项：不可达代码移除 (BUG-6)、stats 内存限制 (BUG-7)、ProcessManager 封装 (BUG-8) |
+| **前端 XSS** | DOMPurify 3.1.6 + SRI 替代手工过滤 (BUG-MD-XSS) |
+| **前端优化** | 8 项：Ctrl+S 双保存、三栏布局 11/12→12/12、搜索 snippet、模态框堆叠、100dvh、CSS 变量统一、侧边栏单一数据源、状态管理清理 |
+| **测试整合** | 6 精确重复项移除；Web API 3→1 文件合并；硬编码值动态化；+38 安全测试 (test_security_fixes_v650.py) |
+| **测试** | +32 项 (总计 629) / 文件 23→21 / ruff 0 errors / 全部通过 |

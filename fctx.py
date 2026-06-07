@@ -7,7 +7,6 @@ executing custom tools, searching files, and exporting AI context.
 
 import argparse
 import contextlib
-import os
 import pathlib
 import sys
 
@@ -41,15 +40,17 @@ def _resolve_project(data_mgr: DataManager, project: str) -> str | None:
 
 def cmd_open(args: argparse.Namespace, data_mgr: DataManager) -> None:
     """Handles the 'open' subcommand."""
-    abs_path = PathValidator.norm_path(args.path)
-    if not os.path.exists(abs_path):
-        print(f"ERROR: Path '{abs_path}' does not exist.")
+    try:
+        validated = PathValidator.validate_project(args.path)
+        abs_path = str(validated)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
         return
-    if not os.path.isdir(abs_path):
-        print(f"ERROR: Path '{abs_path}' is not a directory.")
+    except NotADirectoryError as e:
+        print(f"ERROR: {e}")
         return
-    if not PathValidator.is_safe(abs_path, os.path.abspath(os.sep)):
-        print(f"ERROR: Cannot register unsafe system directory: {abs_path}")
+    except PermissionError as e:
+        print(f"ERROR: {e}")
         return
 
     data_mgr.add_to_recent(abs_path)

@@ -19,7 +19,7 @@ from file_cortex_core import (
     FormatUtils,
     logger,
 )
-from routers.common import ACTIVE_PROCESSES, PROCESS_LOCK, register_process, unregister_process
+from routers.common import process_manager, register_process, unregister_process
 from routers.schemas import (
     CategorizeRequest,
     GenerateRequest,
@@ -48,7 +48,12 @@ def generate_context(
     noise_reducer = dm.config.global_settings.enable_noise_reducer or req.apply_noise_reducer
     if req.project_path:
         root, proj_config = get_project_config_for_path(req.project_path, dm)
-        final_root = root if root else req.project_path
+        if not root:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied (Project path not registered)",
+            )
+        final_root = root
         prompt_prefix = None
         if proj_config and req.template_name:
             prompt_prefix = proj_config.get("prompt_templates", {}).get(
@@ -106,7 +111,9 @@ def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str,
         p = pathlib.Path(f_str)
         if p.is_file() and p.exists() and not FileUtils.is_binary(p):
             try:
-                total_tokens += FormatUtils.estimate_tokens(FileUtils.read_text_smart(p))
+                total_tokens += FormatUtils.estimate_tokens(
+                    FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
+                )
             except Exception as e:
                 logger.debug(f"Stats calculation failed for {f_str}: {e}")
 
@@ -248,24 +255,23 @@ def api_execute_tool(
 @action_router.post("/api/actions/terminate")
 def api_terminate_process(req: ProcessTerminateRequest) -> dict[str, Any]:
     """Terminates a running process."""
-    with PROCESS_LOCK:
-        proc = ACTIVE_PROCESSES.get(req.pid)
-        if not proc:
-            return {
-                "status": "error",
-                "msg": "Process not found or already finished",
-            }
+    proc = process_manager.get(req.pid)
+    if not proc:
+        return {
+            "status": "error",
+            "msg": "Process not found or already finished",
+        }
 
-        logger.info(f"AUDIT - Terminating process {req.pid}")
+    logger.info(f"AUDIT - Terminating process {req.pid}")
+    try:
+        from file_cortex_core.process_utils import terminate_process
+
+        terminate_process(req.pid)
+        return {"status": "ok"}
+    except Exception as e:
         try:
-            from file_cortex_core.process_utils import terminate_process
-
-            terminate_process(req.pid)
-            return {"status": "ok"}
-        except Exception as e:
-            try:
-                os.kill(req.pid, signal.SIGTERM)
-                return {"status": "ok", "msg": f"killpg failed: {e}"}
-            except Exception:
-                pass
-            return {"status": "error", "msg": str(e)}
+            os.kill(req.pid, signal.SIGTERM)
+            return {"status": "ok", "msg": f"killpg failed: {e}"}
+        except Exception:
+            pass
+        return {"status": "error", "msg": str(e)}

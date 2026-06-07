@@ -58,6 +58,7 @@ const App = {
                 }
                 if (e.ctrlKey && e.key === 's') {
                     e.preventDefault();
+                    e.stopPropagation();
                     App.toggleEdit();
                 }
             });
@@ -100,6 +101,8 @@ const App = {
             });
 
         // Restore sidebar state
+        const sidebar = document.getElementById('workspaceSidebar');
+        if (sidebar) sidebar.style.width = App.config.ui.sidebarWidths.collapsed;
         const sidebarState = localStorage.getItem(App.config.storageKeys.sidebarExpanded);
         if (sidebarState === 'true') App.toggleSidebar();
 
@@ -147,13 +150,14 @@ const App = {
             App.config.storageKeys.sidebarExpanded,
             App.state.isSidebarExpanded
         );
-        // Refresh workspaces to update name/icon
-        App.loadWorkspaces();
+        // Re-render sidebar items in-place without network call
+        ui.renderWorkspaces(App._lastWorkspacesData || { pinned: [], recent: [] });
     },
 
     loadWorkspaces: async () => {
         try {
             const data = await api.loadWorkspaces();
+            App._lastWorkspacesData = data;
             ui.renderWorkspaces(data);
         } catch (e) {
             console.error(e);
@@ -173,6 +177,9 @@ const App = {
     openProject: async (path = null) => {
         const p = path || document.getElementById('projectPath').value.trim();
         if (!p) return;
+
+        App.state.selectedFiles.clear();
+        App.updateBulkUI();
 
         try {
             const data = await api.openProject(p);
@@ -412,15 +419,18 @@ const App = {
 
             if (ext === 'md') {
                 const rawHtml = marked.parse(data.content);
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = rawHtml;
-                tempDiv.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
-                tempDiv.querySelectorAll('[onerror],[onload],[onclick]').forEach(el => {
-                    el.removeAttribute('onerror');
-                    el.removeAttribute('onload');
-                    el.removeAttribute('onclick');
-                });
-                codeEl.innerHTML = tempDiv.innerHTML;
+                if (typeof DOMPurify !== 'undefined') {
+                    codeEl.innerHTML = DOMPurify.sanitize(rawHtml);
+                } else {
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = rawHtml;
+                    tempDiv.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
+                    tempDiv.querySelectorAll('[onerror],[onload],[onclick],[onmouseover],[onfocus],[ontoggle]').forEach(el => {
+                        el.remove();
+                    });
+                    tempDiv.querySelectorAll('a[href^="javascript:"]').forEach(el => el.remove());
+                    codeEl.innerHTML = tempDiv.innerHTML;
+                }
                 codeEl.classList.remove('hljs');
             } else if (ext === 'mermaid') {
                 codeEl.innerHTML = `<div class="mermaid">${App.escapeHtml(data.content)}</div>`;
@@ -703,6 +713,7 @@ const App = {
             list.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
             count.innerText = 'Error';
             document.getElementById('btnStopSearch').style.display = 'none';
+            App.state.socket = null;
         };
     },
 
@@ -766,6 +777,8 @@ const App = {
         const runNext = async (index) => {
             if (index >= paths.length) {
                 modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-success fw-bold">All ${paths.length} tasks completed.</div>`;
+                const bsToolModal = bootstrap.Modal.getInstance(modalWrapper);
+                if (bsToolModal) bsToolModal.hide();
                 ui.showActionModal({
                     title: 'Tasks Complete',
                     confirmText: 'Clear Staging',

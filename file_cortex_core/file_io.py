@@ -415,7 +415,6 @@ class FileUtils:
                 return f.read().decode("utf-8", errors="ignore")
         except Exception:
             return ""
-        return ""
 
     @staticmethod
     def get_language_tag(suffix: str) -> str:

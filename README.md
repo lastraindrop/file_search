@@ -1,6 +1,6 @@
 # FileCortex v6.5.0 (工作区编排助手)
 
-> **版本**: 6.5.0 | **日期**: 2026-05-29 | **测试**: 597 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.0 | **日期**: 2026-06-07 | **测试**: 629 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -21,6 +21,7 @@
 
 ### 性能与安全
 - **二级探测缓存**: `(path, mtime, size)` 编码探测缓存，大幅提升大规模文件读取速度。
+- **安全沙盒增强**: 符号链接遍历防护 (`Path.resolve()`)、统一入口验证 (`PathValidator.validate_project()`)
 - **内存防溢出**: 并发内容搜索 `max_bytes` 物理隔离 + 导出 OOM 保护 (500文件/50MB上限)。
 - **Token 预算预警**: UI 超阈值颜色警示。
 - **API Token 认证**: HTTP Header + WebSocket 双通道验证。
@@ -100,8 +101,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **597 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护。
-- **测试结果**: 597 passed, 0 failed
+- **629 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护。
+- **测试结果**: 629 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查

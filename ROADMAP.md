@@ -1,10 +1,41 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.0 | **更新日期**: 2026-05-29 | **测试**: 597 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.0 | **更新日期**: 2026-06-07 | **测试**: 629 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 ---
 
-## 阶段 6.5.0：Google Style 全规范审计与工程整肃 (v6.5.0 — 2026-05-29)
+## 阶段 6.5.0：安全加固、前端优化与测试整合 (v6.5.0 — 2026-06-07)
+
+### 安全修复 (Security Fixes)
+- [x] **SEC-1**: `security.py` 符号链接遍历防护 (`Path.resolve()` 解析)
+- [x] **SEC-2**: `action_routes.py` `/api/generate` 未注册项目路径 → 403
+- [x] **SEC-3**: `config.py` `activate()` 和 `resolve_project_root()` 线程安全 (RLock)
+- [x] **SEC-4**: `mcp_server.py` `register_workspace` 统一使用 `validate_project()`
+- [x] **SEC-5**: CLI `cmd_open` 统一入口验证
+
+### 前端优化 (Frontend Optimization)
+- [x] **FE-8**: Markdown 渲染 XSS 防护 (DOMPurify 3.1.6 + SRI)
+- [x] **FE-9**: Ctrl+S 双重保存竞态修复 (`stopPropagation`)
+- [x] **FE-10**: 三栏布局修复 (col-md-5→col-md-6, 11/12→12/12)
+- [x] **FE-11**: 搜索 snippet 转发 (ws_routes.py + ui.js)
+- [x] **FE-12**: 模态框堆叠修复 (toolResultModal + actionModal)
+- [x] **FE-13**: 移动端 vh-100 → 100dvh 修复
+- [x] **FE-14**: CSS 硬编码颜色统一为变量 (var(--accent)、var(--glass-blur))
+- [x] **FE-15**: 侧边栏宽度单一数据源 (移除 HTML 内联样式)
+- [x] **FE-16**: `selectedFiles` 项目切换清理、WebSocket onerror 置空、toggleSidebar 缓存
+
+### 后端修复 (Backend Fixes)
+- [x] **BUG-6**: `file_io.py` 移除不可达 `return ""`
+- [x] **BUG-7**: `action_routes.py` stats 端点内存限制 (`max_bytes=1MB`)
+- [x] **BUG-8**: `action_routes.py` ProcessManager 封装 (移除旧全局变量引用)
+- [x] **BUG-11**: `fctx.py` CLI `cmd_open` 安全验证
+
+### 测试整合 (Test Consolidation)
+- [x] **TC-1**: 6 个完全重复测试去重 (norm_path、clean_*、is_safe_*、collect_paths)
+- [x] **TC-2**: Web API 测试合并 (test_web_endpoints + test_web_api_advanced + test_api_v6 → test_web_api.py, 42 tests)
+- [x] **TC-3**: 硬编码值动态化 (128000→>0, 1.0→>0, 版本号→__version__)
+- [x] **TC-4**: 新增 38 项安全修复测试 (test_security_fixes_v650.py)
+- [x] **TC-5**: **629 passed, 0 failed** (从 597→629, +32 项; 文件数 23→21)
 
 ### P0：异常日志规范化
 - [x] **LOG-1**: 23 处 `logger.error(f"...{e}")` → `logger.exception("...")`，保留栈轨迹
@@ -111,7 +142,7 @@
 ## 阶段 7：智能化编排与插件生态 (v7.0 - 2026 Q3-Q4)
 
 ### 高优先级 (v7.0 MVP)
-- [ ] **[PLANNED] 测试文件合并优化**: 23→16 文件精简，预计 ~30% 重复率消除
+- [x] **[DONE] 测试文件合并优化**: 23→21 文件精简，重复率已消除 (~6 精确重复项移除, Web API 合并)
 - [ ] **[PLANNED] 静态类型分析**: 集成 `mypy` 实现 100% 静态类型覆盖
 - [ ] **[PLANNED] 前端亮色主题**: 通过 CSS 变量实现亮色/暗色主题切换
 - [ ] **[PLANNED] 拖拽支持**: 实现文件拖拽到 Staging 面板
@@ -140,7 +171,8 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.5.0** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
+| **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
+| **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
 | **6.4.0** | **2026-05-24** | **14 类型标注, process_utils 提取, 3 处 XSS 修复, api.js 集中化, 前端可折叠面板, SRI 哈希, tag 管理, file 创建, actionModal, 479 passed** |
 | 6.3.3 | 2026-05-16 | 8 项 BUG 修复, Google Style 整肃, 24 新测试, 372 passed |
 | 6.3.2 | 2026-05-14 | 8 项 BUG 修复, DataManager DI, 路由拆分, walk_filtered, 348 passed |

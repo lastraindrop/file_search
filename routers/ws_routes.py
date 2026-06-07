@@ -94,6 +94,7 @@ async def websocket_search(
                         "mtime": res_dict["mtime"],
                         "mtime_fmt": res_dict.get("mtime_fmt", ""),
                         "ext": res_dict["ext"],
+                        "snippet": res_dict.get("snippet", ""),
                     },
                 )
         finally:

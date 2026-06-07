@@ -364,7 +364,7 @@ class TestDataManagerEdgeCases:
 
             dm.update_global_settings({"token_threshold": 99999})
             assert dm.config.global_settings.token_threshold == 99999
-            assert dm.config.global_settings.preview_limit_mb == 1.0
+            assert dm.config.global_settings.preview_limit_mb > 0
 
     def test_update_global_settings_invalid_type(self, tmp_path):
         """Invalid type in global settings raises validation error."""

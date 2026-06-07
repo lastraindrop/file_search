@@ -17,7 +17,7 @@
         </div>
     </noscript>
 
-    <div class="container-fluid app-shell vh-100 d-flex flex-column p-0">
+    <div class="container-fluid app-shell vh-100 d-flex flex-column p-0" style="height: 100dvh;">
         <nav class="navbar navbar-expand-lg navbar-dark px-3 py-2 flex-shrink-0">
             <a class="navbar-brand fw-bold" href="#" style="color: var(--accent); letter-spacing: -0.5px;">
                 FileCortex
@@ -114,7 +114,7 @@
         </div>
 
         <div class="row g-0 flex-grow-1 overflow-hidden app-main-row">
-            <aside id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="width: 60px; transition: width 0.3s;">
+            <aside id="workspaceSidebar" class="col-auto glass-panel border-end d-flex flex-column h-100 p-2" style="transition: width 0.3s;">
                 <button class="btn btn-outline-light btn-sm mb-3" onclick="App.toggleSidebar()" title="Toggle Sidebar">View</button>
                 <div class="sidebar-section-label">Pinned</div>
                 <div id="pinnedProjectsList" class="d-flex flex-column gap-2 mb-2 border-bottom pb-2"></div>
@@ -160,7 +160,7 @@
                 </div>
             </section>
 
-            <main class="col-md-5 d-flex flex-column h-100 panel-center">
+            <main class="col-md-6 d-flex flex-column h-100 panel-center">
                 <div class="p-2 border-bottom d-flex justify-content-between align-items-center bg-transparent backdrop-blur">
                     <div class="d-flex align-items-center me-2 overflow-hidden">
                         <span id="currentFileName" class="fw-bold text-truncate text-muted italic">Waiting for selection...</span>
@@ -442,6 +442,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js" integrity="sha384-NNQgBjjuhtXzPmmy4gurS5X7P4uTt1DThyevz4Ua0IVK5+kazYQI1W27JHjbbxQz" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js" crossorigin="anonymous"></script>
     <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha384-jBbcGHiBNware7X1o40EPG8kvwD/GGGnYEN1GwbgzbS2M7fhzPUdZzFfEaHrZxlL" crossorigin="anonymous"></script>
     <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

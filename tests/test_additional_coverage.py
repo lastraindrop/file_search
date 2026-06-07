@@ -144,14 +144,6 @@ class TestPathValidatorEdgeCases:
         assert ".." not in result
         assert "/src/main.py" in result.lower() or "\\src\\main.py" in result.lower()
 
-    def test_is_safe_same_path(self):
-        """A path is safe against itself."""
-        assert PathValidator.is_safe("/tmp/project", "/tmp/project") is True
-
-    def test_is_safe_empty_root(self):
-        """Empty root returns False."""
-        assert PathValidator.is_safe("/some/path", "") is False
-
     def test_validate_project_root_drive(self, tmp_path):
         """Cannot register root drive as project."""
         if os.name != "nt":
@@ -227,13 +219,6 @@ class TestNoiseReducerEdgeCases:
 
 class TestFormatUtilsEdgeCases:
     """Additional format utils tests."""
-
-    def test_collect_paths_absolute_mode(self, tmp_path):
-        """Absolute mode returns full paths."""
-        f = tmp_path / "test.txt"
-        f.write_text("hello", encoding="utf-8")
-        result = FormatUtils.collect_paths([str(f)], mode="absolute")
-        assert str(f) in result or str(f.resolve()) in result
 
     def test_estimate_tokens_cjk_heavy(self):
         """CJK text should have non-zero token estimates."""

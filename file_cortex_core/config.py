@@ -264,12 +264,14 @@ class DataManager:
                 # All code using DataManager() will get 'dm'
                 assert DataManager().config.last_directory == "/tmp"
         """
-        old = cls._instance
-        cls._instance = instance if instance is not None else cls.create()
+        with cls._lock:
+            old = cls._instance
+            cls._instance = instance if instance is not None else cls.create()
         try:
             yield cls._instance
         finally:
-            cls._instance = old
+            with cls._lock:
+                cls._instance = old
 
     @property
     def data(self) -> dict[str, Any]:
@@ -475,17 +477,18 @@ class DataManager:
         Returns:
             The normalized project root path, or None if not found.
         """
-        try:
-            target = PathValidator.norm_path(target_path_str)
-            if not target:
-                return None
-            # Search from longest root to shortest to handle nested projects correctly
-            for p_root in sorted(self.config.projects.keys(), key=len, reverse=True):
-                if target == p_root or target.startswith(p_root.rstrip("/") + "/"):
-                    return p_root
-        except (ValueError, OSError):
-            pass
-        return None
+        with self._lock:
+            try:
+                target = PathValidator.norm_path(target_path_str)
+                if not target:
+                    return None
+                # Search from longest root to shortest to handle nested projects correctly
+                for p_root in sorted(self.config.projects.keys(), key=len, reverse=True):
+                    if target == p_root or target.startswith(p_root.rstrip("/") + "/"):
+                        return p_root
+            except (ValueError, OSError):
+                pass
+            return None
 
     def add_note(self, project_path: str, file_path: str, note: str) -> None:
         """Stores a note for a specific file."""
