@@ -13,6 +13,17 @@ from typing import Final
 
 # Constants for path validation
 UNC_PREFIXES: Final = ("\\\\", "//")
+_WIN_LONG_PREFIXES: Final = ("\\\\?\\", "?\\")
+# Windows long-path prefixes (\\\\?\\ and \\?\\) are local path escapes,
+# NOT UNC network paths. They must not be blocked by UNC checks.
+
+
+def _strip_win_long_prefix(s: str) -> str:
+    r"""Removes the Windows long-path prefix (\\?\ or ?\) if present."""
+    for pre in _WIN_LONG_PREFIXES:
+        if s.startswith(pre):
+            return s[len(pre):]
+    return s
 
 
 class PathValidator:
@@ -38,8 +49,8 @@ class PathValidator:
         if not root_path:
             return False
         try:
-            target_raw = str(target_path)
-            root_raw = str(root_path)
+            target_raw = _strip_win_long_prefix(str(target_path))
+            root_raw = _strip_win_long_prefix(str(root_path))
 
             # Detect Windows-style paths (drive letters or UNC)
             is_windows_target = (
@@ -158,6 +169,8 @@ class PathValidator:
         normalized_str = (
             str(path_str).replace("/", "\\") if sys.platform == "win32" else str(path_str)
         )
+        # BUG-C3 fix: strip long-path prefix BEFORE UNC check.
+        normalized_str = _strip_win_long_prefix(normalized_str)
 
         if sys.platform == "win32" and normalized_str.startswith("\\\\"):
             raise PermissionError(

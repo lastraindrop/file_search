@@ -4,7 +4,24 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+MAX_DICT_JSON_BYTES = 100_000
+
+
+def _validate_dict_size(v: dict[str, Any]) -> dict[str, Any]:
+    """Rejects oversized dicts to prevent storage exhaustion (BUG-W9)."""
+    import json
+
+    try:
+        serialized = json.dumps(v, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Dict not JSON-serializable: {e}") from e
+    if len(serialized.encode("utf-8")) > MAX_DICT_JSON_BYTES:
+        raise ValueError(
+            f"Dict too large: {len(serialized)} bytes > {MAX_DICT_JSON_BYTES} limit"
+        )
+    return v
 
 
 class ProjectOpenRequest(BaseModel):
@@ -24,7 +41,7 @@ class StageAllRequest(BaseModel):
 class GenerateRequest(BaseModel):
     """Request model for generating file context."""
 
-    files: list[str]
+    files: list[str] = Field(..., max_length=1000)
     project_path: str | None = None
     template_name: str | None = None
     export_format: str = "markdown"
@@ -44,19 +61,20 @@ class FileDeleteRequest(BaseModel):
     """Request model for deleting files."""
 
     project_path: str
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
 
 
 class FileMoveRequest(BaseModel):
     """Request model for moving files."""
 
-    src_paths: list[str]
+    src_paths: list[str] = Field(..., max_length=1000)
     dst_dir: str
 
 
 class FileSaveRequest(BaseModel):
     """Request model for saving file content."""
 
+    project_path: str | None = None
     path: str
     content: str = Field(..., max_length=10_000_000)
 
@@ -72,7 +90,7 @@ class FileCreateRequest(BaseModel):
 class FileArchiveRequest(BaseModel):
     """Request model for archiving files."""
 
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     output_name: str
     project_root: str
 
@@ -95,7 +113,7 @@ class NoteRequest(BaseModel):
 
     project_path: str
     file_path: str
-    note: str
+    note: str = Field(..., max_length=10_000)
 
 
 class TagRequest(BaseModel):
@@ -124,7 +142,7 @@ class FavoriteRequest(BaseModel):
 
     project_path: str
     group_name: str
-    file_paths: list[str]
+    file_paths: list[str] = Field(..., max_length=1000)
     action: Literal["add", "remove"]
 
 
@@ -134,12 +152,22 @@ class SessionRequest(BaseModel):
     project_path: str
     data: dict[str, Any]
 
+    @field_validator("data")
+    @classmethod
+    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _validate_dict_size(v)
+
 
 class ProjectSettingsRequest(BaseModel):
     """Request model for updating project settings."""
 
     project_path: str
     settings: dict[str, Any]
+
+    @field_validator("settings")
+    @classmethod
+    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _validate_dict_size(v)
 
 
 class ToolsUpdateRequest(BaseModel):
@@ -148,6 +176,11 @@ class ToolsUpdateRequest(BaseModel):
     project_path: str
     tools: dict[str, Any]
 
+    @field_validator("tools")
+    @classmethod
+    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _validate_dict_size(v)
+
 
 class CategoriesUpdateRequest(BaseModel):
     """Request model for updating categories."""
@@ -155,11 +188,16 @@ class CategoriesUpdateRequest(BaseModel):
     project_path: str
     categories: dict[str, Any]
 
+    @field_validator("categories")
+    @classmethod
+    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _validate_dict_size(v)
+
 
 class PathCollectionRequest(BaseModel):
     """Request model for collecting and formatting paths."""
 
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     project_root: str | None = None
     mode: str = "relative"
     separator: str = "\n"
@@ -177,14 +215,14 @@ class CategorizeRequest(BaseModel):
     """Request model for categorizing files."""
 
     project_path: str
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     category_name: str
 
 
 class StatsRequest(BaseModel):
     """Request model for getting file statistics."""
 
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     project_path: str | None = None
 
 
@@ -192,7 +230,7 @@ class ToolExecuteRequest(BaseModel):
     """Request model for executing tools."""
 
     project_path: str
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     tool_name: str
 
 
@@ -200,7 +238,7 @@ class BatchRenameRequest(BaseModel):
     """Request model for batch renaming files."""
 
     project_path: str
-    paths: list[str]
+    paths: list[str] = Field(..., max_length=1000)
     pattern: str
     replacement: str
     dry_run: bool = True

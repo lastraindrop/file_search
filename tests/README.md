@@ -1,8 +1,8 @@
 # FileCortex 测试说明
 
-> **测试数**: 629 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.5.0
+> **测试数**: 652 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.5.1
 
-本项目包含 **629** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
+本项目包含 **652** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
 
 ## 测试分层架构
 
@@ -25,7 +25,8 @@
 | **上下文/MCP** | `test_context_formatter.py` + `test_mcp_server.py` | 9 | XML/MD 导出/MCP 协议 |
 | **格式化** | `test_utils_format.py` | 8 | 格式化/Token估算 |
 | **边缘覆盖** | `test_additional_coverage.py` + `test_coverage_fill.py` | 47 | 边缘覆盖/ProcessManager/ActionBridge |
-| **总计** | **21 文件** | **629** | **100% 关键路径** |
+| **v6.5.1 P0/P1** | `test_packaging.py` + `test_security_v9.py` | 23 | 打包完整性/安全回归 |
+| **总计** | **23 文件** | **652** | **100% 关键路径** |
 
 ## 参数对齐测试矩阵
 

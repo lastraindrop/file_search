@@ -227,7 +227,7 @@ class ContextFormatter:
                     f"<![CDATA[\n{safe_content}\n]]>\n  </file>\n"
                 )
             except Exception:
-                pass
+                logger.exception(f"Failed to format file {f_str} for XML context")
 
         blocks.append("</context>")
         return "".join(blocks)

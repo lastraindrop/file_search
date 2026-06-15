@@ -5,7 +5,6 @@ A Model Context Protocol server providing file search and context
 generation capabilities for AI assistants.
 """
 
-import os
 import pathlib
 from collections.abc import Callable
 
@@ -303,19 +302,16 @@ def main() -> None:
             return
         except Exception as e:
             print(f"MCP SDK run failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    print("FileCortex MCP Server initialized.")
-    print(f"Available tools: {list(mcp_server._tools.keys())}")
-
-    if not _MCP_SDK_AVAILABLE:
-        print("\nNote: MCP SDK not installed. Install with:")
-        print("  pip install mcp")
-        print("\nFallback mode: Server initialized but not running.")
-        print("To use with Claude Desktop, add this to your config:")
-        print(
-            '{ "mcpServers": { "file-cortex": { '
-            '"command": "python", "args": ["' + os.path.abspath(__file__) + '"] } } }'
-        )
+    # Mock fallback: print info and exit non-zero so callers know it's not live.
+    print("FileCortex MCP Server — FALLBACK MODE (SDK not installed).", file=sys.stderr)
+    print(f"Available tools: {list(mcp_server._tools.keys())}", file=sys.stderr)
+    print("\nMCP SDK not installed. Install with:", file=sys.stderr)
+    print('  pip install -e ".[mcp]"    (development)', file=sys.stderr)
+    print('  pip install mcp             (runtime)', file=sys.stderr)
+    print("\nServer NOT started. Exit code 2.", file=sys.stderr)
+    sys.exit(2)
 
 
 if __name__ == "__main__":

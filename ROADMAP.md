@@ -1,6 +1,39 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.0 | **更新日期**: 2026-06-07 | **测试**: 629 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 652 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+
+---
+
+## 阶段 6.5.1：部署加固与安全补强 (v6.5.1 — 2026-06-15)
+
+### 部署阻断修复 (P0)
+- [x] **BUG-D1**: `pyproject.toml` 打包缺漏 `routers` 包 → `packages` 补全
+- [x] **BUG-D2**: `mcp` SDK 未列入依赖 → 新增 `[mcp]` 可选依赖组 + README 安装说明
+- [x] **BUG-Doc5**: 无 `fctx-mcp` 控制台脚本 → `pyproject.toml [project.scripts]` 补全
+
+### 安全修复 (P0)
+- [x] **BUG-W2**: `api_categorize` 路径遍历 → 逐项 `is_path_safe` 校验
+- [x] **BUG-W1**: API Token 经 index 页泄露 → `_is_local_request` 守卫；`hmac.compare_digest`
+- [x] **BUG-F1**: mermaid CDN 缺 SRI → `integrity="sha384-6F4Ibv..."` 补齐
+
+### 安全加固与一致性 (P1)
+- [x] **BUG-W7/W9**: 无界输入字段 → 11 个 `list[str]` 加 `max_length=1000`；dict 字段加 `field_validator`
+- [x] **BUG-W10**: Token 时序侧信道 → `hmac.compare_digest`
+- [x] **BUG-W4**: WS `search_task` 孤儿线程 → `finally` 取消
+- [x] **BUG-W5**: ProcessManager PID 复用 → `register` 拒绝活跃重叠
+- [x] **BUG-W6**: `api_terminate_process` TOCTOU → 用 Popen 对象终止
+- [x] **BUG-W8**: `FileSaveRequest` 缺 `project_path` → 新增 Optional 字段
+- [x] **BUG-C1**: `to_xml` 静默吞异常 → 加 `logger.exception`
+- [x] **BUG-C2**: `archive_selection` 目录分支 `ValueError` → 逐文件 arcname 决策
+- [x] **BUG-C3**: Windows 长路径 `\\?\` 误判 UNC → 剥离后检查
+- [x] **BUG-C4**: `batch_rename` `count=1` 未文档化 → 增加 `count` 参数
+- [x] **BUG-C5/C6**: search pool shutdown + worker 异常 → submit 检查 + 异常入队
+- [x] **BUG-F4**: `ctxAction` 状态污染 → try/finally 恢复
+
+### 测试补强
+- [x] `tests/test_packaging.py`: 6 项 (D1/D2/Doc5 回归)
+- [x] `tests/test_security_v9.py`: 17 项 (W1/W2/W5/W6/W7/W9/W10/F1 回归)
+- [x] **652 passed, 0 failed** (从 629→652，+23 项；文件数 21→23)
 
 ---
 
@@ -139,23 +172,33 @@
 
 ---
 
-## 阶段 7：智能化编排与插件生态 (v7.0 - 2026 Q3-Q4)
+## 阶段 7：智能化编排与插件生态 (v7.0 — 2026 Q3-Q4)
+
+> **v6.5.1 铺路**: P0/P1 安全加固为 v7.0 演进奠定信任地基（部署可用、认证不泄露、操作不越界）。
 
 ### 高优先级 (v7.0 MVP)
-- [x] **[DONE] 测试文件合并优化**: 23→21 文件精简，重复率已消除 (~6 精确重复项移除, Web API 合并)
+- [x] **[DONE v6.5.0] 测试文件合并优化**: 23→21 文件精简，重复率已消除
+- [x] **[DONE v6.5.1] 部署加固**: `pip install .` 可用、MCP 依赖声明、分类路径安全
+- [x] **[DONE v6.5.1] API Token 安全**: 本地注入/网络不泄露 + `hmac.compare_digest` 常量时间
+- [x] **[DONE v6.5.1] 输入校验**: 所有 `list[str]` 字段 `max_length=1000`；dict 字段 size validator
 - [ ] **[PLANNED] 静态类型分析**: 集成 `mypy` 实现 100% 静态类型覆盖
 - [ ] **[PLANNED] 前端亮色主题**: 通过 CSS 变量实现亮色/暗色主题切换
 - [ ] **[PLANNED] 拖拽支持**: 实现文件拖拽到 Staging 面板
 - [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件
+- [ ] **[PLANNED] 前端 E2E 测试**: Playwright 浏览器端回归
 
 ### 中优先级 (v7.0 增强)
 - [ ] **[PLANNED] Virtual Scroll**: Web 端引入虚拟滚动，支持万级文件树
-- [ ] **[PLANNED] 前端 E2E 测试**: Playwright/Cypress
 - [ ] **[PLANNED] 语义指纹**: 为文件生成快速哈希指纹，加速增量索引
+- [ ] **[PLANNED] Tree-sitter 压缩导出**: 保留签名剥离实现体，~70% token 削减（借鉴 Repomix）
+- [ ] **[PLANNED] PageRank 上下文优先级**: 智能导出按依赖图排名纳入相关文件（借鉴 Aider）
 - [ ] **[PLANNED] 插件系统**: 定义标准 Hook 接口，支持自定义搜索/导出插件
+- [ ] **[PLANNED] CSP 落地**: 内联事件处理器 → `addEventListener` 迁移
+- [ ] **[PLANNED] CI Windows runner**: `.github/workflows/test.yml` matrix 加 `windows-latest`
 
 ### 低优先级
 - [ ] **[PLANNED] 语义搜索**: 集成轻量级 Embedding 模型，实现向量相似性检索
+- [ ] **[PLANNED] `exec_async` 化**: `api_execute_tool` 同步阻塞→async subprocess，防线程池耗尽
 
 ---
 
@@ -171,6 +214,7 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); +23 新测试; 652 passed** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
 | **6.4.0** | **2026-05-24** | **14 类型标注, process_utils 提取, 3 处 XSS 修复, api.js 集中化, 前端可折叠面板, SRI 哈希, tag 管理, file 创建, actionModal, 479 passed** |

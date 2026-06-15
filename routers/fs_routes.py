@@ -211,8 +211,17 @@ def api_move(req: FileMoveRequest, dm: DataManager = _dm_dep) -> dict[str, Any]:
 def api_save(req: FileSaveRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Saves content to a file."""
     try:
-        if not get_valid_project_root(req.path, dm):
+        root = get_valid_project_root(req.path, dm)
+        if not root:
             raise HTTPException(status_code=403, detail="Access denied")
+
+        # BUG-W8 fix: if project_path provided, verify it matches resolved root.
+        if getattr(req, 'project_path', None):
+            expected_root = get_valid_project_root(req.project_path, dm)
+            if expected_root != root:
+                raise HTTPException(
+                    status_code=403, detail="project_path does not match file path's project"
+                )
 
         logger.info(f"AUDIT - Saving content to: {req.path}")
         FileOps.save_content(req.path, req.content)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import signal
 import subprocess
 from typing import Any
 
@@ -169,8 +168,18 @@ def api_categorize(
 ) -> dict[str, Any]:
     """Categorizes files into a directory."""
     try:
-        if not get_valid_project_root(req.project_path, dm):
+        project_root = get_valid_project_root(req.project_path, dm)
+        if not project_root:
             raise HTTPException(status_code=403, detail="Access denied")
+
+        # BUG-W2 fix: validate every source path is within project root.
+        # Matches the pattern used by api_execute_tool (line 204) and api_delete.
+        for p in req.paths:
+            if not is_path_safe(p, project_root):
+                logger.warning(f"AUDIT - categorize rejected unsafe path: {p}")
+                raise HTTPException(
+                    status_code=403, detail=f"Path outside project boundary: {p}"
+                )
 
         logger.info(
             f"AUDIT - Batch categorizing {len(req.paths)} items "
@@ -262,16 +271,29 @@ def api_terminate_process(req: ProcessTerminateRequest) -> dict[str, Any]:
             "msg": "Process not found or already finished",
         }
 
+    # BUG-W6 fix: verify the process is still the one we registered.
+    if proc.pid != req.pid:
+        logger.warning(
+            f"AUDIT - PID mismatch on terminate: registered pid={proc.pid}, "
+            f"requested pid={req.pid}"
+        )
+        return {"status": "error", "msg": "PID mismatch; possible PID reuse"}
+
+    if proc.poll() is not None:
+        unregister_process(req.pid)
+        return {"status": "ok", "msg": "Process already finished"}
+
     logger.info(f"AUDIT - Terminating process {req.pid}")
     try:
-        from file_cortex_core.process_utils import terminate_process
-
-        terminate_process(req.pid)
+        # Terminate via the Popen object directly (ownership verified).
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+        unregister_process(req.pid)
         return {"status": "ok"}
     except Exception as e:
-        try:
-            os.kill(req.pid, signal.SIGTERM)
-            return {"status": "ok", "msg": f"killpg failed: {e}"}
-        except Exception:
-            pass
+        logger.exception(f"Terminate failed for pid {req.pid}")
         return {"status": "error", "msg": str(e)}

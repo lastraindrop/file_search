@@ -1,6 +1,6 @@
-# FileCortex v6.5.0 (工作区编排助手)
+# FileCortex v6.5.1 (工作区编排助手)
 
-> **版本**: 6.5.0 | **日期**: 2026-06-07 | **测试**: 629 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **日期**: 2026-06-15 | **测试**: 652 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -86,10 +86,28 @@ python fctx.py search <project> <query> --mode smart
 python fctx.py export <project> --format markdown --output context.md
 ```
 
-### MCP Server
+### MCP Server（需额外安装 MCP SDK）
 ```bash
+# 1. 安装 MCP 可选依赖
+pip install -e ".[mcp]"
+# 或: pip install mcp>=1.0.0
+
+# 2. 启动（stdio 传输，供 Claude Desktop / Cline 等 MCP 客户端调用）
 python mcp_server.py --transport stdio
+
+# 3. 在 Claude Desktop 配置中注册（示例）
+# ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)
+# 或 %APPDATA%\Claude\claude_desktop_config.json (Windows):
+{
+  "mcpServers": {
+    "file-cortex": {
+      "command": "python",
+      "args": ["<path-to>/mcp_server.py"]
+    }
+  }
+}
 ```
+> 注：未安装 `mcp` 包时，`mcp_server.py` 进入 mock 回退模式（仅打印工具列表，不提供真实 MCP 传输）。
 
 ---
 

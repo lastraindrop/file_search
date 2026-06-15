@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import threading
 
+from file_cortex_core.config import logger
+
 MAX_ACTIVE_PROCESSES = 50
 
 
@@ -39,10 +41,18 @@ class ProcessManager:
             proc: Popen object.
 
         Returns:
-            True if registered successfully, False if at capacity.
+            True if registered successfully, False if at capacity or PID in use.
         """
         with self._lock:
             if len(self._processes) >= self._max:
+                return False
+            existing = self._processes.get(pid)
+            # BUG-W5 fix: refuse to overwrite a still-live process entry.
+            if existing is not None and existing.poll() is None:
+                logger.warning(
+                    f"PID {pid} already registered with a live process; "
+                    f"refusing overwrite."
+                )
                 return False
             self._processes[pid] = proc
             return True

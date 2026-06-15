@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.5.0 | **测试**: 629 passed | **日期**: 2026-06-07 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **测试**: 652 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -110,8 +110,8 @@ v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 12800
 | `test_global_settings_handles_allowed_extensions` | `test_comprehensive_v63.py` | allowed_extensions 字段 |
 | `test_api_token_header_forward` | `test_comprehensive_v63.py` | API Token HTTP 认证 |
 | `test_api_index_page_injects_version` | `test_comprehensive_v63.py` | 版本号模板注入 |
-| `test_ws_search_endpoint` | `test_web_endpoints.py` | WebSocket wsSearch 端点 |
-| `test_ws_execute_endpoint` | `test_web_endpoints.py` | WebSocket wsExecute 端点 |
+| `test_ws_search_endpoint` | `test_web_api.py` | WebSocket wsSearch 端点 |
+| `test_ws_execute_endpoint` | `test_web_api.py` | WebSocket wsExecute 端点 |
 
 ---
 
@@ -311,32 +311,35 @@ super().__init__(daemon=True)
 ### 5.1 测试分层
 
 ```
-tests/                              597 项测试 (v6.5.0)
+tests/                              652 项测试 (v6.5.1)
 ├── test_v8_comprehensive.py        77 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
+├── test_security_fixes_v650.py     38 tests  ← v6.5.0 安全修复回归
 ├── test_coverage_fill.py           20 tests  ← v6.5.0 新增 (process_utils/ProcessManager)
-├── test_frontend_contract.py       31 tests  ← v6.5.0 新增 8 项前端契约
+├── test_frontend_contract.py       31 tests  ← v6.5.0 前端契约 (含 v6.5.1 SRI 扩展)
+├── test_packaging.py                6 tests  ← v6.5.1 新增 (BUG-D1/D2/Doc5 回归)
+├── test_security_v9.py             17 tests  ← v6.5.1 新增 (P0/P1 安全回归)
 ├── test_bugfix_v7.py               85 tests  ← v6.4.0 BUG修复/前端/WebSocket 回归
-├── test_bugfix_v633.py             24 tests  ← v6.3.3 BUG修复 + 边界覆盖
+├── test_bugfix_v633.py             22 tests  ← v6.3.3 BUG修复 + 边界覆盖
 ├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
 ├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全/前端契约
-├── test_comprehensive.py           52 tests  ← 核心功能 + 高级边界
+├── test_comprehensive.py           45 tests  ← 核心功能 + 高级边界
+├── test_web_api.py                 42 tests  ← v6.5.0 Web API 合并 (CRUD/Auth/WS)
 ├── test_search_engine.py           20 tests  ← 搜索引擎矩阵 (4 mode × 2 params)
 ├── test_security_resilience.py     23 tests  ← 路径验证器全矩阵 (15 场景)
 ├── test_fileops_advanced.py         9 tests  ← 文件操作完整覆盖
 ├── test_dm_config.py                7 tests  ← DataManager 持久化/并发/弃用API迁移
-├── test_web_api_advanced.py        21 tests  ← 创建/归档/重命名/设置/Token
-├── test_web_endpoints.py           12 tests  ← 端点契约 (含 WS wsSearch/wsExecute)
 ├── test_core_integration.py        11 tests  ← 集成测试
 ├── test_context_formatter.py        6 tests  ← XML/MD 导出
 ├── test_mcp_server.py               3 tests  ← MCP 协议
 ├── test_utils_format.py             8 tests  ← 格式化/Token估算
 ├── test_scenarios.py                2 tests  ← 端到端场景
 ├── test_ai_enhanced.py              7 tests  ← AI 上下文/Blueprint
-├── test_api_v6.py                  12 tests  ← API 版本演进
-├── test_additional_coverage.py     30 tests  ← 边缘覆盖
+├── test_additional_coverage.py     27 tests  ← 边缘覆盖
 │
 └── conftest.py                              ← 共享 fixture + DataManager.reset()
 ```
+
+> **v6.5.1 变更**: `test_web_api_advanced.py` / `test_web_endpoints.py` / `test_api_v6.py` 已在 v6.5.0 TC-2 合并为 `test_web_api.py`（42 tests）。文档同步修正。新增 `test_packaging.py` (6) + `test_security_v9.py` (17)，总数 629→652。
 
 ### 5.2 测试隔离
 
@@ -417,7 +420,9 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **6.5.0** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 8 类型注解, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 tests** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; +23 新测试; 652 tests** |
+| **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
+| **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |
 | **6.4.0** | **2026-05-24** | **process_utils提取, 14类型标注, 3处XSS修复, api.js集中化, 前端可折叠面板, SRI哈希, tag管理, file创建, actionModal, 479 tests** |
 | 6.3.3 | 2026-05-16 | 8 BUG修复, Google Style整肃, 24新测试, 372 tests |
 | 6.3.2 | 2026-05-14 | 8 BUG修复, DataManager DI, 路由拆分, walk_filtered, 348 tests |
@@ -664,3 +669,133 @@ except (SyntaxError, TypeError):
 **影响范围**: 仅 Web 前端 `main.js` 中的 `stageAll` handler。
 
 ---
+
+## 11. v6.5.1 安全机制与参数对齐强化
+
+### 11.1 API Token 防泄露机制 (BUG-W1)
+
+v6.5.1 引入 `_is_local_request` 守卫，按请求来源决定是否将 token 注入 HTML 模板：
+
+```
+GET /
+  ↓
+_is_local_request(request)
+  ├── client=None (TestClient CI) → True → 注入 token
+  ├── client.host in (127.0.0.1, ::1, localhost) → True → 注入 token
+  └── 其他 (网络) → False → 空字符串 → window.__FCTX_API_TOKEN__ = ""
+```
+
+同时，`verify_api_token` 中间件将 token 比较从 `!=` 改为 `hmac.compare_digest`，消除时序侧信道（BUG-W10）。WebSocket 鉴权 `verify_ws_token` 同理。
+
+```
+HTTP: hmac.compare_digest(X-API-Token, API_TOKEN)
+WS:   hmac.compare_digest(token, expected_token)
+```
+
+### 11.2 API 端点路径安全（BUG-W2）
+
+`api_categorize` 在 v6.5.0 中仅校验 `project_path` 是否已注册，未逐项校验 `paths` 数组。v6.5.1 增加与 `api_execute_tool`/`api_delete` 一致的 `is_path_safe` 循环：
+
+```
+POST /api/actions/categorize
+  ↓
+get_valid_project_root(req.project_path) → 403 if not registered
+  ↓
+for p in req.paths:
+    is_path_safe(p, project_root) → 403 if outside boundary (NEW)
+  ↓
+FileOps.batch_categorize(...)
+```
+
+### 11.3 输入大小限制（BUG-W7/W9）
+
+所有 Pydantic 请求模型的 `list[str]` 字段增设 `Field(..., max_length=1000)`；`dict[str, Any]` 字段增设 `field_validator` 100KB 序列化上限：
+
+| 字段 | 旧 | 新 | 影响端点 |
+|------|-----|-----|----------|
+| `GenerateRequest.files` | `list[str]` | `list[str] = Field(..., max_length=1000)` | `/api/generate` |
+| `FileDeleteRequest.paths` | `list[str]` | 同上 | `/api/fs/delete` |
+| `FileArchiveRequest.paths` | `list[str]` | 同上 | `/api/fs/archive` |
+| `CategorizeRequest.paths` | `list[str]` | 同上 | `/api/actions/categorize` |
+| `ToolExecuteRequest.paths` | `list[str]` | 同上 | `/api/actions/execute` |
+| 所有 `dict[str, Any]` 字段 | 无限制 | `field_validator` ≤100KB JSON | `/api/project/session`, `/api/project/settings`, `/api/project/tools`, `/api/project/categories` |
+
+### 11.4 进程生命周期安全（BUG-W5/W6）
+
+**ProcessManager PID 复用防御**（`routers/common.py`）：
+
+```
+register(pid, proc)
+  ↓
+with _lock:
+    检查 existing.poll() is None → 活跃则返回 False (NEW)
+    否则允许覆盖
+```
+
+**终止进程所有权验证**（`routers/action_routes.py`）：
+
+```
+POST /api/actions/terminate
+  ↓
+proc = process_manager.get(pid)
+  ↓
+proc.pid != req.pid → "PID mismatch" (NEW — 防止 PID 复用)
+  ↓
+proc.poll() is not None → unregister (NEW — 优雅退出)
+  ↓
+proc.terminate() → wait(5s) → kill() → unregister (NEW — 用 Popen 对象，不用裸 PID)
+```
+
+### 11.5 WebSocket 资源清理（BUG-W4）
+
+`websocket_search` 在 v6.5.0 中仅异常路径取消 `search_task`。v6.5.1 统一用 `finally`：
+
+```
+try:
+    while True: ... break on DONE
+except WebSocketDisconnect: stop_event.set()
+except Exception: logger.exception(...)
+finally:
+    search_task.cancel()           # ← NEW: 所有路径统一取消
+    await search_task              # ← NEW: 确保线程回收
+```
+
+### 11.6 核心层健壮性增强（BUG-C1-C6）
+
+| BUG | 模块 | 修改 | 效果 |
+|-----|------|------|------|
+| C1 | `context.py` | `to_xml` `except: pass` → `logger.exception` | 与 `to_markdown` 一致 |
+| C2 | `actions.py` | `archive_selection` 目录分支 arcname → 逐文件决策 | 防止 `relative_to` ValueError |
+| C3 | `security.py` | `_strip_win_long_prefix` → UNC 检查前剥离 `\\?\` | Windows 长路径项目可注册 |
+| C4 | `actions.py` | `batch_rename` 增加 `count` 参数 | 用户可控替换数量 |
+| C5 | `search.py` | `SHARED_SEARCH_POOL._shutdown` 检查 → 提前 break | 防止 atexit 后 RuntimeError |
+| C6 | `search.py` | `SearchWorker.run` try/except → `("ERROR", msg)` 入队 | UI 不再永远等待 |
+
+### 11.7 参数动态对齐 — v6.5.1 新增
+
+| 参数 | 前端 | 后端 | 默认 | v6.5.1 变更 |
+|------|------|------|------|-------------|
+| `api_token` | `window.__FCTX_API_TOKEN__` | `web_app._is_local_request` 守卫 | (环境) | 网络模式不注入 HTML |
+| `token_compare` | N/A | `hmac.compare_digest` | — | 常量时间比较 |
+| `max_list_length` | N/A | `Field(..., max_length=1000)` | 1000 | 新增 |
+| `max_dict_bytes` | N/A | `field_validator` | 100KB | 新增 |
+| `mermaid_sri` | CDN | `integrity="sha384-..."` | — | 新增 |
+| `mcp_install` | README | `[project.optional-dependencies].mcp` | `mcp>=1.0.0` | 新增 |
+
+### 11.8 添加新参数规范流程（v6.5.1 增强）
+
+原 v6.4.0 定义的 6 处同步流程，在 v6.5.1 增加**第 7 步**：
+
+```
+1. file_cortex_core/config.py        ← Pydantic 模型字段
+2. routers/schemas.py                ← Request Schema (含 Field 约束)
+3. static/js/state.js                ← 前端 defaults
+4. templates/index.html              ← Jinja2 注入 (仅本地)
+5. routers/ (对应 route)             ← API 处理逻辑
+6. tests/                            ← 参数传递链路测试
+7. TECHNICAL_GUIDE.md                ← 本文档 2.2 对齐清单 (v6.5.1 新增)
+```
+
+---
+
+*本文档随 FileCortex v6.5.1 更新 — 完整工作原理、安全机制、参数对齐规范。当添加新参数时，必须按 11.8 节 7 步流程同步所有层。*

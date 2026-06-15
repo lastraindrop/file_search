@@ -1240,12 +1240,16 @@ const App = {
                 App.syncStagingToBackend();
                 ui.showToast("Added to Staging");
                 break;
-            case 'fav':
+            case 'fav': {
                 const savedFile = App.state.currentFile;
                 App.state.currentFile = path;
-                await App.addToFavorites();
-                App.state.currentFile = savedFile;
+                try {
+                    await App.addToFavorites();
+                } finally {
+                    App.state.currentFile = savedFile;
+                }
                 break;
+            }
             case 'copyPath':
                 try {
                     await navigator.clipboard.writeText(path);
@@ -1255,12 +1259,16 @@ const App = {
             case 'openOs':
                 App.openInExplorer(path);
                 break;
-            case 'delete':
+            case 'delete': {
                 const savedCurrent = App.state.currentFile;
                 App.state.currentFile = path;
-                await App.deleteFile();
-                App.state.currentFile = savedCurrent;
+                try {
+                    await App.deleteFile();
+                } finally {
+                    App.state.currentFile = savedCurrent;
+                }
                 break;
+            }
         }
         App.hideContextMenu();
     },

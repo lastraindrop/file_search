@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "file-cortex"
-version = "6.5.0"
+version = "6.5.1"
 authors = [
     { name = "Developer", email = "dev@example.com" },
 ]
@@ -35,6 +35,9 @@ dev = [
     "black>=23.0.0",
     "isort>=5.12.0",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 gui = [
     "customtkinter>=5.1.0",
 ]
@@ -45,10 +48,11 @@ build = [
 [project.scripts]
 fctx = "fctx:main"
 fctx-web = "web_app:main"
+fctx-mcp = "mcp_server:main"
 
 [tool.setuptools]
-packages = ["file_cortex_core"]
-py-modules = ["fctx", "web_app", "file_search"]
+packages = ["file_cortex_core", "routers"]
+py-modules = ["fctx", "web_app", "file_search", "mcp_server", "build_exe"]
 
 [tool.ruff]
 line-length = 100

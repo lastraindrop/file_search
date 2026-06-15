@@ -41,6 +41,7 @@ class FileOps:
         pattern: str,
         replacement: str,
         dry_run: bool = True,
+        count: int = 1,
     ) -> list[dict[str, str]]:
         """Renames multiple files using regex.
 
@@ -50,6 +51,8 @@ class FileOps:
             pattern: Regex pattern.
             replacement: Replacement string.
             dry_run: If True, only simulate changes.
+            count: Maximum number of replacements per filename (0 = all).
+                Defaults to 1 for backward compatibility.
 
         Returns:
             List of result dictionaries.
@@ -63,7 +66,7 @@ class FileOps:
         new_names = {}
         for p_str in paths:
             p = pathlib.Path(p_str)
-            new_name = regex.sub(replacement, p.name, count=1)
+            new_name = regex.sub(replacement, p.name, count=count if count > 0 else 0)
             if new_name == p.name:
                 continue
 
@@ -312,8 +315,14 @@ class FileOps:
                     for root, _, files in os.walk(p):
                         for file in files:
                             full_f = pathlib.Path(root) / file
-                            rel_base = root_dir_p if root_dir_p else p.parent
-                            zipf.write(full_f, full_f.relative_to(rel_base))
+                            # BUG-C2 fix: per-file arcname decision, same logic as file branch.
+                            if root_dir_p and (
+                                root_dir_p == full_f or root_dir_p in full_f.parents
+                            ):
+                                arc = full_f.relative_to(root_dir_p)
+                            else:
+                                arc = full_f.relative_to(p.parent)
+                            zipf.write(full_f, arc)
         return str(output_path)
 
     @staticmethod

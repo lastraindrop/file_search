@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.5.0 | **更新日期**: 2026-06-07 | **测试**: 629 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 652 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -185,17 +185,16 @@ tests/
 ├── test_security_resilience.py      # 安全沙盒
 ├── test_search_engine.py            # 搜索引擎矩阵
 ├── test_fileops_advanced.py         # 文件操作
-├── test_web_api_advanced.py         # Web API
-├── test_web_endpoints.py            # Web 端点
+├── test_web_api.py                  # Web API (v6.5.0 TC-2 合并)
 ├── test_core_integration.py         # 集成测试
 ├── test_mcp_server.py               # MCP 协议
 ├── test_additional_coverage.py      # 边缘覆盖
 ├── test_ai_enhanced.py              # AI 上下文/Blueprint
-├── test_api_v6.py                   # API 版本演进
 ├── test_context_formatter.py        # XML/MD 导出
 ├── test_utils_format.py             # 格式化/Token估算
 ├── test_scenarios.py                # 端到端场景
-└── test_search_engine.py            # 搜索引擎
+├── test_packaging.py                # v6.5.1 新增 — 打包完整性 (6)
+├── test_security_v9.py              # v6.5.1 新增 — P0/P1 安全回归 (17)
 ```
 
 ## 7. v6.5.0 变更摘要
@@ -207,7 +206,7 @@ tests/
 | **OOM 保护** | `context.py` 新增 `MAX_EXPORT_FILES=500` + `MAX_TOTAL_CONTENT_BYTES=50MB` |
 | **进程管理** | `routers/common.py` ProcessManager 封装 (线程安全、容量50、旧API别名) |
 | **前端修复** | 8 项修复 (stageAll CRITICAL BUG、上下文菜单越界、bulkActions 死代码、tree-node 选择器污染等) |
-| **测试** | +118 项 (总计 597) / ruff 0 errors / Google Style 全项通过 |
+| **测试** | +118 项 (总计 629) / ruff 0 errors / Google Style 全项通过 |
 | **弃用 API** | 14 处 `dm.data[...]` → `dm.config.xxx` 迁移 |
 | **硬编码** | 版本号 `"6.5.0"` → `core_version` 动态导入；默认值 `== 128000` → `GlobalSettings()` |
 | **线程安全** | `SearchWorker`/`DuplicateWorker` daemon=True 构造器传参 |
@@ -222,3 +221,15 @@ tests/
 | **前端优化** | 8 项：Ctrl+S 双保存、三栏布局 11/12→12/12、搜索 snippet、模态框堆叠、100dvh、CSS 变量统一、侧边栏单一数据源、状态管理清理 |
 | **测试整合** | 6 精确重复项移除；Web API 3→1 文件合并；硬编码值动态化；+38 安全测试 (test_security_fixes_v650.py) |
 | **测试** | +32 项 (总计 629) / 文件 23→21 / ruff 0 errors / 全部通过 |
+
+### v6.5.1 部署加固与安全补强 (2026-06-15)
+
+| 类别 | 变更摘要 |
+|------|----------|
+| **部署修复 (P0)** | `pyproject.toml` 打包补全 `routers`/`mcp_server`/`build_exe`；`mcp` 可选依赖组 + README 安装说明；`fctx-mcp` 控制台脚本 |
+| **安全修复 (P0)** | `api_categorize` 路径遍历修补；index 页 token 泄露修复 (`_is_local_request` 守卫)；mermaid CDN SRI 补齐 |
+| **安全加固 (P1)** | 11 项输入字段 `max_length=1000`；dict 字段 `field_validator` 100KB 上限；token 比较 `hmac.compare_digest`；WS `search_task` finally 取消；ProcessManager PID 复用拒绝；`api_terminate_process` 用 Popen 终止 |
+| **核心健壮性** | `to_xml` 日志；`archive_selection` 目录分支 arcname；Windows 长路径剥离；`batch_rename` `count` 参数；search pool shutdown 检查；SearchWorker 异常入队 |
+| **前端** | `ctxAction` try/finally 状态恢复；Bootstrap 5.3 / marked 12.0 / DOMPurify 3.1.6 / mermaid 10.9 SRI 全链完整性校验 |
+| **测试** | +23 项 (test_packaging 6 + test_security_v9 17) / 总计 652 / ruff 0 / 全部通过 |
+| **文档** | 全文档版本号 6.5.0→6.5.1 同步；TECHNICAL_GUIDE 过时测试文件引用修正；ROADMAP v6.5.1 章节 + v7.0 计划更新 |

@@ -46,6 +46,18 @@ def _is_wildcard_origin(origins: list[str]) -> bool:
 ALLOWED_ORIGINS = _parse_allowed_origins(os.getenv("FCTX_ALLOWED_ORIGINS", "*"))
 
 
+def _is_local_request(request: Request) -> bool:
+    """Checks if the request originates from localhost.
+
+    Used to decide whether to inject the API token into the index page.
+    TestClient requests (no client info) are treated as local for CI.
+    """
+    client = request.client
+    if not client:
+        return True
+    return client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
 async def verify_api_token(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
@@ -55,7 +67,8 @@ async def verify_api_token(
 
     if request.url.path.startswith("/api/"):
         token = request.headers.get("X-API-Token", "")
-        if token != API_TOKEN:
+        import hmac
+        if not hmac.compare_digest(token, API_TOKEN):
             return JSONResponse(
                 status_code=401,
                 content={"status": "error", "detail": "Invalid or missing API token"},
@@ -111,10 +124,21 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
-    """Serves the main index page."""
+    """Serves the main index page.
+
+    BUG-W1 fix: only inject the API token into the page when the request is
+    local. Network clients must authenticate via X-API-Token header.
+    """
+    inject_token = API_TOKEN if _is_local_request(request) else ""
     return templates.TemplateResponse(
-        request, "index.html", {"api_token": API_TOKEN, "version": __version__}
+        request, "index.html", {"api_token": inject_token, "version": __version__}
     )
+
+
+@app.get("/api/whoami")
+async def whoami() -> dict[str, str]:
+    """Returns server version (auth already enforced by middleware for /api/)."""
+    return {"version": __version__, "status": "ok"}
 
 
 def main() -> None:

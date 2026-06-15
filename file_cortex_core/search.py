@@ -261,6 +261,11 @@ def search_generator(
                 if count >= query.max_results:
                     break
             elif query.mode == "content" and query.text:
+                # BUG-C5 fix: guard against submitting to a shutdown pool
+                # (atexit may have fired during interpreter teardown).
+                if SHARED_SEARCH_POOL._shutdown:
+                    logger.warning("Search pool is shutting down; aborting content search.")
+                    break
                 future = SHARED_SEARCH_POOL.submit(content_matcher.match_file, full_path)
                 content_futures[future] = meta
 
@@ -372,6 +377,10 @@ class SearchWorker(threading.Thread):
                 if self.stop_event.is_set():
                     break
                 self.result_queue.put(result)
+        except Exception as e:
+            # BUG-C6 fix: push error to queue so UI knows the worker died.
+            logger.exception("SearchWorker thread crashed")
+            self.result_queue.put(("ERROR", str(e)))
         finally:
             gen.close()
         self.result_queue.put(("DONE", "DONE"))

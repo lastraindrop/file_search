@@ -24,11 +24,14 @@ router = APIRouter()
 _dm_dep = Depends(get_dm)
 
 def verify_ws_token(token: str | None) -> bool:
-    """Verifies the API token for WebSocket connections."""
+    """Verifies the API token for WebSocket connections (constant-time)."""
     expected_token = os.getenv("FCTX_API_TOKEN", "")
     if not expected_token:
         return True
-    return token == expected_token
+    if not token:
+        return False
+    import hmac
+    return hmac.compare_digest(token, expected_token)
 
 
 @router.websocket("/ws/search")
@@ -112,12 +115,15 @@ async def websocket_search(
     except WebSocketDisconnect:
         logger.info("Search client disconnected")
         stop_event.set()
-        search_task.cancel()
     except Exception as e:
         logger.exception("Search error")
-        search_task.cancel()
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
+    finally:
+        # BUG-W4 fix: always cancel + await search_task to prevent orphan threads.
+        search_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await search_task
 
 
 @router.websocket("/ws/actions/execute")
