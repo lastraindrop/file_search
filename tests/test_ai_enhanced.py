@@ -2,6 +2,9 @@
 
 import os
 
+import pytest
+from starlette.websockets import WebSocketDisconnect
+
 from file_cortex_core import ContextFormatter, PathValidator
 
 
@@ -23,7 +26,7 @@ def test_xml_export_with_blueprint(mock_project):
     assert "<context>" in xml_without
 
 def test_websocket_auth_failure(project_client, mock_project, monkeypatch):
-    """Verify that WebSocket connection fails with invalid token."""
+    """Verify that WebSocket connection closes before accept with invalid token."""
     # Set a required token
     monkeypatch.setenv("FCTX_API_TOKEN", "secret_pass")
 
@@ -31,10 +34,9 @@ def test_websocket_auth_failure(project_client, mock_project, monkeypatch):
     # FastAPI/TestClient WebSocket auth is usually checked via query params in our implementation
 
     ws_url = f"/ws/search?path={str(mock_project)}&query=main&token=wrong"
-    with project_client.websocket_connect(ws_url) as ws:
-        data = ws.receive_json()
-        assert data["status"] == "ERROR"
-        assert "Unauthorized" in data["msg"]
+    with pytest.raises(WebSocketDisconnect) as exc_info, project_client.websocket_connect(ws_url):
+        pass
+    assert exc_info.value.code == 4001
 
 def test_websocket_auth_success(project_client, mock_project, monkeypatch):
     """Verify that WebSocket connection succeeds with valid token."""

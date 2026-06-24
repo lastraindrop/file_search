@@ -47,12 +47,11 @@ async def websocket_search(
     dm: DataManager = _dm_dep,
 ) -> None:
     """Streams search results over WebSocket."""
-    await websocket.accept()
-
     if not verify_ws_token(token):
-        await websocket.send_json({"status": "ERROR", "msg": "Unauthorized"})
-        await websocket.close()
+        await websocket.close(code=4001)
         return
+
+    await websocket.accept()
 
     project_root, proj_config = get_project_config_for_path(path, dm)
     if not project_root or proj_config is None:
@@ -136,12 +135,11 @@ async def websocket_action_stream(
     dm: DataManager = _dm_dep,
 ) -> None:
     """Streams tool execution output over WebSocket."""
-    await websocket.accept()
-
     if not verify_ws_token(token):
-        await websocket.send_json({"status": "ERROR", "msg": "Unauthorized"})
-        await websocket.close()
+        await websocket.close(code=4001)
         return
+
+    await websocket.accept()
 
     project_root = get_valid_project_root(project_path, dm)
     if not project_root:
@@ -225,3 +223,5 @@ async def websocket_action_stream(
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
     finally:
         stream_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await stream_task
