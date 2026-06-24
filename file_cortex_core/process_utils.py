@@ -28,7 +28,13 @@ def terminate_process(pid: int) -> None:
         else:
             import signal
 
-            with contextlib.suppress(ProcessLookupError):
+            try:
                 os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except ProcessLookupError:
+                # The process may have already exited between registration and
+                # termination. A direct kill can still catch a live process when
+                # only the process-group lookup raced.
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGTERM)
     except Exception as exc:
         logger.warning("Failed to terminate process %d: %s", pid, exc)
