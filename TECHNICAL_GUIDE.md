@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.5.1 | **测试**: 652 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **测试**: 661 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -80,14 +80,14 @@ v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 12800
 | # | 参数 | 前端位置 | 后端模型 | API 传输 |
 |---|------|----------|----------|----------|
 | 1 | `token_threshold` | `state.js` (128000) | `GlobalSettings.token_threshold` | `POST /api/global/settings` |
-| 2 | `token_ratio` | `state.js` (4.0) | `GlobalSettings.token_ratio` | `POST /api/global/settings` |
+| 2 | `token_ratio` | `state.js` (4) | `GlobalSettings.token_ratio` | `POST /api/global/settings` |
 | 3 | `preview_limit_mb` | `main.js` (1.0) | `GlobalSettings.preview_limit_mb` | `POST /api/global/settings` |
 | 4 | `allowed_extensions` | `main.js` ("") | `GlobalSettings.allowed_extensions` | `POST /api/global/settings` |
 | 5 | `api_token` | `window.__FCTX_API_TOKEN__` | `os.getenv("FCTX_API_TOKEN")` | HTTP `X-API-Token` + WS `token` |
 | 6 | `__version__` | `index.html` `{{ version }}` | `__init__.py` | Jinja2 注入 |
 | 7 | `max_search_size_mb` | `state.js` (10) | `ProjectConfig.max_search_size_mb` | `POST /api/project/settings` |
 | 8 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL |
-| 9 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/execute` | WebSocket URL |
+| 9 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/actions/execute` | WebSocket URL |
 
 ### 2.3 添加新参数的规范流程
 
@@ -257,7 +257,7 @@ super().__init__(daemon=True)
 
 **预防**:
 - 所有参数必须在 `GlobalSettings` / `ProjectConfig` Pydantic 模型中有单一默认值
-- 测试文件中的默认值校验应使用 `GlobalSettings()` 动态获取而非硬编码数字
+- 测试文件中的默认值校验应使用 `GlobalSettings()` 动态获取而非硬编码数字；文档中的默认值仅描述当前模型默认，不作为第二来源
 - 新增参数必须同步更新「参数对齐清单」并添加测试
 
 ### 4.2 NoneType 崩溃
@@ -311,18 +311,18 @@ super().__init__(daemon=True)
 ### 5.1 测试分层
 
 ```
-tests/                              652 项测试 (v6.5.1)
-├── test_v8_comprehensive.py        77 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
+tests/                              661 项测试 (v6.5.1)
+├── test_v8_comprehensive.py        90 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
 ├── test_security_fixes_v650.py     38 tests  ← v6.5.0 安全修复回归
 ├── test_coverage_fill.py           20 tests  ← v6.5.0 新增 (process_utils/ProcessManager)
 ├── test_frontend_contract.py       31 tests  ← v6.5.0 前端契约 (含 v6.5.1 SRI 扩展)
-├── test_packaging.py                6 tests  ← v6.5.1 新增 (BUG-D1/D2/Doc5 回归)
+├── test_packaging.py               15 tests  ← v6.5.1 新增 (BUG-D1/D2/Doc5 回归)
 ├── test_security_v9.py             17 tests  ← v6.5.1 新增 (P0/P1 安全回归)
-├── test_bugfix_v7.py               85 tests  ← v6.4.0 BUG修复/前端/WebSocket 回归
+├── test_bugfix_v7.py               90 tests  ← v6.4.0 BUG修复/前端/WebSocket 回归
 ├── test_bugfix_v633.py             22 tests  ← v6.3.3 BUG修复 + 边界覆盖
 ├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
 ├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全/前端契约
-├── test_comprehensive.py           45 tests  ← 核心功能 + 高级边界
+├── test_comprehensive.py           46 tests  ← 核心功能 + 高级边界
 ├── test_web_api.py                 42 tests  ← v6.5.0 Web API 合并 (CRUD/Auth/WS)
 ├── test_search_engine.py           20 tests  ← 搜索引擎矩阵 (4 mode × 2 params)
 ├── test_security_resilience.py     23 tests  ← 路径验证器全矩阵 (15 场景)
@@ -339,7 +339,7 @@ tests/                              652 项测试 (v6.5.1)
 └── conftest.py                              ← 共享 fixture + DataManager.reset()
 ```
 
-> **v6.5.1 变更**: `test_web_api_advanced.py` / `test_web_endpoints.py` / `test_api_v6.py` 已在 v6.5.0 TC-2 合并为 `test_web_api.py`（42 tests）。文档同步修正。新增 `test_packaging.py` (6) + `test_security_v9.py` (17)，总数 629→652。
+> **v6.5.1 变更**: `test_web_api_advanced.py` / `test_web_endpoints.py` / `test_api_v6.py` 已在 v6.5.0 TC-2 合并为 `test_web_api.py`（42 tests）。文档同步修正。新增 `test_packaging.py` (15) + `test_security_v9.py` (17)，总数 629→661。
 
 ### 5.2 测试隔离
 
@@ -366,6 +366,7 @@ def _reset_singleton():
 | `api_client` | FastAPI TestClient（隔离 config） |
 | `project_client` | 已注册项目的 api_client |
 | `mock_popen` | 模拟 subprocess.Popen 用于 ActionBridge 测试 |
+| `system_dir` | 平台相关的系统目录，用于安全沙盒阻断测试 |
 
 ---
 
@@ -420,7 +421,7 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; +23 新测试; 652 tests** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; +32 新测试; 661 tests** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |
 | **6.4.0** | **2026-05-24** | **process_utils提取, 14类型标注, 3处XSS修复, api.js集中化, 前端可折叠面板, SRI哈希, tag管理, file创建, actionModal, 479 tests** |

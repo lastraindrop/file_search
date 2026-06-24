@@ -1,6 +1,6 @@
 # FileCortex v6.5.1 (工作区编排助手)
 
-> **版本**: 6.5.1 | **日期**: 2026-06-15 | **测试**: 652 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **日期**: 2026-06-15 | **测试**: 661 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -47,7 +47,7 @@
 ---
 
 ## 详细文档
-- [综合审计与执行计划](COMPREHENSIVE_ANALYSIS_V8.md)
+- [综合审计与执行计划](COMPREHENSIVE_ANALYSIS_V9.md)
 - [技术指南 (架构/参数对齐/防BUG)](TECHNICAL_GUIDE.md)
 - [开发者指南](DEVELOPER_GUIDE.md)
 - [项目路线图](ROADMAP.md)
@@ -119,8 +119,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **629 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护。
-- **测试结果**: 629 passed, 0 failed
+- **661 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护。
+- **测试结果**: 661 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -179,14 +179,14 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 
 | 参数 | 前端 | 后端 | 默认 |
 |------|------|------|------|
-| `token_threshold` | `state.js` | `GlobalSettings` | 128000 |
-| `token_ratio` | `state.js` | `GlobalSettings` | 4.0 |
+| `token_threshold` | `state.js` | `GlobalSettings` | 128000 (dynamic via `GlobalSettings()`) |
+| `token_ratio` | `state.js` | `GlobalSettings` | 4 (dynamic via `GlobalSettings()`) |
 | `preview_limit_mb` | settings modal | `GlobalSettings` | 1.0 |
 | `allowed_extensions` | settings modal | `GlobalSettings` | "" |
 | `api_token` | `window.__FCTX_API_TOKEN__` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
-| `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.0 |
+| `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.1 |
 
 ---
 
@@ -195,7 +195,6 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 |-----|------|-------|
 | FCTX_API_TOKEN | API 认证 Token | (无) |
 | FCTX_ALLOWED_ORIGINS | 允许的跨域来源 | * |
-| FCTX_PORT | Web 服务端口 | 8000 |
 | FCTX_PROD | 生产模式 (隐藏错误详情) | (无) |
 | FCTX_EXEC_TIMEOUT | 工具执行超时(秒) | 300 |
 

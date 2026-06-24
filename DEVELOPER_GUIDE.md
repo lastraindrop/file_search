@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 652 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 661 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -71,7 +71,7 @@ routers/
 | `api_token` | `window.__FCTX_API_TOKEN__` | `web_app.py` | HTTP `X-API-Token` + WS `token` | `test_api_token_header_forward` |
 | 版本号 | `index.html` `{{ version }}` | `file_cortex_core/__init__.py` | Jinja2 模板注入 | `test_api_index_page_injects_version` |
 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL | `test_ws_search_endpoint` |
-| `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/execute` | WebSocket URL | `test_ws_execute_endpoint` |
+| `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/actions/execute` | WebSocket URL | `test_ws_execute_endpoint` |
 
 **对齐原则**: 添加新参数时，必须同步更新：
 1. 前端 `state.js`/`defaults` 或对应 form 字段
@@ -88,7 +88,7 @@ routers/
 
 ### 2.1 自动化检查
 1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则 + Google pydocstyle)
-2. **Pytest**: `python -m pytest` (验证 **629** 项核心测试)
+2. **Pytest**: `python -m pytest` (验证 **661** 项核心测试)
 
 ### 2.2 Docstrings 样例
 ```python
@@ -175,6 +175,7 @@ tests/
 ├── conftest.py                      # 共享 fixtures + DataManager.reset()
 ├── test_v8_comprehensive.py         # v6.4.0+/v6.5.0 新增 77 项测试 (DI/OOM/CLI/ProcessManager)
 ├── test_coverage_fill.py            # v6.5.0 新增 20 项测试 (process_utils/ProcessManager)
+├── test_security_fixes_v650.py       # v6.5.0 新增 38 项安全修复测试
 ├── test_frontend_contract.py        # v6.5.0 新增 8 项前端契约测试 (共 31 项)
 ├── test_bugfix_v7.py                # v6.4.0 回归测试 (BUF/前端/WebSocket)
 ├── test_bugfix_v633.py              # v6.3.3 BUG修复 + 边界覆盖
@@ -193,7 +194,7 @@ tests/
 ├── test_context_formatter.py        # XML/MD 导出
 ├── test_utils_format.py             # 格式化/Token估算
 ├── test_scenarios.py                # 端到端场景
-├── test_packaging.py                # v6.5.1 新增 — 打包完整性 (6)
+├── test_packaging.py                # v6.5.1 新增 — 打包完整性 (15)
 ├── test_security_v9.py              # v6.5.1 新增 — P0/P1 安全回归 (17)
 ```
 
@@ -231,5 +232,5 @@ tests/
 | **安全加固 (P1)** | 11 项输入字段 `max_length=1000`；dict 字段 `field_validator` 100KB 上限；token 比较 `hmac.compare_digest`；WS `search_task` finally 取消；ProcessManager PID 复用拒绝；`api_terminate_process` 用 Popen 终止 |
 | **核心健壮性** | `to_xml` 日志；`archive_selection` 目录分支 arcname；Windows 长路径剥离；`batch_rename` `count` 参数；search pool shutdown 检查；SearchWorker 异常入队 |
 | **前端** | `ctxAction` try/finally 状态恢复；Bootstrap 5.3 / marked 12.0 / DOMPurify 3.1.6 / mermaid 10.9 SRI 全链完整性校验 |
-| **测试** | +23 项 (test_packaging 6 + test_security_v9 17) / 总计 652 / ruff 0 / 全部通过 |
+| **测试** | +32 项 (test_packaging 15 + test_security_v9 17) / 总计 661 / ruff 0 / 全部通过 |
 | **文档** | 全文档版本号 6.5.0→6.5.1 同步；TECHNICAL_GUIDE 过时测试文件引用修正；ROADMAP v6.5.1 章节 + v7.0 计划更新 |

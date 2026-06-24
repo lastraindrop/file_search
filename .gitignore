@@ -47,3 +47,5 @@ tests/tmp/
 tests/tmp_tests/
 tests/tmp_test_res/
 .omo/
+.playwright-mcp/
+*-regression.png

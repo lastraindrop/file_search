@@ -1,6 +1,6 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 652 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 661 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 ---
 
@@ -31,9 +31,17 @@
 - [x] **BUG-F4**: `ctxAction` 状态污染 → try/finally 恢复
 
 ### 测试补强
-- [x] `tests/test_packaging.py`: 6 项 (D1/D2/Doc5 回归)
+- [x] `tests/test_packaging.py`: 15 项 (D1/D2/Doc5/依赖与文档一致性回归)
 - [x] `tests/test_security_v9.py`: 17 项 (W1/W2/W5/W6/W7/W9/W10/F1 回归)
-- [x] **652 passed, 0 failed** (从 629→652，+23 项；文件数 21→23)
+- [x] **661 passed, 0 failed** (从 629→661，+32 项；文件数 21→23)
+
+### 收尾一致化与运行时验证 (Closeout)
+- [x] **DEP-1**: `fastapi`/`starlette` 依赖基线锁定，避免 Starlette 1.x 破坏性变更提前进入
+- [x] **WS-1**: WebSocket Token 失败在 `accept()` 前关闭，统一返回 4001；action stream 取消后 await 清理
+- [x] **PROC-1**: POSIX 进程组查询竞态增加 direct-kill fallback，降低子进程残留风险
+- [x] **MCP-1**: 兼容新版 MCP SDK 不暴露 `_tools` 的行为，保留 FileCortex 工具注册表
+- [x] **FE-SRI-1**: 修正 DOMPurify 3.1.6 SRI 哈希并添加内联 SVG favicon；Playwright 验证 console 0 errors / 0 warnings
+- [x] **DOC-1**: 文档端点、测试数、动态默认说明与路线图保持一致；`/ws/actions/execute` 为唯一 wsExecute 路由
 
 ---
 
@@ -214,7 +222,7 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); +23 新测试; 652 passed** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); +32 新测试; 661 passed** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
 | **6.4.0** | **2026-05-24** | **14 类型标注, process_utils 提取, 3 处 XSS 修复, api.js 集中化, 前端可折叠面板, SRI 哈希, tag 管理, file 创建, actionModal, 479 passed** |
