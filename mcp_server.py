@@ -56,11 +56,45 @@ except ImportError:
 _mcp_instance: FastMCP | None = None
 
 
+def _ensure_tool_registry(mcp: FastMCP) -> FastMCP:
+    """Adds a stable FileCortex tool registry to FastMCP instances.
+
+    Recent MCP SDK versions no longer expose the private ``_tools`` attribute
+    that the fallback mock has always provided. FileCortex keeps its own small
+    registry for tests, fallback-mode diagnostics, and version-independent
+    introspection while still delegating real registration to the SDK.
+    """
+    if getattr(mcp, "_filecortex_registry_wrapped", False):
+        return mcp
+
+    if not hasattr(mcp, "_tools"):
+        mcp._tools = {}
+
+    original_tool = mcp.tool
+
+    def tool(name: str = None, description: str = "") -> Callable:
+        sdk_decorator = original_tool(name=name, description=description)
+
+        def decorator(func):
+            tool_name = name or func.__name__
+            mcp._tools[tool_name] = {
+                "function": func,
+                "description": description or func.__doc__ or "",
+            }
+            return sdk_decorator(func)
+
+        return decorator
+
+    mcp.tool = tool
+    mcp._filecortex_registry_wrapped = True
+    return mcp
+
+
 def get_mcp() -> FastMCP:
     """Get or create the MCP server instance."""
     global _mcp_instance
     if _mcp_instance is None:
-        _mcp_instance = FastMCP("FileCortex")
+        _mcp_instance = _ensure_tool_registry(FastMCP("FileCortex"))
     return _mcp_instance
 
 def get_dm() -> DataManager:
