@@ -212,10 +212,15 @@ def test_main_js_has_debounced_sync(api_client):
 
 
 def test_index_html_has_sri_integrity(api_client):
-    """Phase 3: CDN resources should have integrity hashes."""
+    """Phase 3: CDN resources should have pinned integrity hashes and favicon."""
     html = api_client.get("/").text
     assert "integrity=" in html
     assert "sha384-" in html
+    assert "dompurify/3.1.6/purify.min.js" in html
+    assert "sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" in html
+    assert "sha384-jBbcGHiBNware7X1o40EPG8kvwD/GGGnYEN1GwbgzbS2M7fhzPUdZzFfEaHrZxlL" not in html
+    assert 'rel="icon"' in html
+    assert "data:image/svg+xml" in html
 
 
 def test_index_html_pinned_cdn_versions(api_client):
