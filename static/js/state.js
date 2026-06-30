@@ -35,6 +35,8 @@ export const config = {
         batchRename: '/api/fs/batch_rename',
         delete: '/api/fs/delete',
         move: '/api/fs/move',
+        copy: '/api/fs/copy',
+        extract: '/api/fs/extract',
         save: '/api/fs/save',
         stageAll: '/api/actions/stage_all',
         categorize: '/api/actions/categorize',
@@ -48,6 +50,8 @@ export const config = {
         createFile: '/api/fs/create',
         wsSearch: '/ws/search',
         wsExecute: '/ws/actions/execute',
+        progress: '/api/fs/progress',
+        progressNew: '/api/fs/progress/new',
     }
 };
 

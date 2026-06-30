@@ -80,9 +80,12 @@ def cmd_stage(args: argparse.Namespace, data_mgr: DataManager) -> None:
         print(f"ERROR: Path '{args.path}' is outside project root or unsafe.")
         return
 
-    proj_data = data_mgr.get_project_data(proj_root)
-    if file_path_str not in proj_data["staging_list"]:
-        proj_data["staging_list"].append(file_path_str)
+    # CRITICAL: use get_project_data_obj() (live ProjectConfig), NOT
+    # get_project_data() which returns a disconnected model_dump() snapshot.
+    # Mutating the snapshot was silently lost on save().
+    proj = data_mgr.get_project_data_obj(proj_root)
+    if file_path_str not in proj.staging_list:
+        proj.staging_list.append(file_path_str)
         data_mgr.save()
         print(f"Staged: {file_path_str}")
     else:
@@ -167,15 +170,19 @@ def cmd_categorize(args: argparse.Namespace, data_mgr: DataManager) -> None:
     if not proj_root:
         return
 
-    proj_data = data_mgr.get_project_data(proj_root)
-    paths = proj_data["staging_list"]
+    # CRITICAL: use get_project_data_obj() (live ProjectConfig), NOT
+    # get_project_data() which returns a disconnected model_dump() snapshot.
+    # Reassigning the snapshot key was silently lost on save(), leaving the
+    # real staging list populated after categorize.
+    proj = data_mgr.get_project_data_obj(proj_root)
+    paths = list(proj.staging_list)
     if not paths:
         print("Staging list is empty.")
         return
     try:
         moved = FileOps.batch_categorize(proj_root, paths, args.category)
         print(f"Moved {len(moved)} files to {args.category}")
-        proj_data["staging_list"] = []
+        proj.staging_list = []
         data_mgr.save()
     except Exception as e:
         print(f"ERROR: {e}")
@@ -188,7 +195,7 @@ def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> None:
         return
 
     proj_data = data_mgr.get_project_data(proj_root)
-    template = proj_data["custom_tools"].get(args.tool)
+    template = proj_data.get("custom_tools", {}).get(args.tool)
     if not template:
         print(f"Tool '{args.tool}' not found.")
         return
@@ -204,6 +211,71 @@ def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> None:
             print(f"ERROR: {res['error']}")
         else:
             print(f"EXIT CODE: {res['exit_code']}")
+
+
+def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> None:
+    """Handles the 'copy' subcommand (batch copy, one or more sources)."""
+    proj_root = _resolve_project(data_mgr, args.project)
+    if not proj_root:
+        return
+
+    # Validate every source path before touching the filesystem so a
+    # single unsafe entry aborts the whole batch (matches core semantics).
+    normalized_srcs: list[str] = []
+    for src in args.srcs:
+        src_str = PathValidator.norm_path(src)
+        if not PathValidator.is_safe(src_str, proj_root):
+            logger.error(f"Security: CLI block unsafe src: {src}")
+            print(f"ERROR: Source '{src}' is outside project root or unsafe.")
+            return
+        normalized_srcs.append(src_str)
+
+    dst_str = PathValidator.norm_path(args.dst_dir)
+    if not PathValidator.is_safe(dst_str, proj_root):
+        logger.error(f"Security: CLI block unsafe dst: {args.dst_dir}")
+        print(
+            f"ERROR: Destination '{args.dst_dir}' is outside project root "
+            f"or unsafe."
+        )
+        return
+
+    try:
+        result = FileOps.copy_item(
+            srcs=normalized_srcs,
+            dst_dir_str=dst_str,
+            project_root=proj_root,
+        )
+    except (FileNotFoundError, FileExistsError, PermissionError, ValueError) as e:
+        print(f"ERROR: {e}")
+        return
+    for p in result:
+        print(f"Copied: {p}")
+
+
+def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> None:
+    """Handles the 'extract' subcommand."""
+    proj_root = _resolve_project(data_mgr, args.project)
+    if not proj_root:
+        return
+
+    dst_str = PathValidator.norm_path(args.dst_dir)
+    if not PathValidator.is_safe(dst_str, proj_root):
+        logger.error(f"Security: CLI block unsafe dst: {args.dst_dir}")
+        print(
+            f"ERROR: Destination '{args.dst_dir}' is outside project root "
+            f"or unsafe."
+        )
+        return
+
+    # The archive may live outside the project workspace; only the
+    # extraction destination must be safe (validated above and again inside
+    # FileOps.extract_archive on a per-member basis).
+    try:
+        extracted = FileOps.extract_archive(args.zip_path, dst_str, proj_root)
+    except (FileNotFoundError, PermissionError, ValueError) as e:
+        print(f"ERROR: {e}")
+        return
+    print(f"Extracted {len(extracted)} entries to: {dst_str}")
 
 
 def main() -> None:
@@ -269,6 +341,25 @@ def main() -> None:
     run_p.add_argument("project", help="Project root path")
     run_p.add_argument("tool", help="Tool name")
 
+    copy_p = subparsers.add_parser(
+        "copy",
+        help="Copy one or more files/directories within a project",
+    )
+    copy_p.add_argument("project", help="Project root path")
+    copy_p.add_argument(
+        "srcs",
+        nargs="+",
+        help="Source paths to copy (one or more)",
+    )
+    copy_p.add_argument(
+        "dst_dir", help="Destination directory relative to project root"
+    )
+
+    extract_p = subparsers.add_parser("extract", help="Extract a ZIP archive into a project")
+    extract_p.add_argument("project", help="Project root path")
+    extract_p.add_argument("zip_path", help="Path to ZIP archive")
+    extract_p.add_argument("dst_dir", help="Destination directory relative to project root")
+
     args = parser.parse_args()
     data_mgr = DataManager()
 
@@ -280,6 +371,8 @@ def main() -> None:
         "export": cmd_export,
         "categorize": cmd_categorize,
         "run": cmd_run,
+        "copy": cmd_copy,
+        "extract": cmd_extract,
     }
 
     handler = handlers.get(args.command)

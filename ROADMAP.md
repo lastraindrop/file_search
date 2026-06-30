@@ -1,6 +1,6 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 661 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 768 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 ---
 
@@ -33,7 +33,7 @@
 ### 测试补强
 - [x] `tests/test_packaging.py`: 15 项 (D1/D2/Doc5/依赖与文档一致性回归)
 - [x] `tests/test_security_v9.py`: 17 项 (W1/W2/W5/W6/W7/W9/W10/F1 回归)
-- [x] **661 passed, 0 failed** (从 629→661，+32 项；文件数 21→23)
+- [x] **768 passed, 0 failed** (稳定化/copy-extract/批量copy+事务extract+progress/前端稳定化 回归覆盖；文件数 25)
 
 ### 收尾一致化与运行时验证 (Closeout)
 - [x] **DEP-1**: `fastapi`/`starlette` 依赖基线锁定，避免 Starlette 1.x 破坏性变更提前进入
@@ -42,6 +42,33 @@
 - [x] **MCP-1**: 兼容新版 MCP SDK 不暴露 `_tools` 的行为，保留 FileCortex 工具注册表
 - [x] **FE-SRI-1**: 修正 DOMPurify 3.1.6 SRI 哈希并添加内联 SVG favicon；Playwright 验证 console 0 errors / 0 warnings
 - [x] **DOC-1**: 文档端点、测试数、动态默认说明与路线图保持一致；`/ws/actions/execute` 为唯一 wsExecute 路由
+
+### 文件系统完善 — 批次 1 (File System Completion Tranche 1 — 2026-06-30)
+- [x] **FS-1**: `copy_item` 批量复制 (srcs: list[str])，递归目录复制，安全边界校验
+- [x] **FS-2**: `extract_archive` 事务化提取 (三段式：验证→暂存→原子移动)，zip-slip 防护，no-overwrite
+- [x] **FS-3**: `/api/fs/copy` 批量端点，`/api/fs/extract` 事务提取端点
+- [x] **FS-4**: `fctx copy` 多源 CLI 支持 (nargs='+')
+- [x] **FS-5**: Web UI 批量 Copy/Extract 按钮，操作进度条
+
+### 文件系统完善 — 批次 2 + 前端稳定化 (Tranche 2 + FE Stabilization — 2026-06-30)
+- [x] **FS-6**: `ProgressTracker` 线程安全进度注册表 + `/api/fs/progress` / `/api/fs/progress/new` 轮询端点
+- [x] **FS-7**: `task_id` 贯通 schema→route→core 完整链路；前端真实进度轮询 (_pollProgress)
+- [x] **FE-FIX-1**: 批量 Extract `indexOf` 进度 bug 修复 (改用 `entries()`)
+- [x] **FE-FIX-2**: `N selected` 选择计数文案 + 全选框 indeterminate 状态
+- [x] **FE-FIX-3**: 操作确认按钮防重复提交 (disabled guard)
+- [x] **FE-FIX-4**: Extract ZIP 无 ZIP 时不弹窗 + 非 ZIP 忽略提示
+- [x] **FE-FIX-5**: `bulkActions` d-flex 显示回归修复
+- [x] **FE-CONTRACT**: 4 项新前端契约测试 (真实 progress 引用、entries() 使用、双提交守卫、N selected)
+- [x] **API-CONTRACT**: 2 项新 API 回归测试 (copy/extract task_id 贯通 ProgressTracker)
+
+### 后续工作 (Next Steps)
+- [ ] 最近目标目录记忆 (localStorage)
+- [ ] 右键菜单上下文感知 (按文件类型显示/隐藏操作)
+- [ ] 操作结果摘要 (复制/提取成功/失败详情)
+- [ ] 目标目录自动预填 (父目录/项目根/上次记忆)
+- [ ] 键盘快捷键 (Ctrl+A 全选树内文件)
+- [ ] 轻量操作历史 (localStorage)
+- [ ] UI 文案 i18n 预备 (strings 对象)
 
 ---
 
@@ -222,7 +249,7 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); +32 新测试; 661 passed** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 passed** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
 | **6.4.0** | **2026-05-24** | **14 类型标注, process_utils 提取, 3 处 XSS 修复, api.js 集中化, 前端可折叠面板, SRI 哈希, tag 管理, file 创建, actionModal, 479 passed** |

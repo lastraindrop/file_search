@@ -5,6 +5,7 @@ security, WebSocket search, generation flow.
 """
 
 import importlib
+import pathlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -187,6 +188,176 @@ class TestWebAPIAdvanced:
             "project_root": str(mock_project),
         })
         assert res.status_code != 200
+
+    @pytest.mark.parametrize("malicious_name", [
+        "../evil.zip",   # POSIX traversal via forward slash
+        "..\\evil.zip",  # Windows traversal via backslash
+        "..",            # bare traversal component (no separator)
+        "..\\",          # trailing traversal separator (Windows)
+        "../",           # trailing traversal separator (POSIX)
+        "subdir/evil.zip",   # nested forward-slash path
+        "subdir\\evil.zip",  # nested backslash path
+    ])
+    def test_api_archive_traversal_names_rejected(
+        self, project_client, mock_project, malicious_name
+    ):
+        """Regression: archive output names with separators/traversal are rejected.
+
+        Malicious names must NOT write any file outside the project root.
+        See routers/fs_routes.py:api_archive path-traversal fix.
+        """
+        res = project_client.post("/api/fs/archive", json={
+            "paths": [str(mock_project / "src")],
+            "output_name": malicious_name,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code in (400, 403), (
+            f"Expected rejection for malicious name {malicious_name!r}, "
+            f"got {res.status_code}"
+        )
+        # No stray archive leaked into the project root's parent (traversal).
+        assert not (mock_project.parent / "evil.zip").exists()
+        assert not (mock_project / "evil.zip").exists()
+
+    @pytest.mark.parametrize("safe_name", [
+        "backup.zip",
+        "archive-2026.zip",
+        "my data.zip",       # spaces are allowed (no separator)
+        "中文归档.zip",        # non-ASCII basename is allowed
+    ])
+    def test_api_archive_safe_names_accepted(
+        self, project_client, mock_project, safe_name
+    ):
+        """Regression: benign archive names still succeed and land inside root."""
+        res = project_client.post("/api/fs/archive", json={
+            "paths": [str(mock_project / "src")],
+            "output_name": safe_name,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200, (
+            f"Safe name {safe_name!r} was rejected: {res.status_code} {res.text}"
+        )
+        # The archive must be written inside the project root.
+        assert (mock_project / safe_name).exists()
+
+    def test_api_copy_file(self, project_client, mock_project):
+        """Verify copying a file via API."""
+        src = str(mock_project / "src" / "main.py")
+        dst_dir = str(mock_project)
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "new_paths" in data
+        copied = pathlib.Path(data["new_paths"][0])
+        assert copied.exists()
+        assert copied.name == "main.py"
+
+    def test_api_copy_directory(self, project_client, mock_project):
+        """Verify copying a directory via API."""
+        src = str(mock_project / "src")
+        dst_dir = str(mock_project / "backup")
+        pathlib.Path(dst_dir).mkdir(parents=True, exist_ok=True)
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        copied = pathlib.Path(data["new_paths"][0])
+        assert copied.is_dir()
+        assert (copied / "main.py").exists()
+
+    def test_api_copy_unauthorized(self, project_client, mock_project, tmp_path):
+        """Copying outside project scope is blocked."""
+        src = str(mock_project / "src" / "main.py")
+        dst_dir = str(tmp_path / "evil")
+        dst_dir_path = pathlib.Path(dst_dir)
+        dst_dir_path.mkdir(parents=True, exist_ok=True)
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 403
+
+    def test_api_copy_duplicate_rejected(self, project_client, mock_project):
+        """Copying to an existing target returns error."""
+        src = str(mock_project / "src" / "main.py")
+        dst_dir = str(mock_project)
+        # First copy succeeds
+        res1 = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res1.status_code == 200
+        # Second copy to same destination fails
+        res2 = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res2.status_code == 400
+
+    def test_api_extract_archive(self, project_client, mock_project, tmp_path):
+        """Verify extracting a ZIP archive via API."""
+        import zipfile
+        zip_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("extracted.txt", "hello from zip")
+        dst_dir = str(mock_project / "extracted")
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(zip_path),
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "extracted_paths" in data
+        assert any("extracted.txt" in p for p in data["extracted_paths"])
+        assert (mock_project / "extracted" / "extracted.txt").exists()
+
+    def test_api_extract_unauthorized_dst(self, project_client, mock_project, tmp_path):
+        """Extracting to a destination outside project scope is blocked."""
+        import zipfile
+        zip_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("evil.txt", "nope")
+        dst_dir = str(tmp_path / "evil")
+        pathlib.Path(dst_dir).mkdir(parents=True, exist_ok=True)
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(zip_path),
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 403
+
+    def test_api_extract_external_archive_allowed(self, project_client, mock_project, tmp_path):
+        """External archives (outside project root) are allowed for bundle import."""
+        import zipfile
+        # Archive lives outside the project root
+        external_zip = tmp_path / "external_bundle.zip"
+        with zipfile.ZipFile(external_zip, "w") as zf:
+            zf.writestr("imported.txt", "imported content")
+        dst_dir = str(mock_project / "imports")
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(external_zip),
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert (mock_project / "imports" / "imported.txt").exists()
+
 
     def test_api_session_save_and_verify(self, project_client, mock_project):
         """Verify session persistence and retrieval."""
@@ -522,3 +693,348 @@ def test_api_search_websocket_protocol(project_client, mock_project):
                 pytest.fail(f"Search WS error: {data}")
             results.append(data)
         assert len(results) >= 1
+
+
+@pytest.mark.parametrize("malformed_config", [
+    {},                      # Legacy config missing `custom_tools` key entirely
+    {"custom_tools": {}},    # Empty custom_tools dict
+])
+def test_ws_action_execute_handles_missing_custom_tools(
+    project_client, mock_project, malformed_config,
+):
+    """Regression test for missing/empty custom_tools config.
+
+    /ws/actions/execute must not crash (KeyError) when a project config lacks
+    the `custom_tools` key. It should fall through to the 'Tool template not
+    found' error path instead.
+    """
+    from file_cortex_core import DataManager
+
+    # Simulate a legacy/malformed config that lacks `custom_tools`.
+    # resolve_project_root (used for validation) is unaffected, so the project
+    # still resolves; only the subsequent config lookup is malformed.
+    original = DataManager.get_project_data
+    DataManager.get_project_data = lambda self, path_str: dict(malformed_config)
+    try:
+        ws_url = (
+            f"/ws/actions/execute?project_path={str(mock_project)}"
+            f"&tool_name=Summary&path={str(mock_project / 'src' / 'main.py')}"
+        )
+        with project_client.websocket_connect(ws_url) as ws:
+            data = ws.receive_json()
+            assert data["status"] == "ERROR"
+            assert "not found" in data["msg"].lower()
+    finally:
+        DataManager.get_project_data = original
+
+
+# ==============================================================================
+# 4. Copy / Extract API Tests
+# ==============================================================================
+
+class TestAPICopyExtract:
+    """Tests for /api/fs/copy and /api/fs/extract endpoints."""
+
+    # ------------------------------------------------------------------
+    # Copy
+    # ------------------------------------------------------------------
+
+    def test_api_copy_file_success(self, project_client, mock_project):
+        """Copying a file via API returns the new path."""
+        src = str(mock_project / "README.md")
+        dst_dir = str(mock_project / "src")
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "new_paths" in data
+        assert pathlib.Path(data["new_paths"][0]).name == "README.md"
+
+    def test_api_copy_directory_success(self, project_client, mock_project):
+        """Copying a directory via API returns the new directory path."""
+        src = str(mock_project / "src")
+        dst = mock_project / "backup"
+        dst.mkdir()
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert (dst / "src" / "main.py").exists()
+
+    def test_api_copy_conflict_returns_400(self, project_client, mock_project):
+        """Copying to an existing destination returns 400."""
+        src = str(mock_project / "README.md")
+        dst_dir = str(mock_project / "src")
+        # Create the collision so the copy fails.
+        (mock_project / "src" / "README.md").write_text("DST", encoding="utf-8")
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": dst_dir,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 400
+
+    def test_api_copy_unsafe_source_returns_403(self, project_client, mock_project, tmp_path):
+        """Copy with source outside project root is blocked."""
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret", encoding="utf-8")
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [str(outside)],
+            "dst_dir": str(mock_project / "src"),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 403
+
+    def test_api_copy_unsafe_destination_returns_403(self, project_client, mock_project, tmp_path):
+        """Copy with destination outside project root is blocked."""
+        outside_dir = tmp_path / "escape"
+        outside_dir.mkdir()
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [str(mock_project / "README.md")],
+            "dst_dir": str(outside_dir),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 403
+
+    def test_api_copy_missing_source_returns_400(self, project_client, mock_project):
+        """Copy with non-existent source returns 400."""
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [str(mock_project / "does_not_exist.txt")],
+            "dst_dir": str(mock_project / "src"),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 400
+
+    # ------------------------------------------------------------------
+    # Extract
+    # ------------------------------------------------------------------
+
+    def _make_zip(self, members: dict[str, bytes | None], path: pathlib.Path) -> pathlib.Path:
+        """Creates a ZIP archive at *path* for API extract tests."""
+        import zipfile
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, payload in members.items():
+                if payload is None:
+                    zi = zipfile.ZipInfo(name)
+                    zi.external_attr = (0o040000 << 16) | 0o755
+                    zf.writestr(zi, b"")
+                else:
+                    zf.writestr(name, payload)
+        return path
+
+    def test_api_extract_archive_success(self, project_client, mock_project, tmp_path):
+        """Extracting a benign archive via API returns extracted paths."""
+        archive = self._make_zip(
+            {"a.txt": b"alpha", "b.txt": b"beta"},
+            tmp_path / "normal.zip",
+        )
+        dst = str(mock_project / "extracted")
+
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(archive),
+            "dst_dir": dst,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert len(data["extracted_paths"]) >= 2
+        assert (mock_project / "extracted" / "a.txt").read_bytes() == b"alpha"
+
+    def test_api_extract_missing_archive_returns_400(self, project_client, mock_project):
+        """Extract with non-existent archive returns 400."""
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(mock_project / "missing.zip"),
+            "dst_dir": str(mock_project / "out"),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 400
+
+    def test_api_extract_existing_target_returns_400_without_overwrite(
+        self, project_client, mock_project, tmp_path
+    ):
+        """Extract conflicts return 400 and leave the existing file unchanged."""
+        archive = self._make_zip({"a.txt": b"new"}, tmp_path / "conflict.zip")
+        dst = mock_project / "existing_extract"
+        dst.mkdir()
+        existing = dst / "a.txt"
+        existing.write_text("old", encoding="utf-8")
+
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(archive),
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 400
+        assert existing.read_text(encoding="utf-8") == "old"
+
+    def test_api_extract_unsafe_destination_returns_403(
+        self, project_client, mock_project, tmp_path
+    ):
+        """Extract with destination outside project root is blocked."""
+        archive = self._make_zip({"a.txt": b"a"}, tmp_path / "ok.zip")
+        outside = tmp_path / "escape"
+        outside.mkdir()
+
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(archive),
+            "dst_dir": str(outside),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 403
+
+    def test_api_extract_zip_slip_returns_400(self, project_client, mock_project, tmp_path):
+        """Extracting a hostile archive with traversal member returns 400."""
+        archive = self._make_zip({"../evil.txt": b"pwned"}, tmp_path / "hostile.zip")
+        dst = str(mock_project / "target")
+
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(archive),
+            "dst_dir": dst,
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 400
+        # Critical invariant: nothing escaped.
+        assert not list(mock_project.parent.rglob("evil.txt"))
+
+    # ------------------------------------------------------------------
+    # Batch copy + progress (Phase A / Phase B)
+    # ------------------------------------------------------------------
+
+    def test_api_batch_copy_multiple_files(self, project_client, mock_project):
+        """Batch copy of multiple files returns a new_paths list with all entries."""
+        a = mock_project / "a.txt"
+        b = mock_project / "b.txt"
+        a.write_text("A", encoding="utf-8")
+        b.write_text("B", encoding="utf-8")
+        dst = mock_project / "batch_dst"
+        dst.mkdir()
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [str(a), str(b)],
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert len(data["new_paths"]) == 2
+        names = {pathlib.Path(p).name for p in data["new_paths"]}
+        assert names == {"a.txt", "b.txt"}
+        assert (dst / "a.txt").exists()
+        assert (dst / "b.txt").exists()
+
+    def test_api_copy_single_file_backward_compat(self, project_client, mock_project):
+        """A single-element srcs list still works (backward compatibility)."""
+        src = str(mock_project / "README.md")
+        dst = mock_project / "single_dst"
+        dst.mkdir()
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data["new_paths"]) == 1
+        assert pathlib.Path(data["new_paths"][0]).name == "README.md"
+        assert (dst / "README.md").exists()
+
+    def test_api_copy_empty_srcs_rejected(self, project_client, mock_project):
+        """An empty srcs list is rejected with 422 (pydantic validation)."""
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [],
+            "dst_dir": str(mock_project / "src"),
+            "project_root": str(mock_project),
+        })
+        assert res.status_code == 422
+
+    def test_api_progress_new_and_get(self, project_client):
+        """Creating a progress task then polling returns its pending state."""
+        res = project_client.post("/api/fs/progress/new", json={"total": 5})
+        assert res.status_code == 200
+        task_id = res.json()["task_id"]
+        assert isinstance(task_id, str) and task_id
+
+        poll = project_client.post(
+            "/api/fs/progress", json={"task_id": task_id}
+        )
+        assert poll.status_code == 200
+        body = poll.json()
+        assert body["task_id"] == task_id
+        assert body["status"] == "pending"
+        assert body["total"] == 5
+        assert body["done"] == 0
+
+    def test_api_progress_unknown_task_404(self, project_client):
+        """Polling an unknown task_id returns 404."""
+        res = project_client.post(
+            "/api/fs/progress", json={"task_id": "nonexistent-task-xyz"}
+        )
+        assert res.status_code == 404
+
+    def test_api_copy_task_id_updates_progress(self, project_client, mock_project):
+        """Copy endpoint should pass task_id through to ProgressTracker."""
+        from file_cortex_core import ProgressTracker
+
+        src = str(mock_project / "README.md")
+        dst = mock_project / "tracked_copy"
+        dst.mkdir()
+        task_id = ProgressTracker.new_task(total=1)
+
+        res = project_client.post("/api/fs/copy", json={
+            "srcs": [src],
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+            "task_id": task_id,
+        })
+
+        assert res.status_code == 200
+        progress = ProgressTracker.get(task_id)
+        assert progress is not None
+        assert progress["status"] == "done"
+        assert progress["done"] == 1
+        assert progress["total"] == 1
+
+    def test_api_extract_task_id_updates_progress(
+        self, project_client, mock_project, tmp_path
+    ):
+        """Extract endpoint should pass task_id through to ProgressTracker."""
+        from file_cortex_core import ProgressTracker
+
+        archive = self._make_zip(
+            {"a.txt": b"alpha", "b.txt": b"beta"},
+            tmp_path / "tracked_extract.zip",
+        )
+        dst = mock_project / "tracked_extract"
+        task_id = ProgressTracker.new_task(total=2)
+
+        res = project_client.post("/api/fs/extract", json={
+            "zip_path": str(archive),
+            "dst_dir": str(dst),
+            "project_root": str(mock_project),
+            "task_id": task_id,
+        })
+
+        assert res.status_code == 200
+        progress = ProgressTracker.get(task_id)
+        assert progress is not None
+        assert progress["status"] == "done"
+        assert progress["done"] == 2
+        assert progress["total"] == 2

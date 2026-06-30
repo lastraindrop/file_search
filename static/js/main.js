@@ -128,11 +128,15 @@ const App = {
         if (actionConfirm) {
             actionConfirm.addEventListener('click', async () => {
                 if (!App.state.actionModalHandler) return;
+                if (actionConfirm.disabled) return;
                 actionConfirm.disabled = true;
                 try {
                     await App.state.actionModalHandler();
                 } finally {
-                    actionConfirm.disabled = false;
+                    const modalEl = document.getElementById('actionModal');
+                    if (modalEl && modalEl.classList.contains('show')) {
+                        actionConfirm.disabled = false;
+                    }
                 }
             });
         }
@@ -591,6 +595,68 @@ const App = {
                     document.getElementById('fileControls').style.display = 'none';
                     ui.showToast("File deleted", 'success');
                 } catch (e) { ui.showToast("Delete failed: " + e.message, 'danger'); }
+            }
+        });
+    },
+
+    copyFile: async (path = null) => {
+        const src = path || App.state.currentFile;
+        if (!src) return ui.showToast("Select a file or folder first", 'warning');
+        if (!App.state.projectPath) return ui.showToast("Open a project first", 'warning');
+
+        ui.showActionModal({
+            title: 'Copy file or folder',
+            confirmText: 'Copy',
+            bodyHtml: `
+                <div class="small text-muted mb-2">Copy <strong>${App.escapeHtml(getFileName(src))}</strong> into another project directory.</div>
+                <label class="form-label small text-muted">Destination directory</label>
+                <input type="text" id="copyDestinationInput" class="form-control bg-dark text-white border-secondary"
+                    placeholder="Destination directory path">
+            `,
+            onConfirm: async () => {
+                const dstDir = document.getElementById('copyDestinationInput').value.trim();
+                if (!dstDir) return ui.showToast("Destination directory is required", 'warning');
+                try {
+                    const data = await api.copyFile(src, dstDir, App.state.projectPath);
+                    ui.closeActionModal();
+                    ui.showToast(`Copied to ${(data.new_paths && data.new_paths[0]) || dstDir}`, 'success');
+                    App.refreshProject();
+                } catch (e) { ui.showToast("Copy failed: " + e.message, 'danger'); }
+            }
+        });
+    },
+
+    extractArchive: async (zipPath = null) => {
+        const stagedZip = Array.from(App.state.staging).find((p) => getFileExt(p) === 'zip');
+        const initialZip = zipPath || (getFileExt(App.state.currentFile) === 'zip' ? App.state.currentFile : stagedZip) || '';
+        if (!App.state.projectPath) return ui.showToast("Open a project first", 'warning');
+
+        ui.showActionModal({
+            title: 'Extract ZIP archive',
+            confirmText: 'Extract',
+            bodyHtml: `
+                <div class="mb-3">
+                    <label class="form-label small text-muted">ZIP archive path</label>
+                    <input type="text" id="extractZipInput" class="form-control bg-dark text-white border-secondary"
+                        value="${App.escapeHtml(initialZip)}" placeholder="Archive path">
+                </div>
+                <div class="mb-0">
+                    <label class="form-label small text-muted">Destination directory</label>
+                    <input type="text" id="extractDestinationInput" class="form-control bg-dark text-white border-secondary"
+                        placeholder="Destination directory path">
+                </div>
+            `,
+            onConfirm: async () => {
+                const archivePath = document.getElementById('extractZipInput').value.trim();
+                const dstDir = document.getElementById('extractDestinationInput').value.trim();
+                if (!archivePath || !dstDir) return ui.showToast("Archive and destination are required", 'warning');
+                try {
+                    const data = await api.extractArchive(archivePath, dstDir, App.state.projectPath);
+                    const count = data.extracted_paths ? data.extracted_paths.length : 0;
+                    ui.closeActionModal();
+                    ui.showToast(`Extracted ${count} entries`, 'success');
+                    App.refreshProject();
+                } catch (e) { ui.showToast("Extract failed: " + e.message, 'danger'); }
             }
         });
     },
@@ -1071,10 +1137,25 @@ const App = {
     updateBulkUI: () => {
         const count = App.state.selectedFiles.size;
         const countLabel = document.getElementById('selectedCount');
-        if (countLabel) countLabel.innerText = count;
+        if (countLabel) countLabel.innerText = `${count} selected`;
         const bulkActions = document.getElementById('bulkActions');
         if (bulkActions) {
             bulkActions.style.display = count > 0 ? 'flex' : 'none';
+        }
+        const selectAllCb = document.getElementById('selectAllCb');
+        if (selectAllCb) {
+            const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
+            let selectable = 0;
+            let selected = 0;
+            allItems.forEach(item => {
+                const path = item.getAttribute('data-path');
+                if (path) {
+                    selectable++;
+                    if (App.state.selectedFiles.has(path)) selected++;
+                }
+            });
+            selectAllCb.indeterminate = selectable > 0 && selected > 0 && selected < selectable;
+            selectAllCb.checked = selectable > 0 && selected === selectable;
         }
     },
 
@@ -1132,6 +1213,142 @@ const App = {
                 } catch (e) { ui.showToast("Move failed: " + e.message, 'danger'); }
             }
         });
+    },
+
+    bulkCopy: async () => {
+        if (App.state.selectedFiles.size === 0) return;
+        if (!App.state.projectPath) return ui.showToast("Open a project first", 'warning');
+        ui.showActionModal({
+            title: 'Copy selected files',
+            confirmText: 'Copy',
+            bodyHtml: `
+                <p class="small text-muted mb-2">Copy <strong>${App.state.selectedFiles.size}</strong> file(s) into another project directory.</p>
+                <label class="form-label small text-muted">Destination directory</label>
+                <input type="text" id="bulkCopyInput" class="form-control bg-dark text-white border-secondary"
+                    placeholder="Destination directory path">
+            `,
+            onConfirm: async () => {
+                const dstDir = document.getElementById('bulkCopyInput').value.trim();
+                if (!dstDir) return ui.showToast("Destination directory is required", 'warning');
+                App._showProgress();
+                try {
+                    const files = Array.from(App.state.selectedFiles);
+                    const { task_id: taskId } = await api.newProgressTask(files.length);
+                    const copyPromise = api.copyFile(files, dstDir, App.state.projectPath, taskId);
+                    const pollPromise = App._pollProgress(taskId, files.length, 'Copying');
+                    const [data] = await Promise.all([copyPromise, pollPromise]);
+                    ui.closeActionModal();
+                    const count = data.new_paths ? data.new_paths.length : 0;
+                    ui.showToast(`Copied ${count} item(s).`, 'success');
+                    App.state.selectedFiles.clear();
+                    App.updateBulkUI();
+                    App.openProject();
+                } catch (e) { ui.showToast("Batch copy failed: " + e.message, 'danger'); }
+                finally { App._hideProgress(); }
+            }
+        });
+    },
+
+    bulkExtract: async () => {
+        if (App.state.selectedFiles.size === 0) return;
+        if (!App.state.projectPath) return ui.showToast("Open a project first", 'warning');
+        const allSelected = Array.from(App.state.selectedFiles);
+        const zips = allSelected.filter(p => getFileExt(p) === 'zip');
+        if (zips.length === 0) {
+            ui.showToast("No ZIP files selected", 'warning');
+            return;
+        }
+        const ignored = allSelected.length - zips.length;
+        ui.showActionModal({
+            title: 'Extract selected archives',
+            confirmText: 'Extract',
+            bodyHtml: `
+                <p class="small text-muted mb-2">Extract <strong>${zips.length}</strong> ZIP archive(s).${ignored > 0 ? ` <span class="text-warning">${ignored} non-ZIP item(s) will be ignored.</span>` : ''}</p>
+                <label class="form-label small text-muted">Destination directory</label>
+                <input type="text" id="bulkExtractInput" class="form-control bg-dark text-white border-secondary"
+                    placeholder="Destination directory path">
+            `,
+            onConfirm: async () => {
+                const dstDir = document.getElementById('bulkExtractInput').value.trim();
+                if (!dstDir) return ui.showToast("Destination directory is required", 'warning');
+                App._showProgress();
+                let extracted = 0;
+                try {
+                    for (const [index, zip] of zips.entries()) {
+                        const { task_id: taskId } = await api.newProgressTask(1);
+                        const poll = App._pollProgress(taskId, 1, `Extracting ${index + 1}/${zips.length}`);
+                        const data = await api.extractArchive(zip, dstDir, App.state.projectPath, taskId);
+                        await poll;
+                        extracted += data.extracted_paths ? data.extracted_paths.length : 0;
+                        App._updateProgress(((index + 1) / zips.length) * 100, `${index + 1}/${zips.length} Extracted...`);
+                    }
+                    ui.closeActionModal();
+                    ui.showToast(`Extracted ${extracted} entries from ${zips.length} archive(s).`, 'success');
+                    App.state.selectedFiles.clear();
+                    App.updateBulkUI();
+                    App.openProject();
+                } catch (e) {
+                    ui.showToast("Extract failed: " + e.message, 'danger');
+                } finally {
+                    App._hideProgress();
+                }
+            }
+        });
+    },
+
+    _pollProgress: async (taskId, total, label = 'Processing') => {
+        return new Promise((resolve) => {
+            const interval = setInterval(async () => {
+                try {
+                    const prog = await api.getProgress(taskId);
+                    const done = prog.done || 0;
+                    const progressTotal = prog.total || total;
+                    const message = prog.message || '';
+                    const pct = progressTotal > 0 ? Math.min((done / progressTotal) * 100, 100) : 0;
+                    const inner = document.getElementById('operationProgressBar');
+                    if (inner) {
+                        inner.style.width = pct + '%';
+                        inner.innerText = `${done}/${progressTotal} ${message || label}...`;
+                    }
+                    if (prog.status === 'done' || prog.status === 'failed' || prog.status === 'error' || done >= progressTotal) {
+                        clearInterval(interval);
+                        resolve(prog);
+                    }
+                } catch (e) {
+                    clearInterval(interval);
+                    resolve({ status: 'error', message: e.message });
+                }
+            }, 400);
+        });
+    },
+
+    _showProgress: () => {
+        const bar = document.getElementById('operationProgress');
+        if (bar) {
+            bar.style.display = 'block';
+            const inner = document.getElementById('operationProgressBar');
+            if (inner) {
+                inner.style.width = '0%';
+                inner.innerText = 'Starting...';
+            }
+        }
+    },
+
+    _hideProgress: () => {
+        const bar = document.getElementById('operationProgress');
+        if (bar) {
+            bar.style.display = 'none';
+            const inner = document.getElementById('operationProgressBar');
+            if (inner) { inner.style.width = '0%'; inner.innerText = '0%'; }
+        }
+    },
+
+    _updateProgress: (pct, text = null) => {
+        const inner = document.getElementById('operationProgressBar');
+        if (inner) {
+            inner.style.width = pct + '%';
+            inner.innerText = text || (Math.round(pct) + '%');
+        }
     },
 
     clearStaging: () => {
@@ -1255,6 +1472,12 @@ const App = {
                     await navigator.clipboard.writeText(path);
                     ui.showToast("Path Copied");
                 } catch (_) { ui.showToast("Copy failed", 'danger'); }
+                break;
+            case 'copyItem':
+                await App.copyFile(path);
+                break;
+            case 'extract':
+                await App.extractArchive(path);
                 break;
             case 'openOs':
                 App.openInExplorer(path);

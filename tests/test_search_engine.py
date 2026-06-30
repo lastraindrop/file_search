@@ -1,6 +1,9 @@
 """Tests for the multi-mode search engine and matching logic."""
 
+import contextlib
+import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -107,3 +110,92 @@ def test_search_interruption_resilience(stress_project):
 
     # Should have very few results if any, as it checks stop_event in loops
     assert len(results) < 50
+
+
+# -----------------------------------------------------------------------------
+# 5. Shared Pool Robustness Regression
+# -----------------------------------------------------------------------------
+
+@pytest.fixture
+def _restored_search_pool():
+    """Ensure the module-level shared search pool is usable after the test.
+
+    Regression tests below deliberately shut the pool down to exercise the
+    fallback path; this fixture guarantees no shut-down pool leaks into later
+    tests, regardless of pass/fail.
+    """
+    import file_cortex_core.search as search_mod
+
+    yield search_mod
+
+    # Always leave a fresh, running pool for subsequent tests.
+    with contextlib.suppress(Exception):
+        search_mod.SHARED_SEARCH_POOL.shutdown(wait=False)
+    search_mod.SHARED_SEARCH_POOL = ThreadPoolExecutor(
+        max_workers=os.cpu_count() or 4
+    )
+
+
+def test_content_search_reinitializes_shut_down_pool(
+    mock_project, _restored_search_pool
+):
+    """Content search must survive a shut-down shared pool.
+
+    Regression for the brittle ``SHARED_SEARCH_POOL._shutdown`` private-attribute
+    check. Submission now wraps ``ThreadPoolExecutor.submit`` in
+    ``try/except RuntimeError`` and reinitializes the pool once on failure,
+    so a previously shut-down pool is transparently recovered instead of
+    aborting the whole search.
+    """
+    search_mod = _restored_search_pool
+
+    # Pre-condition: shut down the active pool to force the fallback path.
+    original_pool = search_mod.SHARED_SEARCH_POOL
+    original_pool.shutdown(wait=False)
+
+    # Direct submission to the stale pool must now raise -- this is the
+    # public, version-stable signal we rely on instead of ``_shutdown``.
+    with pytest.raises(RuntimeError):
+        original_pool.submit(lambda: None)
+
+    # The content search itself must still complete via the reinit path.
+    results = list(search_generator(
+        str(mock_project), "hello", "content", "", use_gitignore=True,
+    ))
+
+    # mock_project/src/main.py contains "print('hello')".
+    assert any("main.py" in r["path"] for r in results)
+
+    # The module global must have been replaced with a fresh, usable pool.
+    new_pool = search_mod.SHARED_SEARCH_POOL
+    assert new_pool is not original_pool
+    fut = new_pool.submit(lambda: 42)
+    assert fut.result(timeout=5) == 42
+
+
+def test_submit_content_task_returns_none_on_persistent_failure(
+    monkeypatch, _restored_search_pool
+):
+    """If the pool stays unusable after reinit, submission degrades gracefully.
+
+    Patches ``_reinit_shared_pool`` so the second ``submit`` still raises,
+    exercising the ``return None`` branch -- the search loop turns this into
+    a clean ``break`` instead of propagating ``RuntimeError``.
+    """
+    search_mod = _restored_search_pool
+
+    # Force the active pool into a shut-down state.
+    search_mod.SHARED_SEARCH_POOL.shutdown(wait=False)
+
+    # Stub reinit so the *new* pool is also dead on arrival.
+    def _fake_reinit():
+        dead = ThreadPoolExecutor(max_workers=1)
+        dead.shutdown(wait=False)
+        search_mod.SHARED_SEARCH_POOL = dead
+        return dead
+
+    monkeypatch.setattr(search_mod, "_reinit_shared_pool", _fake_reinit)
+
+    # Helper under test: both attempts fail -> None.
+    result = search_mod._submit_content_task(lambda: None)
+    assert result is None

@@ -25,12 +25,63 @@ MAX_SEARCH_RESULTS: Final = 5000
 DEFAULT_BATCH_SIZE: Final = 40
 DEFAULT_MAX_SIZE_MB: Final = 5
 
-# Shared resource for parallel content search
-SHARED_SEARCH_POOL: Final = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+# Shared resource for parallel content search.
+# NOTE: deliberately *not* ``Final`` -- the search loop may reinitialize this
+# pool at runtime if it gets shut down out from under us (see
+# ``_submit_content_task`` / ``_reinit_shared_pool``).
+SHARED_SEARCH_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
 atexit.register(
     SHARED_SEARCH_POOL.shutdown, wait=False,
     **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
 )
+
+
+def _reinit_shared_pool() -> ThreadPoolExecutor:
+    """Recreate the shared content-search pool after an unexpected shutdown.
+
+    Returns the freshly constructed executor and re-registers an ``atexit``
+    hook so the new pool is still torn down at interpreter exit. Used by
+    ``_submit_content_task`` as the recovery path when ``submit`` raises
+    ``RuntimeError`` (the only public, version-stable signal that a
+    ``ThreadPoolExecutor`` is no longer usable).
+    """
+    global SHARED_SEARCH_POOL
+    try:
+        SHARED_SEARCH_POOL.shutdown(wait=False)
+    except Exception:
+        logger.exception("Failed to shut down stale search pool during reinit.")
+    new_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+    SHARED_SEARCH_POOL = new_pool
+    atexit.register(
+        new_pool.shutdown, wait=False,
+        **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
+    )
+    return new_pool
+
+
+def _submit_content_task(func: Any, *args: Any) -> Future | None:
+    """Submit ``func`` to the shared pool, robust against pool shutdown.
+
+    Replaces the previous ``SHARED_SEARCH_POOL._shutdown`` guard, which relied
+    on a private CPython implementation detail and is brittle across versions.
+    Submission is wrapped in ``try/except RuntimeError``; on the first failure
+    we reinitialize the pool once (covers the case where the pool was shut down
+    mid-run) and retry. A second failure gives up gracefully.
+
+    Returns the submitted Future, or ``None`` if the pool could not be used.
+    """
+    try:
+        return SHARED_SEARCH_POOL.submit(func, *args)
+    except RuntimeError:
+        logger.warning("Shared search pool unavailable; attempting reinitialize.")
+        _reinit_shared_pool()
+        try:
+            return SHARED_SEARCH_POOL.submit(func, *args)
+        except RuntimeError:
+            logger.warning(
+                "Search pool still unusable after reinit; aborting content task."
+            )
+            return None
 
 
 class SearchQuery(BaseModel):
@@ -261,12 +312,14 @@ def search_generator(
                 if count >= query.max_results:
                     break
             elif query.mode == "content" and query.text:
-                # BUG-C5 fix: guard against submitting to a shutdown pool
-                # (atexit may have fired during interpreter teardown).
-                if SHARED_SEARCH_POOL._shutdown:
-                    logger.warning("Search pool is shutting down; aborting content search.")
+                # Robust submission: avoid the private ``_shutdown`` attribute
+                # (a CPython implementation detail). ``_submit_content_task``
+                # catches ``RuntimeError`` from ``submit`` -- the public signal
+                # that the pool is shut down (e.g. atexit fired during
+                # interpreter teardown) -- and reinitializes the pool once.
+                future = _submit_content_task(content_matcher.match_file, full_path)
+                if future is None:
                     break
-                future = SHARED_SEARCH_POOL.submit(content_matcher.match_file, full_path)
                 content_futures[future] = meta
 
                 if len(content_futures) >= DEFAULT_BATCH_SIZE:

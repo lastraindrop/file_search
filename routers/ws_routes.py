@@ -148,7 +148,9 @@ async def websocket_action_stream(
         return
 
     proj_config = dm.get_project_data(project_path)
-    template = proj_config["custom_tools"].get(tool_name)
+    # Defensive lookup: legacy/malformed configs may lack the `custom_tools` key.
+    # Falls through to the 'Tool template not found' error path instead of KeyError.
+    template = proj_config.get("custom_tools", {}).get(tool_name)
     if not template:
         await websocket.send_json({"status": "ERROR", "msg": "Tool template not found"})
         await websocket.close()

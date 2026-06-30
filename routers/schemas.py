@@ -95,6 +95,58 @@ class FileArchiveRequest(BaseModel):
     project_root: str
 
 
+class FileCopyRequest(BaseModel):
+    """Request model for copying files (batch).
+
+    Attributes:
+        srcs: List of source file/directory paths to copy.
+        dst_dir: Destination directory path.
+        project_root: Project root acting as the security boundary.
+        task_id: Optional progress-tracker task id. When omitted the
+            operation is not tracked, preserving backward-compatible behaviour.
+    """
+
+    srcs: list[str] = Field(..., min_length=1, max_length=1000)
+    dst_dir: str = Field(..., max_length=1000)
+    project_root: str = Field(..., max_length=1000)
+    task_id: str | None = None
+
+
+class FileExtractRequest(BaseModel):
+    """Request model for extracting an archive.
+
+    Attributes:
+        zip_path: Path to the ZIP archive to extract.
+        dst_dir: Destination directory path.
+        project_root: Project root acting as the security boundary.
+        task_id: Optional progress-tracker task id. When omitted the
+            operation is not tracked, preserving backward-compatible behaviour.
+    """
+
+    zip_path: str = Field(..., max_length=1000)
+    dst_dir: str = Field(..., max_length=1000)
+    project_root: str = Field(..., max_length=1000)
+    task_id: str | None = None
+
+
+class ProgressStatus(BaseModel):
+    """Progress status for a long-running task.
+
+    Attributes:
+        task_id: Unique identifier for the task.
+        status: One of ``"pending"``, ``"running"``, ``"done"``, ``"failed"``.
+        message: Optional human-readable progress message.
+        done: Number of completed units so far.
+        total: Total number of units in the task.
+    """
+
+    task_id: str
+    status: str
+    message: str | None = None
+    done: int = 0
+    total: int = 0
+
+
 class OpenPathRequest(BaseModel):
     """Request model for opening a file or directory in the OS shell."""
 

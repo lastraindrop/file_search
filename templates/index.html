@@ -101,17 +101,23 @@
             </div>
         </section>
 
-        <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center" style="display:none;">
+        <div id="bulkActions" class="p-2 border-bottom justify-content-between align-items-center" style="display:none;">
             <div>
                 <input type="checkbox" id="selectAllCb" class="form-check-input me-1" onchange="App.toggleSelectAll(this.checked)">
-                <small id="selectedCount" class="fw-bold text-primary">0</small>
+                <small id="selectedCount" class="fw-bold text-primary">0 selected</small>
             </div>
             <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-light" onclick="App.bulkCopy()" title="Batch Copy">Copy</button>
+                <button class="btn btn-outline-info" onclick="App.bulkExtract()" title="Batch Extract">Extract</button>
                 <button class="btn btn-outline-secondary" onclick="App.bulkMove()" title="Batch Move">Move</button>
                 <button class="btn btn-outline-warning" onclick="App.batchRename()" title="Batch Regex Rename">Rename</button>
                 <button class="btn btn-outline-danger" onclick="App.bulkDelete()" title="Batch Delete">Delete</button>
                 <button class="btn btn-outline-success" onclick="App.bulkStage()" title="Batch Stage">Stage</button>
             </div>
+        </div>
+        <div id="operationProgress" class="progress" style="display:none; height: 4px;">
+            <div id="operationProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info"
+                 role="progressbar" style="width: 0%">0%</div>
         </div>
 
         <div class="row g-0 flex-grow-1 overflow-hidden app-main-row">
@@ -172,6 +178,8 @@
                         <button class="btn btn-outline-warning" onclick="App.addToFavorites()" title="Add to Favorites">Favorite</button>
                         <button class="btn btn-outline-info" onclick="App.showFileNote()" title="Notes">Notes</button>
                         <button class="btn btn-outline-light" id="btnCopyPath" onclick="App.copyPath()" title="Copy Full Path">Copy Path</button>
+                        <button class="btn btn-outline-light" id="btnCopyItem" onclick="App.copyFile()" title="Copy File or Folder">Copy</button>
+                        <button class="btn btn-outline-light" id="btnExtractArchive" onclick="App.extractArchive()" title="Extract ZIP Archive">Extract</button>
                         <button class="btn btn-outline-light" id="btnOpenExternal" onclick="App.openCurrentInExplorer()" title="Open in Explorer">Open</button>
                         <button class="btn btn-outline-light" onclick="App.renameFile()">Rename</button>
                         <button class="btn btn-outline-danger" onclick="App.deleteFile()">Delete</button>
@@ -235,6 +243,7 @@
                         <label class="form-check-label small text-muted" for="includeBlueprint">Include Blueprint</label>
                     </div>
                     <button class="btn btn-outline-info btn-sm w-100 mb-2" id="btnArchiveSelection" onclick="App.archiveStaging()">Archive Selection</button>
+                    <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btnExtractSelection" onclick="App.extractArchive()">Extract ZIP</button>
                     <button class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="App.showPathCollector()">Copy Paths</button>
                 </div>
             </section>
@@ -248,6 +257,8 @@
         <div class="context-item" onclick="App.ctxAction('fav')">Add to Favorites</div>
         <div class="context-separator"></div>
         <div class="context-item" onclick="App.ctxAction('copyPath')">Copy Full Path</div>
+        <div class="context-item" onclick="App.ctxAction('copyItem')">Copy File/Folder</div>
+        <div class="context-item" onclick="App.ctxAction('extract')">Extract ZIP</div>
         <div class="context-item" onclick="App.ctxAction('openOs')">Open in Explorer</div>
         <div class="context-separator"></div>
         <div class="context-item text-danger" onclick="App.ctxAction('delete')">Delete File</div>

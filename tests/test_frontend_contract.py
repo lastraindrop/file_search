@@ -18,6 +18,9 @@ def test_index_contains_updated_frontend_contract(api_client):
         "searchCaseSensitive",
         "searchInverse",
         "btnOpenExternal",
+        "btnCopyItem",
+        "btnExtractArchive",
+        "btnExtractSelection",
         "set-token-threshold",
         "set-token-ratio",
         "actionModal",
@@ -39,6 +42,8 @@ def test_static_assets_reflect_current_frontend_architecture(api_client):
     css = css_res.text
 
     assert "api.openInOs" in js or "/api/fs/open_os" in js
+    assert "api.copyFile" in js
+    assert "api.extractArchive" in js
     assert "searchIncludeDirs" in js
     assert "searchCaseSensitive" in js
     assert "searchInverse" in js
@@ -47,6 +52,69 @@ def test_static_assets_reflect_current_frontend_architecture(api_client):
     assert "summary-bar" in css
     assert "search-option-grid" in css
     assert "tree-toggle" in css
+
+
+def test_frontend_copy_extract_contract(api_client):
+    """Web UI should expose copy/extract controls and endpoint wrappers."""
+    html = api_client.get("/").text
+    state_js = api_client.get("/static/js/state.js").text
+    api_js = api_client.get("/static/js/api.js").text
+    main_js = api_client.get("/static/js/main.js").text
+
+    assert "App.copyFile" in html
+    assert "App.extractArchive" in html
+    assert "ctxAction('copyItem')" in html
+    assert "ctxAction('extract')" in html
+    assert "copy: '/api/fs/copy'" in state_js
+    assert "extract: '/api/fs/extract'" in state_js
+    assert "export async function copyFile" in api_js
+    assert "export async function extractArchive" in api_js
+    assert "copyDestinationInput" in main_js
+    assert "extractDestinationInput" in main_js
+
+
+def test_bulk_copy_extract_buttons_exist(api_client):
+    """Bulk copy/extract buttons and the operation progress bar must exist."""
+    html = api_client.get("/").text
+
+    assert "App.bulkCopy" in html
+    assert "App.bulkExtract" in html
+    assert "operationProgress" in html
+    assert "operationProgressBar" in html
+    assert 'id="bulkActions"' in html
+    assert 'justify-content-between align-items-center" style="display:none;"' in html
+    assert "0 selected" in html
+
+
+def test_progress_endpoints_configured(api_client):
+    """state.js must register the progress poll and create endpoints."""
+    state_js = api_client.get("/static/js/state.js").text
+
+    assert "progress: '/api/fs/progress'" in state_js
+    assert "progressNew: '/api/fs/progress/new'" in state_js
+
+
+def test_frontend_uses_real_progress_polling(api_client):
+    """main.js/api.js should wire task_id based backend progress polling."""
+    api_js = api_client.get("/static/js/api.js").text
+    main_js = api_client.get("/static/js/main.js").text
+
+    assert "taskId = null" in api_js
+    assert "payload.task_id = taskId" in api_js
+    assert "api.newProgressTask" in main_js
+    assert "api.getProgress(taskId)" in main_js
+    assert "_pollProgress" in main_js
+
+
+def test_frontend_bulk_extract_progress_regression_contract(api_client):
+    """Bulk extract should avoid indexOf progress bugs and warn about non-ZIP items."""
+    main_js = api_client.get("/static/js/main.js").text
+
+    assert "zips.entries()" in main_js
+    assert "zips.indexOf(zip)" not in main_js
+    assert "non-ZIP item(s) will be ignored" in main_js
+    assert "`${count} selected`" in main_js
+    assert "if (actionConfirm.disabled) return" in main_js
 
 
 def test_desktop_gui_avoids_hardcoded_image_processor_menu():

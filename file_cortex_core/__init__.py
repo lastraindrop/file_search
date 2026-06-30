@@ -2,7 +2,7 @@
 
 __version__ = "6.5.1"
 
-from .actions import ActionBridge, FileOps
+from .actions import ActionBridge, FileOps, ProgressTracker
 from .config import DataManager, get_app_dir, logger
 from .context import ContextFormatter, NoiseReducer
 from .duplicate import DuplicateWorker
@@ -25,6 +25,7 @@ __all__ = [
     "SearchWorker",
     "FileOps",
     "ActionBridge",
+    "ProgressTracker",
     "PathValidator",
     "ContextFormatter",
     "FormatUtils",

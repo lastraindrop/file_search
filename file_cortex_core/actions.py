@@ -12,6 +12,8 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
+import uuid
 import zipfile
 from collections.abc import Generator
 from typing import Any
@@ -19,6 +21,105 @@ from typing import Any
 from .config import DataManager, logger
 from .file_io import FileUtils
 from .security import PathValidator
+
+
+class ProgressTracker:
+    """Thread-safe in-memory progress tracker for long-running tasks.
+
+    Maintains a module-level registry mapping ``task_id`` to a progress dict
+    with the keys ``task_id``, ``status`` (``"pending"`` / ``"running"`` /
+    ``"done"`` / ``"failed"``), ``message``, ``done`` and ``total``. All access
+    is serialized through a class-level :class:`threading.Lock`.
+
+    Typical usage::
+
+        task_id = ProgressTracker.new_task(total=len(items))
+        for i, item in enumerate(items):
+            ...
+            ProgressTracker.update(task_id, done=i + 1, status="running")
+        ProgressTracker.update(task_id, status="done")
+        state = ProgressTracker.get(task_id)
+    """
+
+    _tasks: dict[str, dict] = {}
+    _lock = threading.Lock()
+
+    @classmethod
+    def new_task(cls, total: int) -> str:
+        """Creates a new tracked task with a generated UUID id.
+
+        Args:
+            total: Total number of units in the task.
+
+        Returns:
+            The newly generated ``task_id``.
+        """
+        task_id = uuid.uuid4().hex
+        cls.start_task(task_id, total)
+        return task_id
+
+    @classmethod
+    def start_task(cls, task_id: str, total: int) -> None:
+        """Creates a new progress entry for ``task_id``.
+
+        Overwrites any pre-existing entry for the same id.
+
+        Args:
+            task_id: Unique identifier supplied by the caller.
+            total: Total number of units in the task.
+        """
+        with cls._lock:
+            cls._tasks[task_id] = {
+                "task_id": task_id,
+                "status": "pending",
+                "message": None,
+                "done": 0,
+                "total": total,
+            }
+
+    @classmethod
+    def update(
+        cls,
+        task_id: str,
+        done: int | None = None,
+        status: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Updates an existing progress entry.
+
+        Silently no-ops if ``task_id`` was never started. Each of
+        ``done`` / ``status`` / ``message`` is applied only when provided.
+
+        Args:
+            task_id: Unique identifier supplied to :meth:`start_task`.
+            done: New completed-units count, or ``None`` to leave unchanged.
+            status: New status string, or ``None`` to leave unchanged.
+            message: New human-readable message, or ``None`` to leave unchanged.
+        """
+        with cls._lock:
+            entry = cls._tasks.get(task_id)
+            if entry is None:
+                return
+            if done is not None:
+                entry["done"] = done
+            if status is not None:
+                entry["status"] = status
+            if message is not None:
+                entry["message"] = message
+
+    @classmethod
+    def get(cls, task_id: str) -> dict | None:
+        """Returns a shallow copy of the progress entry, or ``None`` if unknown.
+
+        Args:
+            task_id: Unique identifier supplied to :meth:`start_task`.
+
+        Returns:
+            A copy of the progress dict, or ``None``.
+        """
+        with cls._lock:
+            entry = cls._tasks.get(task_id)
+            return dict(entry) if entry is not None else None
 
 
 class FileOps:
@@ -366,6 +467,348 @@ class FileOps:
             except Exception:
                 logger.exception(f"Failed to categorize {p_str}")
         return moved
+
+    @staticmethod
+    def copy_item(
+        srcs: list[str],
+        dst_dir_str: str,
+        project_root: str,
+        task_id: str | None = None,
+    ) -> list[str]:
+        """Copies a batch of files and/or directories into a destination directory.
+
+        Iterates over ``srcs`` and applies the existing per-item copy logic:
+        files are copied with :func:`shutil.copy2` and directories are copied
+        recursively with :func:`shutil.copytree`. Each item still enforces
+        no-overwrite: if ``dst_dir / src.name`` already exists a
+        :class:`FileExistsError` is raised and the whole batch aborts.
+
+        Both the destination directory and every source must reside within
+        ``project_root`` (the security boundary). The destination directory
+        must already exist.
+
+        When ``task_id`` is provided the operation is tracked through
+        :class:`ProgressTracker`: the task is started with
+        ``total = len(srcs)``, updated to ``"running"`` after each successful
+        item, set to ``"failed"`` on exception (re-raised), and set to
+        ``"done"`` on full success. ``task_id=None`` (default) disables
+        tracking entirely, preserving backward-compatible behaviour.
+
+        Args:
+            srcs: List of source file or directory paths to copy.
+            dst_dir_str: Destination directory path.
+            project_root: Project root acting as the security boundary.
+            task_id: Optional progress-tracker task id.
+
+        Returns:
+            List of the newly created copy paths, one per input source.
+
+        Raises:
+            FileNotFoundError: If a source does not exist or the destination
+                directory does not exist.
+            FileExistsError: If a target name already exists in the destination.
+            PermissionError: If a source or the destination escapes the project
+                root.
+            ValueError: If a source is neither a file nor a directory, or if a
+                directory would be copied into itself or one of its descendants.
+        """
+        dst_dir = pathlib.Path(dst_dir_str).resolve()
+        root = pathlib.Path(project_root).resolve()
+
+        if not PathValidator.is_safe(dst_dir, root):
+            raise PermissionError("Destination is outside the project workspace.")
+        if not dst_dir.exists() or not dst_dir.is_dir():
+            raise FileNotFoundError("Destination directory does not exist.")
+
+        if task_id is not None:
+            ProgressTracker.start_task(task_id, total=len(srcs))
+
+        results: list[str] = []
+        try:
+            for idx, src_path_str in enumerate(srcs):
+                src_path = pathlib.Path(src_path_str).resolve()
+
+                if not src_path.exists():
+                    raise FileNotFoundError("Source path does not exist.")
+                if not PathValidator.is_safe(src_path, root):
+                    raise PermissionError(
+                        "Source is outside the project workspace."
+                    )
+
+                dst_path = dst_dir / src_path.name
+                if dst_path.exists():
+                    raise FileExistsError(
+                        "A file with the same name exists in destination."
+                    )
+
+                if src_path.is_file():
+                    shutil.copy2(src_path, dst_path)
+                    logger.info(f"Copied file: {src_path} -> {dst_path}")
+                elif src_path.is_dir():
+                    # Guard against copying a directory into itself or a
+                    # descendant, which would otherwise recurse infinitely.
+                    if dst_dir == src_path or src_path in dst_dir.parents:
+                        raise ValueError(
+                            "Cannot copy a directory into itself or its "
+                            "descendant."
+                        )
+                    shutil.copytree(src_path, dst_path)
+                    logger.info(f"Copied directory: {src_path} -> {dst_path}")
+                else:
+                    raise ValueError("Source is neither a file nor a directory.")
+
+                results.append(str(dst_path))
+
+                if task_id is not None:
+                    ProgressTracker.update(
+                        task_id,
+                        done=idx + 1,
+                        status="running",
+                        message=f"Copied {src_path.name}",
+                    )
+        except Exception:
+            if task_id is not None:
+                ProgressTracker.update(
+                    task_id,
+                    done=len(results),
+                    status="failed",
+                    message="Batch copy failed",
+                )
+            raise
+
+        if task_id is not None:
+            ProgressTracker.update(
+                task_id,
+                done=len(results),
+                status="done",
+                message=f"Copied {len(results)} item(s)",
+            )
+        return results
+
+    @staticmethod
+    def _validate_extract_member(
+        member_name: str, dst_root: pathlib.Path
+    ) -> pathlib.Path:
+        """Validates a single ZIP member name and returns its safe target path.
+
+        Rejects any member that could escape ``dst_root``: absolute paths,
+        Windows drive letters, UNC paths, backslash traversal, ``..`` segments,
+        and any resolved target that lands outside ``dst_root``.
+
+        Args:
+            member_name: Raw member filename from the archive.
+            dst_root: Resolved destination root directory.
+
+        Returns:
+            The resolved, boundary-checked target path.
+
+        Raises:
+            ValueError: If the member name is unsafe or escapes the destination.
+        """
+        if not member_name:
+            raise ValueError("Empty archive member name.")
+
+        # Normalize backslashes to forward slashes so Windows-style traversal
+        # (e.g. "..\\evil.txt") is treated uniformly. ZIP spec uses "/", but
+        # hostile archives may use "\" to slip past naive checks.
+        normalized = member_name.replace("\\", "/")
+
+        if normalized.startswith("/"):
+            raise ValueError(f"Absolute path in archive: {member_name!r}")
+        if normalized.startswith("//"):
+            raise ValueError(f"UNC-style path in archive: {member_name!r}")
+        # Windows drive letter, e.g. "C:/evil" or "C:evil".
+        if len(normalized) >= 2 and normalized[1] == ":":
+            raise ValueError(f"Drive-letter path in archive: {member_name!r}")
+
+        # Reject any ".." path segment regardless of separator.
+        segments = normalized.split("/")
+        if any(seg == ".." for seg in segments):
+            raise ValueError(f"Path traversal in archive: {member_name!r}")
+
+        target = (dst_root / normalized).resolve()
+        try:
+            target.relative_to(dst_root)
+        except ValueError as e:
+            raise ValueError(
+                f"Archive member escapes destination: {member_name!r}"
+            ) from e
+        return target
+
+    @staticmethod
+    def extract_archive(
+        zip_path_str: str,
+        dst_dir_str: str,
+        project_root: str,
+        task_id: str | None = None,
+    ) -> list[str]:
+        """Extracts a ZIP archive into a destination directory transactionally.
+
+        The archive and destination must both reside within ``project_root``
+        (the security boundary). The destination directory is created if it
+        does not exist (including parents).
+
+        Every member is validated before any file is written: absolute paths,
+        Windows drive letters, UNC paths, backslash traversal, ``..`` segments,
+        and any resolved target outside the destination are rejected. If any
+        member is unsafe the whole operation aborts without writing.
+
+        Extraction is performed in three passes inside a temporary staging
+        directory created with
+        ``tempfile.mkdtemp(prefix=".fctx_extract_", dir=dst_dir.parent)``:
+
+        * **Pass 1** validates every member, computes its final target path,
+          re-applies the no-overwrite pre-check and the duplicate-target check.
+        * **Pass 2** extracts files (and creates directory members) inside the
+          staging directory.
+        * **Pass 3** atomically renames/moves each staged file to its final
+          destination via :func:`shutil.move`.
+
+        The staging directory is always removed via
+        ``shutil.rmtree(temp_dir, ignore_errors=True)`` in a ``finally`` block,
+        whether the operation succeeds or fails.
+
+        When ``task_id`` is provided the operation is tracked through
+        :class:`ProgressTracker` (``total`` = number of archive members),
+        updated to ``"running"`` as each member is committed in Pass 3, set to
+        ``"failed"`` on exception (re-raised), and set to ``"done"`` on full
+        success. ``task_id=None`` (default) disables tracking.
+
+        Args:
+            zip_path_str: Path to the ZIP archive.
+            dst_dir_str: Destination directory path.
+            project_root: Project root acting as the security boundary.
+            task_id: Optional progress-tracker task id.
+
+        Returns:
+            List of extracted paths (directories and files).
+
+        Raises:
+            FileNotFoundError: If the archive does not exist.
+            FileExistsError: If any extracted file would overwrite an existing
+                path.
+            ValueError: If the archive is not a ZIP file or a member is unsafe.
+            PermissionError: If the destination escapes the project root.
+        """
+        # The archive may originate from anywhere (e.g. a freshly downloaded or
+        # generated bundle). The security boundary for extraction is the
+        # *destination*: only where members are written matters, enforced by
+        # the per-member validation below plus the dst-within-root check.
+        zip_path = pathlib.Path(zip_path_str).resolve()
+        root = pathlib.Path(project_root).resolve()
+        dst_dir = pathlib.Path(dst_dir_str).resolve()
+
+        if not zip_path.exists():
+            raise FileNotFoundError("Archive does not exist.")
+        if not PathValidator.is_safe(dst_dir, root):
+            raise PermissionError(
+                "Destination is outside the project workspace."
+            )
+        if not zipfile.is_zipfile(zip_path):
+            raise ValueError(f"Not a ZIP archive: {zip_path}")
+
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        extracted: list[str] = []
+        infolist: list[zipfile.ZipInfo] = []
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            infolist = zf.infolist()
+
+            if task_id is not None:
+                ProgressTracker.start_task(task_id, total=len(infolist))
+
+            # Staging directory lives next to the destination so the final
+            # Pass 3 rename/move is on the same filesystem and therefore atomic.
+            temp_dir = pathlib.Path(
+                tempfile.mkdtemp(prefix=".fctx_extract_", dir=str(dst_dir.parent))
+            )
+            try:
+                # Pass 1: validate every member and resolve final + staging
+                # targets. Re-apply the no-overwrite + duplicate-target checks
+                # against the final destination. A malicious or unsatisfiable
+                # entry aborts before any bytes are written.
+                plan: list[tuple[zipfile.ZipInfo, pathlib.Path, pathlib.Path]] = []
+                planned_file_targets: set[str] = set()
+                for member in infolist:
+                    target = FileOps._validate_extract_member(
+                        member.filename, dst_dir
+                    )
+                    rel = target.relative_to(dst_dir)
+                    temp_target = temp_dir / rel
+                    target_key = (
+                        str(target).lower() if os.name == "nt" else str(target)
+                    )
+                    if member.is_dir():
+                        if target.exists() and not target.is_dir():
+                            raise FileExistsError(
+                                "Archive directory conflicts with existing "
+                                f"file: {target}"
+                            )
+                    else:
+                        if target.exists():
+                            raise FileExistsError(
+                                f"Extract target already exists: {target}"
+                            )
+                        if target_key in planned_file_targets:
+                            raise FileExistsError(
+                                "Archive contains duplicate target: "
+                                f"{member.filename}"
+                            )
+                        planned_file_targets.add(target_key)
+                    plan.append((member, target, temp_target))
+
+                # Pass 2: write every member into the staging directory only.
+                for member, _target, temp_target in plan:
+                    if member.is_dir():
+                        temp_target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        temp_target.parent.mkdir(parents=True, exist_ok=True)
+                        with zf.open(member) as src, open(temp_target, "wb") as out:
+                            shutil.copyfileobj(src, out)
+
+                # Pass 3: atomically promote each staged member to its final
+                # destination. Per-file atomicity comes from shutil.move using
+                # os.rename on the same filesystem.
+                for idx, (member, target, temp_target) in enumerate(plan):
+                    if member.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(temp_target), str(target))
+                    extracted.append(str(target))
+
+                    if task_id is not None:
+                        ProgressTracker.update(
+                            task_id,
+                            done=idx + 1,
+                            status="running",
+                            message=f"Extracted {member.filename}",
+                        )
+            except Exception:
+                if task_id is not None:
+                    ProgressTracker.update(
+                        task_id,
+                        done=len(extracted),
+                        status="failed",
+                        message="Extraction failed",
+                    )
+                raise
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        logger.info(
+            f"Extracted {len(infolist)} members from {zip_path} -> {dst_dir}"
+        )
+
+        if task_id is not None:
+            ProgressTracker.update(
+                task_id,
+                done=len(extracted),
+                status="done",
+                message=f"Extracted {len(extracted)} member(s)",
+            )
+        return extracted
 
 
 class ActionBridge:

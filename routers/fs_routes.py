@@ -14,19 +14,23 @@ from file_cortex_core import (
     FileUtils,
     FormatUtils,
     PathValidator,
+    ProgressTracker,
     logger,
 )
 from routers.schemas import (
     BatchRenameRequest,
     ChildrenRequest,
     FileArchiveRequest,
+    FileCopyRequest,
     FileCreateRequest,
     FileDeleteRequest,
+    FileExtractRequest,
     FileMoveRequest,
     FileRenameRequest,
     FileSaveRequest,
     OpenPathRequest,
     PathCollectionRequest,
+    ProgressStatus,
 )
 from routers.services import (
     get_children,
@@ -290,9 +294,16 @@ def api_archive(
             if not is_path_safe(p, req.project_root):
                 raise HTTPException(status_code=403, detail=f"Unsafe path: {p}")
 
-        if any(sep in req.output_name for sep in (os.sep, "/")):
+        # Defense in depth: reject path separators of BOTH POSIX ('/') and
+        # Windows ('\\') forms regardless of host OS, plus traversal-only
+        # basenames. This complements the authoritative is_safe check below.
+        if any(sep in req.output_name for sep in ("/", "\\")):
             raise HTTPException(
                 status_code=400, detail="Invalid characters in output name"
+            )
+        if req.output_name in (".", ".."):
+            raise HTTPException(
+                status_code=400, detail="Invalid output name"
             )
 
         logger.info(
@@ -300,6 +311,12 @@ def api_archive(
             f"in {req.project_root}"
         )
         output_file = os.path.join(req.project_root, req.output_name)
+        # Authoritative revalidation: the resolved archive path must remain
+        # inside the project root, blocking any traversal the name checks miss.
+        if not PathValidator.is_safe(output_file, req.project_root):
+            raise HTTPException(
+                status_code=403, detail="Archive output escapes project root"
+            )
         result_path = FileOps.archive_selection(
             req.paths, output_file, req.project_root
         )
@@ -334,3 +351,100 @@ def collect_paths_api(
     except Exception as e:
         logger.exception("Path collection error")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@fs_router.post("/api/fs/copy")
+def api_copy(req: FileCopyRequest, dm: DataManager = _dm_dep) -> dict[str, Any]:
+    """Copies a batch of files and/or directories into a destination directory."""
+    try:
+        project_root = get_valid_project_root(req.project_root, dm)
+        if not project_root:
+            raise HTTPException(
+                status_code=403, detail="Access denied (Invalid project root)"
+            )
+
+        for src in req.srcs:
+            if not is_path_safe(src, project_root):
+                logger.warning(f"Blocking potentially unsafe copy source: {src}")
+                raise HTTPException(
+                    status_code=403, detail=f"Access denied for source: {src}"
+                )
+
+        if not is_path_safe(req.dst_dir, project_root):
+            logger.warning(
+                f"Blocking potentially unsafe copy destination: {req.dst_dir}"
+            )
+            raise HTTPException(
+                status_code=403, detail=f"Access denied for destination: {req.dst_dir}"
+            )
+
+        logger.info(
+            f"AUDIT - Copying {len(req.srcs)} item(s) -> {req.dst_dir}"
+        )
+        new_paths = FileOps.copy_item(req.srcs, req.dst_dir, project_root, req.task_id)
+        return {"status": "ok", "new_paths": new_paths, "skipped": 0}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@fs_router.post("/api/fs/extract")
+def api_extract(req: FileExtractRequest, dm: DataManager = _dm_dep) -> dict[str, Any]:
+    """Extracts a ZIP archive into a destination directory."""
+    try:
+        project_root = get_valid_project_root(req.project_root, dm)
+        if not project_root:
+            raise HTTPException(
+                status_code=403, detail="Access denied (Invalid project root)"
+            )
+
+        if not is_path_safe(req.dst_dir, project_root):
+            logger.warning(
+                f"Blocking potentially unsafe extract destination: {req.dst_dir}"
+            )
+            raise HTTPException(
+                status_code=403, detail=f"Access denied for destination: {req.dst_dir}"
+            )
+
+        logger.info(f"AUDIT - Extracting archive: {req.zip_path} -> {req.dst_dir}")
+        extracted_paths = FileOps.extract_archive(
+            req.zip_path, req.dst_dir, project_root, req.task_id
+        )
+        return {"status": "ok", "extracted_paths": extracted_paths}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@fs_router.post("/api/fs/progress", response_model=ProgressStatus)
+def api_progress(payload: dict[str, Any]) -> dict[str, Any]:
+    """Polls progress for a tracked task_id.
+
+    Body: ``{"task_id": str}``. Returns the current :class:`ProgressStatus`
+    snapshot, or 404 if the task_id is unknown.
+    """
+    task_id = payload.get("task_id")
+    if not isinstance(task_id, str):
+        raise HTTPException(status_code=400, detail="task_id (str) required")
+    state = ProgressTracker.get(task_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Unknown task_id: {task_id}")
+    return state
+
+
+@fs_router.post("/api/fs/progress/new")
+def api_progress_new(payload: dict[str, Any]) -> dict[str, str]:
+    """Creates a new tracked task and returns its task_id.
+
+    Body: ``{"total": int}``. Returns ``{"task_id": str}``.
+    """
+    total = payload.get("total")
+    # Reject bools (bool is a subclass of int) and negative values.
+    if not isinstance(total, int) or isinstance(total, bool) or total < 0:
+        raise HTTPException(
+            status_code=400, detail="total (non-negative int) required"
+        )
+    task_id = ProgressTracker.new_task(total=total)
+    return {"task_id": task_id}

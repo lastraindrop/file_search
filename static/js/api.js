@@ -101,6 +101,27 @@ export async function moveFiles(srcPaths, dstDir) {
     return await _postJson(config.endpoints.move, { src_paths: srcPaths, dst_dir: dstDir });
 }
 
+export async function copyFile(src, dstDir, projectRoot, taskId = null) {
+    const srcs = Array.isArray(src) ? src : [src];
+    const payload = { srcs, dst_dir: dstDir, project_root: projectRoot };
+    if (taskId !== null) payload.task_id = taskId;
+    return await _postJson(config.endpoints.copy, payload);
+}
+
+export async function getProgress(taskId) {
+    return await _postJson(config.endpoints.progress, { task_id: taskId });
+}
+
+export async function newProgressTask(total) {
+    return await _postJson(config.endpoints.progressNew, { total });
+}
+
+export async function extractArchive(zipPath, dstDir, projectRoot, taskId = null) {
+    const payload = { zip_path: zipPath, dst_dir: dstDir, project_root: projectRoot };
+    if (taskId !== null) payload.task_id = taskId;
+    return await _postJson(config.endpoints.extract, payload);
+}
+
 export async function saveFileContent(path, content) {
     await _post(config.endpoints.save, { path, content });
 }

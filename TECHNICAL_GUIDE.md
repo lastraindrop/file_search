@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.5.1 | **测试**: 661 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **测试**: 768 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -88,6 +88,10 @@ v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 12800
 | 7 | `max_search_size_mb` | `state.js` (10) | `ProjectConfig.max_search_size_mb` | `POST /api/project/settings` |
 | 8 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL |
 | 9 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/actions/execute` | WebSocket URL |
+| 10 | `progress` | `state.js:config.endpoints.progress` | `fs_routes.py` `/api/fs/progress` | `POST /api/fs/progress` |
+| 11 | `progressNew` | `state.js:config.endpoints.progressNew` | `fs_routes.py` `/api/fs/progress/new` | `POST /api/fs/progress/new` |
+| 12 | `copy` (batch) | `api.js:copyFile(srcs=[])` | `schemas.py:FileCopyRequest(srcs: list)` | `POST /api/fs/copy` |
+| 13 | `extract` (batch) | `api.js:extractArchive(taskId=)` | `schemas.py:FileExtractRequest(task_id)` | `POST /api/fs/extract` |
 
 ### 2.3 添加新参数的规范流程
 
@@ -113,13 +117,75 @@ v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 12800
 | `test_ws_search_endpoint` | `test_web_api.py` | WebSocket wsSearch 端点 |
 | `test_ws_execute_endpoint` | `test_web_api.py` | WebSocket wsExecute 端点 |
 
+| `test_api_progress_new_and_get` | `test_web_api.py` | ProgressTracker 任务创建/轮询 |
+| `test_api_copy_task_id_updates_progress` | `test_web_api.py` | copy endpoint task_id → ProgressTracker 填充 |
+| `test_api_extract_task_id_updates_progress` | `test_web_api.py` | extract endpoint task_id → ProgressTracker 填充 |
+| `test_frontend_uses_real_progress_polling` | `test_frontend_contract.py` | main.js 真实使用 newProgressTask/getProgress |
+| `test_frontend_bulk_extract_progress_regression_contract` | `test_frontend_contract.py` | entries() + non-ZIP 警告 + 双提交守卫 + N selected |
+
 ---
 
-## 3. v6.5.0 重构深度解析
+## 3. 文件操作与进度架构 (v6.5.1 — File System Completion)
 
-### 3.1 Google Python Style Guide 全面审计
+### 3.1 批量复制 (Batch Copy)
 
-v6.5.0 对整个代码库（28 个源文件, 6,441 行）进行了完整的 Google Python Style Guide 规范审计，涵盖 7 个维度：
+`FileOps.copy_item(srcs: list[str], dst_dir_str, project_root, task_id=None) -> list[str]`
+
+- 遍历 `srcs`，逐项安全校验 (`PathValidator.is_safe`)、no-overwrite 检查
+- 文件用 `shutil.copy2`（保留元数据），目录用 `shutil.copytree`（递归子树）
+- 自包含/后代目录防御 (`dst_dir == src_path or src_path in dst_dir.parents`)
+- `task_id` 非 None 时通过 `ProgressTracker` 报告进度
+
+**请求模型**：`FileCopyRequest(srcs: list[str], dst_dir, project_root, task_id=None)`
+**API 端点**：`POST /api/fs/copy` → `{"status": "ok", "new_paths": [...], "skipped": 0}`
+**CLI**：`fctx copy <project> <src1> <src2> ...` (nargs='+')
+
+### 3.2 事务化提取 (Transactional Extract)
+
+`FileOps.extract_archive(zip_path_str, dst_dir_str, project_root, task_id=None) -> list[str]`
+
+三段式操作确保原子性与安全性：
+
+```
+Pass 1: 验证所有成员 (zip-slip/绝对路径/UNC/驱动器号/..)
+        对所有文件目标执行 no-overwrite + 重复目标预检
+        构建计划: (ZipInfo, final_target, temp_target)
+
+Pass 2: 写入暂存目录 (tempfile.mkdtemp(prefix=".fctx_extract_", dir=dst_dir.parent))
+        仅文件成员 → temp_target；目录成员 → mkdir
+
+Pass 3: 原子移动 (shutil.move 从 staged → final)
+        temp_dir 与 dst_dir 在同一文件系统 → os.rename 原子
+
+finally: shutil.rmtree(temp_dir, ignore_errors=True)
+```
+
+**安全性**：`_validate_extract_member` 拒绝：绝对路径、UNC、驱动器号 (C:)、`..` 遍历、反斜杠绕过。
+**no-overwrite**：Pass 1 中对每个文件目标执行 `target.exists()` 预检，有冲突立即中止（零写入）。
+**存档来源**：存档文件可位于项目根目录之外（导入外部 bundle），安全边界仅针对目标目录。
+
+### 3.3 ProgressTracker 与前端轮询
+
+`ProgressTracker` 是一个模块级线程安全进度注册表（`dict[str, dict]` + `threading.Lock`）：
+
+- `new_task(total)` → 生成 UUID，创建 `{"status": "pending", "done": 0, "total": N}` 条目
+- `update(task_id, done, status, message)` → 更新进度（幂等）
+- `get(task_id)` → 返回快照或 None（404）
+
+**完整链路**：
+```
+前端 main.js
+  → api.newProgressTask(total)           /api/fs/progress/new
+  → api.copyFile(srcs, ..., taskId)      /api/fs/copy {..., task_id}
+  → api.extractArchive(zip, ..., taskId)  /api/fs/extract {..., task_id}
+  → _pollProgress(taskId, total)         /api/fs/progress {task_id} (400ms 轮询)
+  → 更新 #operationProgressBar (done/total + message)
+```
+
+**测试覆盖**：
+- `test_api_copy_task_id_updates_progress`：copy endpoint → ProgressTracker.done==1, status="done"
+- `test_api_extract_task_id_updates_progress`：extract endpoint → ProgressTracker.done==2
+- `test_frontend_uses_real_progress_polling`：main.js 引用 `api.newProgressTask`/`getProgress`/`_pollProgress`
 
 | 维度 | 检查标准 | 发现 | 修复 |
 |------|----------|------|------|
@@ -311,11 +377,11 @@ super().__init__(daemon=True)
 ### 5.1 测试分层
 
 ```
-tests/                              661 项测试 (v6.5.1)
+tests/                              764 项测试 (v6.5.1 + 当前稳定化/copy-extract/批量copy+事务extract+progress 回归)
 ├── test_v8_comprehensive.py        90 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
 ├── test_security_fixes_v650.py     38 tests  ← v6.5.0 安全修复回归
 ├── test_coverage_fill.py           20 tests  ← v6.5.0 新增 (process_utils/ProcessManager)
-├── test_frontend_contract.py       31 tests  ← v6.5.0 前端契约 (含 v6.5.1 SRI 扩展)
+├── test_frontend_contract.py       32 tests  ← v6.5.0 前端契约 (含 v6.5.1 SRI/copy-extract 扩展)
 ├── test_packaging.py               15 tests  ← v6.5.1 新增 (BUG-D1/D2/Doc5 回归)
 ├── test_security_v9.py             17 tests  ← v6.5.1 新增 (P0/P1 安全回归)
 ├── test_bugfix_v7.py               90 tests  ← v6.4.0 BUG修复/前端/WebSocket 回归
@@ -323,8 +389,9 @@ tests/                              661 项测试 (v6.5.1)
 ├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
 ├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全/前端契约
 ├── test_comprehensive.py           46 tests  ← 核心功能 + 高级边界
-├── test_web_api.py                 42 tests  ← v6.5.0 Web API 合并 (CRUD/Auth/WS)
-├── test_search_engine.py           20 tests  ← 搜索引擎矩阵 (4 mode × 2 params)
+├── test_web_api.py                 55 tests  ← v6.5.0 Web API 合并 + archive/WS 回归
+├── test_search_engine.py           22 tests  ← 搜索引擎矩阵 + search pool 恢复回归
+├── test_cli_persistence_v10.py     11 tests  ← CLI stage/categorize 持久化回归
 ├── test_security_resilience.py     23 tests  ← 路径验证器全矩阵 (15 场景)
 ├── test_fileops_advanced.py         9 tests  ← 文件操作完整覆盖
 ├── test_dm_config.py                7 tests  ← DataManager 持久化/并发/弃用API迁移
@@ -339,7 +406,7 @@ tests/                              661 项测试 (v6.5.1)
 └── conftest.py                              ← 共享 fixture + DataManager.reset()
 ```
 
-> **v6.5.1 变更**: `test_web_api_advanced.py` / `test_web_endpoints.py` / `test_api_v6.py` 已在 v6.5.0 TC-2 合并为 `test_web_api.py`（42 tests）。文档同步修正。新增 `test_packaging.py` (15) + `test_security_v9.py` (17)，总数 629→661。
+> **当前稳定化变更**: 在既有 v6.5.1 测试基础上，新增 CLI 持久化、archive traversal、WebSocket fallback、search pool 恢复、run legacy config 与 copy/extract 回归覆盖；并新增批量 copy、事务 extract + progress 追踪覆盖；总数提升至 764。
 
 ### 5.2 测试隔离
 
@@ -421,7 +488,7 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; +32 新测试; 661 tests** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 tests** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |
 | **6.4.0** | **2026-05-24** | **process_utils提取, 14类型标注, 3处XSS修复, api.js集中化, 前端可折叠面板, SRI哈希, tag管理, file创建, actionModal, 479 tests** |
@@ -769,7 +836,7 @@ finally:
 | C2 | `actions.py` | `archive_selection` 目录分支 arcname → 逐文件决策 | 防止 `relative_to` ValueError |
 | C3 | `security.py` | `_strip_win_long_prefix` → UNC 检查前剥离 `\\?\` | Windows 长路径项目可注册 |
 | C4 | `actions.py` | `batch_rename` 增加 `count` 参数 | 用户可控替换数量 |
-| C5 | `search.py` | `SHARED_SEARCH_POOL._shutdown` 检查 → 提前 break | 防止 atexit 后 RuntimeError |
+| C5 | `search.py` | `ThreadPoolExecutor.submit` `RuntimeError` 捕获 → pool 重建后重试一次 | 去除私有 `_shutdown` 依赖并防止 atexit 后提交崩溃 |
 | C6 | `search.py` | `SearchWorker.run` try/except → `("ERROR", msg)` 入队 | UI 不再永远等待 |
 
 ### 11.7 参数动态对齐 — v6.5.1 新增

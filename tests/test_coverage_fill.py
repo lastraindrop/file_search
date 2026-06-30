@@ -151,11 +151,16 @@ class TestSearchPoolShutdown:
     """Tests for search pool graceful shutdown behavior."""
 
     def test_search_pool_not_shut_down_yet(self):
-        """Shared search pool is initialized and not yet shutdown."""
+        """Shared search pool is initialized and accepts submissions.
+
+        Uses the public behavioral contract (successful submit + result)
+        rather than the private ``_shutdown`` attribute, which is a CPython
+        implementation detail and not part of the ``ThreadPoolExecutor`` API.
+        """
         from file_cortex_core.search import SHARED_SEARCH_POOL
 
-        assert hasattr(SHARED_SEARCH_POOL, "_shutdown")
-        assert not SHARED_SEARCH_POOL._shutdown
+        fut = SHARED_SEARCH_POOL.submit(lambda: True)
+        assert fut.result(timeout=5) is True
 
 
 class TestConfigConstants:
