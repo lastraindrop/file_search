@@ -30,6 +30,7 @@ from file_cortex_core import (
     FileUtils,
     FormatUtils,
     PathValidator,
+    ProjectConfig,
     SearchWorker,
     __version__,
     logger,
@@ -41,7 +42,7 @@ SEARCH_POLL_MS = 100
 
 def get_preview_limit(dm: DataManager) -> int:
     """Gets preview limit from global settings (default 1MB)."""
-    mb = dm.data.get("global_settings", {}).get("preview_limit_mb", 1)
+    mb = dm.config.global_settings.preview_limit_mb
     return int(mb * 1024 * 1024)
 
 
@@ -60,7 +61,7 @@ class FileCortexApp:
 
         self.data_mgr = DataManager()
         self.current_dir: pathlib.Path | None = None
-        self.current_proj_config: dict | None = None
+        self.current_proj_config: ProjectConfig | None = None
         self.search_thread: threading.Thread | None = None
         self.staging_files: list[str] = []
         self.stop_event = threading.Event()
@@ -85,7 +86,7 @@ class FileCortexApp:
         self._init_ui()
         self._init_context_menu()
 
-        last_dir = self.data_mgr.data.get("last_directory")
+        last_dir = self.data_mgr.config.last_directory
         if last_dir and os.path.exists(last_dir):
             try:
                 self.load_project(last_dir)
@@ -635,7 +636,7 @@ class FileCortexApp:
     def refresh_context_tools_menu(self) -> None:
         """Refreshes the context-menu tool submenu from project configuration."""
         self.context_tool_menu.delete(0, tk.END)
-        tools = (self.current_proj_config or {}).get("custom_tools", {})
+        tools = self.current_proj_config.custom_tools if self.current_proj_config else {}
         if not tools:
             self.context_tool_menu.add_command(label="(无可用工具)", state=tk.DISABLED)
             return
@@ -675,13 +676,12 @@ class FileCortexApp:
     def save_project_settings(self) -> None:
         """Saves current project UI settings to config."""
         if self.current_proj_config:
-            self.current_proj_config["excludes"] = self.exclude_var.get()
-            self.current_proj_config["search_settings"] = {
-                "mode": self.search_mode_var.get(),
-                "case_sensitive": self.case_sensitive_var.get(),
-                "inverse": self.is_inverse_var.get(),
-                "include_dirs": self.search_include_dirs_var.get(),
-            }
+            self.current_proj_config.excludes = self.exclude_var.get()
+            ss = self.current_proj_config.search_settings
+            ss.mode = self.search_mode_var.get()
+            ss.case_sensitive = self.case_sensitive_var.get()
+            ss.inverse = self.is_inverse_var.get()
+            ss.include_dirs = self.search_include_dirs_var.get()
             self.data_mgr.save()
             self.lbl_status.config(text="项目配置已保存")
 
@@ -699,14 +699,14 @@ class FileCortexApp:
 
         self.current_dir = pathlib.Path(path_str)
         self.lbl_project.config(text=f"📂 {path_str}")
-        self.current_proj_config = self.data_mgr.get_project_data(path_str)
+        self.current_proj_config = self.data_mgr.get_project_data_obj(path_str)
 
-        ss = self.current_proj_config.get("search_settings", {})
-        self.search_mode_var.set(ss.get("mode", "smart"))
-        self.case_sensitive_var.set(ss.get("case_sensitive", False))
-        self.is_inverse_var.set(ss.get("inverse", False))
-        self.search_include_dirs_var.set(ss.get("include_dirs", False))
-        self.exclude_var.set(self.current_proj_config.get("excludes", ""))
+        ss = self.current_proj_config.search_settings
+        self.search_mode_var.set(ss.mode)
+        self.case_sensitive_var.set(ss.case_sensitive)
+        self.is_inverse_var.set(ss.inverse)
+        self.search_include_dirs_var.set(ss.include_dirs)
+        self.exclude_var.set(self.current_proj_config.excludes)
         self._update_pin_button()
 
         self.data_mgr.add_to_recent(path_str)
@@ -758,7 +758,7 @@ class FileCortexApp:
         for w in self.tool_btn_frame.winfo_children():
             w.destroy()
 
-        cats = self.current_proj_config.get("quick_categories", {})
+        cats = self.current_proj_config.quick_categories
         for name in cats:
             ttk.Button(
                 self.cat_btn_frame,
@@ -767,7 +767,7 @@ class FileCortexApp:
                 command=lambda n=name: self.on_categorize_staged(n),
             ).pack(side=tk.LEFT, padx=2)
 
-        tools = self.current_proj_config.get("custom_tools", {})
+        tools = self.current_proj_config.custom_tools
         for name in tools:
             ttk.Button(
                 self.tool_btn_frame,
@@ -778,7 +778,7 @@ class FileCortexApp:
 
     def refresh_template_combo(self) -> None:
         """Refreshes the template dropdown."""
-        templates = self.current_proj_config.get("prompt_templates", {})
+        templates = self.current_proj_config.prompt_templates
         vals = ["None"] + list(templates.keys())
         self.combo_templates["values"] = vals
         if self.selected_template_var.get() not in vals:
@@ -823,7 +823,9 @@ class FileCortexApp:
         if not self.current_dir or not paths:
             return
 
-        template = self.current_proj_config.get("custom_tools", {}).get(tool_name)
+        if not self.current_proj_config:
+            return
+        template = self.current_proj_config.custom_tools.get(tool_name)
         if not template:
             return
 
@@ -934,7 +936,7 @@ class FileCortexApp:
             token_count: Estimated token count.
         """
         try:
-            threshold = self.current_proj_config.get("token_threshold", 100000)
+            threshold = self.data_mgr.config.global_settings.token_threshold
             color = "#ef4444" if token_count > threshold else "#555"
             self.lbl_stats.config(
                 text=f"清单: {item_count} 项 ({file_count} 文件) "
@@ -1052,7 +1054,7 @@ class FileCortexApp:
         self.result_queue = queue.Queue()
         self.lbl_status.config(text="扫描中...")
         max_size = (
-            self.current_proj_config.get("max_search_size_mb", 5)
+            self.current_proj_config.max_search_size_mb
             if self.current_proj_config
             else 5
         )
@@ -1085,6 +1087,9 @@ class FileCortexApp:
                         text=f"就绪 ({len(self.tree_search.get_children())}项)"
                     )
                     return
+                if isinstance(res, tuple) and res[0] == "ERROR":
+                    self.show_status(f"搜索错误: {res[1]}", is_error=True)
+                    continue
 
                 try:
                     path_str = res["path"]
@@ -1297,7 +1302,7 @@ class FileCortexApp:
         self.staging_files.clear()
 
         if self.current_proj_config:
-            staging_data = list(self.current_proj_config.get("staging_list", []))
+            staging_data = list(self.current_proj_config.staging_list)
             filter_text = self.staging_filter_var.get().lower() if apply_filter else ""
 
             for p_raw in staging_data:
@@ -1344,7 +1349,7 @@ class FileCortexApp:
                     self.staging_files.remove(p)
 
             if self.current_proj_config:
-                self.current_proj_config["staging_list"] = list(self.staging_files)
+                self.current_proj_config.staging_list = list(self.staging_files)
                 self.data_mgr.save()
 
             self.show_status(f"已从清单移除 {len(to_remove)} 个匹配项")
@@ -1375,7 +1380,7 @@ class FileCortexApp:
                 )
 
         if save_to_disk and self.current_proj_config:
-            self.current_proj_config["staging_list"] = list(self.staging_files)
+            self.current_proj_config.staging_list = list(self.staging_files)
             self.data_mgr.save()
 
         self.update_stats()
@@ -1416,7 +1421,7 @@ class FileCortexApp:
         for i in self.tree_staging.get_children():
             self.tree_staging.delete(i)
         if self.current_proj_config:
-            self.current_proj_config["staging_list"] = []
+            self.current_proj_config.staging_list = []
             self.data_mgr.save()
         self.update_stats()
 
@@ -1429,7 +1434,7 @@ class FileCortexApp:
             self.tree_staging.delete(i)
 
         if self.current_proj_config:
-            self.current_proj_config["staging_list"] = list(self.staging_files)
+            self.current_proj_config.staging_list = list(self.staging_files)
             self.data_mgr.save()
         self.update_stats()
 
@@ -1438,7 +1443,7 @@ class FileCortexApp:
         prefix = None
         tpl_name = self.selected_template_var.get()
         if tpl_name != "None" and self.current_proj_config:
-            prefix = self.current_proj_config.get("prompt_templates", {}).get(tpl_name)
+            prefix = self.current_proj_config.prompt_templates.get(tpl_name)
 
         ex_str = self.exclude_var.get()
         use_git = self.use_gitignore_var.get()
@@ -1469,7 +1474,7 @@ class FileCortexApp:
         """Updates the group combo box values."""
         if not self.current_proj_config:
             return
-        self.combo_groups["values"] = list(self.current_proj_config["groups"].keys())
+        self.combo_groups["values"] = list(self.current_proj_config.groups.keys())
 
     def on_group_changed(self, event: tk.Event) -> None:
         """Handles group selection change."""
@@ -1481,7 +1486,7 @@ class FileCortexApp:
             self.tree_fav.delete(i)
         if not self.current_proj_config:
             return
-        grp = self.current_proj_config["groups"].get(self.current_group_var.get(), [])
+        grp = self.current_proj_config.groups.get(self.current_group_var.get(), [])
         for ps in grp:
             p = pathlib.Path(ps)
             self.tree_fav.insert(
@@ -1496,8 +1501,8 @@ class FileCortexApp:
         if not self.current_proj_config:
             return
         n = simpledialog.askstring("新建组", "名:")
-        if n and n not in self.current_proj_config["groups"]:
-            self.current_proj_config["groups"][n] = []
+        if n and n not in self.current_proj_config.groups:
+            self.current_proj_config.groups[n] = []
             self.update_group_combo()
             self.current_group_var.set(n)
             self.data_mgr.save()
@@ -1507,7 +1512,7 @@ class FileCortexApp:
         if not self.current_proj_config:
             return
         self._add_paths_to_staging(
-            self.current_proj_config["groups"].get(self.current_group_var.get(), [])
+            self.current_proj_config.groups.get(self.current_group_var.get(), [])
         )
 
     def toggle_preview_edit(self) -> None:
@@ -1639,7 +1644,7 @@ class FileCortexApp:
 
         profiles = {}
         if self.current_proj_config:
-            profiles = self.current_proj_config.get("collection_profiles", {})
+            profiles = self.current_proj_config.collection_profiles
 
         dialog = PathCollectionDialog(
             self.root,

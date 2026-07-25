@@ -6,10 +6,19 @@ export const config = {
         caseSensitive: 'searchCaseSensitive',
         inverse: 'searchInverse',
         sidebarExpanded: 'sidebarExpanded',
-        lastProjectPath: 'lastProjectPath'
+        lastProjectPath: 'lastProjectPath',
+        theme: 'theme',
+        leftPanelWidth: 'leftPanelWidth',
+        rightPanelWidth: 'rightPanelWidth'
     },
     ui: {
         searchDebounceMs: 400,
+        panelWidths: {
+            left: 22,
+            right: 22,
+            min: 18,
+            max: 32,
+        },
         sidebarWidths: {
             collapsed: '60px',
             expanded: '210px'
@@ -95,10 +104,14 @@ export function getFileExt(path) {
     return dot > 0 ? name.substring(dot + 1).toLowerCase() : "";
 }
 
+export function getInjectedApiToken() {
+    return document.querySelector('meta[name="fctx-api-token"]')?.content || "";
+}
+
 export function buildWsUrl(path, params = {}) {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const base = `${proto}//${window.location.host}${path}`;
-    const token = state.globalSettings.api_token || window.__FCTX_API_TOKEN__ || "";
+    const token = state.globalSettings.api_token || getInjectedApiToken();
     if (token) params.token = token;
     const qs = Object.entries(params)
         .filter(([, v]) => v !== undefined && v !== null && v !== "")

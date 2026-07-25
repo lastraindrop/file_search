@@ -531,6 +531,7 @@ class TestAPITokenMiddleware:
                 "access-control-allow-origin", ""
             )
         finally:
+            monkeypatch.delenv("FCTX_ALLOWED_ORIGINS", raising=False)
             importlib.reload(web_app)
 
 

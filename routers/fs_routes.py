@@ -139,6 +139,7 @@ def api_batch_rename(
             req.pattern,
             req.replacement,
             req.dry_run,
+            count=req.count,
         )
         return {"status": "ok", "results": results}
     except ValueError as e:

@@ -1,8 +1,8 @@
 # FileCortex 测试说明
 
-> **测试数**: 768 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.5.1
+> **测试数**: 773 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.5.1
 
-本项目包含 **768** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
+本项目包含 **773** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
 
 ## 测试分层架构
 
@@ -10,7 +10,7 @@
 |------|-----------|--------|----------|
 | **v6.5.0 全量回归** | `test_v8_comprehensive.py` | 90 | DI/DI反转/OOM保护/CLI search+export/ProcessManager/完整回归 |
 | **v6.5.0 安全修复** | `test_security_fixes_v650.py` | 38 | 符号链接遍历/访问控制/MCP安全/线程安全/ProcessManager/死代码消除 |
-| **v6.5.0 前端契约** | `test_frontend_contract.py` | 36 | HTML结构/JS模块/CSS/前端功能契约/copy-extract Web wiring/bulk copy-extract+progress 契约 |
+| **v6.5.0 前端契约** | `test_frontend_contract.py` | 41 | HTML结构/JS模块/CSS/前端功能契约/copy-extract Web wiring/bulk copy-extract+progress/CSP 事件委托/主题/布局/虚拟滚动/CSP Header/Style 契约 |
 | **v6.5.0 Web API (合并)** | `test_web_api.py` | 80 | CRUD/CORS/Auth/设置/WebSocket/文件操作/安全/端点契约/归档安全/WS fallback/copy/extract/批量copy+progress API |
 | **v6.4.0 BUG修复** | `test_bugfix_v7.py` | 90 | BUG修复/GlobalSettings/PathValidator/DI/格式工具/搜索 |
 | **v6.3.3 BUG修复** | `test_bugfix_v633.py` | 22 | is_truncated/CDATA/CORS/NoiseReducer/version |
@@ -28,7 +28,7 @@
 | **v6.5.1 P0/P1** | `test_packaging.py` + `test_security_v9.py` | 32 | 打包完整性/安全回归 |
 | **当前稳定化回归** | `test_cli_persistence_v10.py` | 21 | CLI stage/categorize 持久化、快照隔离、磁盘 reload、run legacy config 回归/copy/extract/批量copy CLI |
 | **文件操作 (copy/extract)** | `test_fileops_copy_extract.py` | 41 | Copy/Extract 内核安全与功能覆盖 (zip-slip/冲突/边界/no-overwrite/批量copy/事务extract/progress) |
-| **总计** | **25 文件** | **768** | **100% 关键路径** |
+| **总计** | **25 文件** | **773** | **100% 关键路径** |
 
 ## 参数对齐测试矩阵
 
@@ -37,7 +37,7 @@
 | `token_threshold` | `state.js` | `GlobalSettings.token_threshold` (动态默认值) | `test_global_settings_handles_settings_alias` |
 | `preview_limit_mb` | `main.js` | `GlobalSettings.preview_limit_mb` (动态默认值) | `test_global_settings_roundtrip` |
 | `allowed_extensions` | `main.js` | `GlobalSettings.allowed_extensions` | `test_global_settings_handles_allowed_extensions` |
-| `api_token` | `window.__FCTX_API_TOKEN__` | env `FCTX_API_TOKEN` | `test_api_token_header_forward` |
+| `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | `test_api_token_header_forward` |
 | Version | `{{ version }}` | `__version__` = dynamic | `test_api_index_page_injects_version` |
 
 > **注意**: 所有默认值现在都是动态的——测试使用 `GlobalSettings()` 实例和 `__version__` 而非硬编码的数值，以防止默认值改变时测试失效。

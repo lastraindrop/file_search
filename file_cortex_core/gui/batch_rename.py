@@ -149,6 +149,7 @@ class BatchRenameWindow(tk.Toplevel):
                 final_pattern,
                 replacement,
                 dry_run=True,
+                count=1,
             )
 
             changed_map = {item["old"]: item for item in results}
@@ -196,6 +197,7 @@ class BatchRenameWindow(tk.Toplevel):
                 final_pattern,
                 replacement,
                 dry_run=False,
+                count=1,
             )
 
             if self.callback:

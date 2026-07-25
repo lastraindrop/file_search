@@ -54,6 +54,51 @@ def test_static_assets_reflect_current_frontend_architecture(api_client):
     assert "tree-toggle" in css
 
 
+def test_frontend_uses_delegated_actions_and_no_inline_handlers(api_client):
+    """Static UI actions should not require inline event handlers or a global App."""
+    html = api_client.get("/").text
+    main_js = api_client.get("/static/js/main.js").text
+    events_js = api_client.get("/static/js/events.js").text
+
+    assert "onclick=" not in html
+    assert "onchange=" not in html
+    assert 'data-action="openProject"' in html
+    assert 'data-action="toggleSection"' in html
+    assert "bindStaticEvents(App)" in main_js
+    assert "window.App" not in main_js
+    assert "document.addEventListener('click'" in events_js
+
+
+def test_frontend_supports_themes_resizers_and_operation_summary(api_client):
+    """The UI should provide persistent theme, panel-resize, and result-summary hooks."""
+    html = api_client.get("/").text
+    state_js = api_client.get("/static/js/state.js").text
+    layout_js = api_client.get("/static/js/layout.js").text
+    css = api_client.get("/static/css/style.css").text
+
+    assert 'id="btnTheme"' in html
+    assert 'id="leftPanelResizer"' in html
+    assert 'id="rightPanelResizer"' in html
+    assert 'id="operationSummary"' in html
+    assert "theme: 'theme'" in state_js
+    assert "initializePanelResizers" in layout_js
+    assert 'html[data-theme="light"]' in css
+    assert ".operation-summary" in css
+
+
+def test_frontend_uses_virtualized_search_result_rendering(api_client):
+    """Search result rendering should avoid appending every result directly to the DOM."""
+    main_js = api_client.get("/static/js/main.js").text
+    ui_js = api_client.get("/static/js/ui.js").text
+    virtual_list_js = api_client.get("/static/js/virtual-list.js").text
+    css = api_client.get("/static/css/style.css").text
+
+    assert "renderVirtualSearchResults" in main_js
+    assert "createVirtualList" in ui_js
+    assert "requestAnimationFrame" in virtual_list_js
+    assert ".virtual-search-item" in css
+
+
 def test_frontend_copy_extract_contract(api_client):
     """Web UI should expose copy/extract controls and endpoint wrappers."""
     html = api_client.get("/").text
@@ -61,10 +106,10 @@ def test_frontend_copy_extract_contract(api_client):
     api_js = api_client.get("/static/js/api.js").text
     main_js = api_client.get("/static/js/main.js").text
 
-    assert "App.copyFile" in html
-    assert "App.extractArchive" in html
-    assert "ctxAction('copyItem')" in html
-    assert "ctxAction('extract')" in html
+    assert 'data-action="copyFile"' in html
+    assert 'data-action="extractArchive"' in html
+    assert 'data-context-action="copyItem"' in html
+    assert 'data-context-action="extract"' in html
     assert "copy: '/api/fs/copy'" in state_js
     assert "extract: '/api/fs/extract'" in state_js
     assert "export async function copyFile" in api_js
@@ -77,8 +122,8 @@ def test_bulk_copy_extract_buttons_exist(api_client):
     """Bulk copy/extract buttons and the operation progress bar must exist."""
     html = api_client.get("/").text
 
-    assert "App.bulkCopy" in html
-    assert "App.bulkExtract" in html
+    assert 'data-action="bulkCopy"' in html
+    assert 'data-action="bulkExtract"' in html
     assert "operationProgress" in html
     assert "operationProgressBar" in html
     assert 'id="bulkActions"' in html
@@ -222,10 +267,10 @@ def test_index_html_uses_collapsible_sections_not_tabs(api_client):
     assert "toggleSection" in html
 
 
-def test_index_html_has_staging_col_md3(api_client):
-    """Phase 2: Staging panel should be col-md-3 (widened from col-md-2)."""
+def test_index_html_has_staging_panel(api_client):
+    """Staging panel should exist with proper structure (flex-based layout)."""
     html = api_client.get("/").text
-    assert 'class="col-md-3 glass-panel border-start' in html
+    assert 'glass-panel border-start' in html
     assert 'panel-right' in html
 
 
@@ -314,7 +359,7 @@ def test_main_js_has_create_file(api_client):
 def test_index_html_has_new_file_button(api_client):
     """Phase 3: Files section header should have a +New button."""
     html = api_client.get("/").text
-    assert "App.createFile" in html
+    assert 'data-action="createFile"' in html
 
 
 def test_index_html_keyboard_help_updated(api_client):
@@ -376,3 +421,22 @@ class TestFrontendBugFixes:
         """FrontFix-1: updateBulkUI should use normal style.display, not setProperty important."""
         js = api_client.get("/static/js/main.js").text
         assert "style.setProperty('display'" not in js
+
+
+def test_csp_header_present_on_html_response(api_client):
+    """CSP header must be present on the index page."""
+    res = api_client.get("/")
+    assert res.status_code == 200
+    csp = res.headers.get("content-security-policy", "")
+    assert "default-src 'self'" in csp
+    assert "script-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "connect-src 'self' ws: wss:" in csp
+
+
+def test_inline_styles_not_event_handlers(api_client):
+    """Remaining inline style attributes must only be JS-toggled display:none or progress widths."""
+    html = api_client.get("/").text
+    assert "onclick=" not in html
+    assert "onchange=" not in html
+    assert "behavior:" not in html

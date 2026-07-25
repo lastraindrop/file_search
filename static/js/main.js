@@ -1,4 +1,7 @@
-import { state, config, escapeHtml, getFileName, getFileExt, buildWsUrl } from './state.js';import * as api from './api.js';
+import { state, config, escapeHtml, getFileName, getFileExt, buildWsUrl } from './state.js';
+import { bindStaticEvents } from './events.js';
+import { initializePanelResizers } from './layout.js';
+import * as api from './api.js';
 import * as ui from './ui.js';
 
 const App = {
@@ -13,7 +16,11 @@ const App = {
     ...ui,
 
     init: async () => {
+        ui.setApp(App);
         await App.loadGlobalSettings();
+        App.applyTheme(App.state.globalSettings.theme || localStorage.getItem(App.config.storageKeys.theme));
+        bindStaticEvents(App);
+        initializePanelResizers();
         await App.loadWorkspaces();
 
         const searchInput = document.getElementById('searchInput');
@@ -80,7 +87,11 @@ const App = {
                 const helpModal = document.getElementById('helpModal');
                 if (helpModal) new bootstrap.Modal(helpModal).show();
             }
-            if (e.key === 'Escape') App.hideContextMenu();
+            if (e.key === 'Escape') {
+                App.hideContextMenu();
+                App.closeSearchOverlay();
+                App.hideFileNote();
+            }
         });
 
         // Restore search settings from localStorage
@@ -118,7 +129,7 @@ const App = {
         document.addEventListener('click', (e) => {
             const overlay = document.getElementById('searchOverlay');
             if (overlay && overlay.style.display !== 'none') {
-                if (!overlay.contains(e.target) && !e.target.closest('#searchInput') && !e.target.closest('#btnStopSearch') && !e.target.closest('[onclick*="startSearch"]')) {
+                if (!overlay.contains(e.target) && !e.target.closest('#searchInput') && !e.target.closest('#btnStopSearch') && !e.target.closest('[data-action="startSearch"]')) {
                     App.closeSearchOverlay();
                 }
             }
@@ -141,6 +152,35 @@ const App = {
             });
         }
         App.updateWorkspaceSummary();
+    },
+
+    applyTheme: (theme) => {
+        const activeTheme = theme === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = activeTheme;
+        localStorage.setItem(App.config.storageKeys.theme, activeTheme);
+        const button = document.getElementById('btnTheme');
+        if (button) {
+            button.innerText = activeTheme === 'light' ? 'Dark' : 'Light';
+            button.setAttribute('aria-pressed', String(activeTheme === 'light'));
+            button.title = `Switch to ${activeTheme === 'light' ? 'dark' : 'light'} theme`;
+        }
+        if (window.mermaid) {
+            window.mermaid.initialize({
+                startOnLoad: false,
+                theme: activeTheme === 'light' ? 'default' : 'dark',
+            });
+        }
+    },
+
+    toggleTheme: async () => {
+        const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+        App.applyTheme(nextTheme);
+        App.state.globalSettings = { ...App.state.globalSettings, theme: nextTheme };
+        try {
+            await api.saveGlobalSettings({ theme: nextTheme });
+        } catch (e) {
+            ui.showToast('Theme is saved locally; server sync failed.', 'warning');
+        }
     },
 
     toggleSidebar: () => {
@@ -219,7 +259,7 @@ const App = {
 
             const rootContainer = document.getElementById('fileTreeRoot');
             if (rootContainer) {
-                rootContainer.innerHTML = '<div class="small text-muted px-2 py-1">Loading workspace tree...</div>';
+                rootContainer.innerHTML = '<div class="skeleton-tree-item"><div class="skeleton skeleton-icon"></div><div class="skeleton skeleton-line medium" style="flex:1"></div></div>';
                 const rootTree = ui.renderTree(data, { initialExpand: true });
                 rootContainer.innerHTML = '';
                 rootContainer.appendChild(rootTree);
@@ -326,7 +366,7 @@ const App = {
         row.innerHTML = `
             <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-key" style="width:30%" value="${App.escapeHtml(key)}" placeholder="Name">
             <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary kv-value" style="width:55%" value="${App.escapeHtml(value)}" placeholder="Value">
-            <button class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('.d-flex').remove()">&times;</button>
+            <button class="btn btn-sm btn-link text-danger p-0" type="button" data-action="removeKeyValueRow" aria-label="Remove entry">&times;</button>
         `;
         return row;
     },
@@ -426,14 +466,7 @@ const App = {
                 if (typeof DOMPurify !== 'undefined') {
                     codeEl.innerHTML = DOMPurify.sanitize(rawHtml);
                 } else {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = rawHtml;
-                    tempDiv.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
-                    tempDiv.querySelectorAll('[onerror],[onload],[onclick],[onmouseover],[onfocus],[ontoggle]').forEach(el => {
-                        el.remove();
-                    });
-                    tempDiv.querySelectorAll('a[href^="javascript:"]').forEach(el => el.remove());
-                    codeEl.innerHTML = tempDiv.innerHTML;
+                    codeEl.innerText = data.content;
                 }
                 codeEl.classList.remove('hljs');
             } else if (ext === 'mermaid') {
@@ -509,6 +542,11 @@ const App = {
                     await api.archiveFiles(App.state.projectPath, Array.from(App.state.staging), name);
                     ui.closeActionModal();
                     ui.showToast(`Archived to ${name}`, 'success');
+                    ui.showOperationSummary({
+                        title: 'Archive created',
+                        completed: App.state.staging.size,
+                        details: name,
+                    });
                     btn.innerText = originalText;
                     btn.disabled = false;
                 } catch (e) { ui.showToast(e.message, 'danger'); }
@@ -594,6 +632,7 @@ const App = {
                     App.state.currentFile = null;
                     document.getElementById('fileControls').style.display = 'none';
                     ui.showToast("File deleted", 'success');
+                    ui.showOperationSummary({ title: 'File deleted', completed: 1 });
                 } catch (e) { ui.showToast("Delete failed: " + e.message, 'danger'); }
             }
         });
@@ -620,6 +659,11 @@ const App = {
                     const data = await api.copyFile(src, dstDir, App.state.projectPath);
                     ui.closeActionModal();
                     ui.showToast(`Copied to ${(data.new_paths && data.new_paths[0]) || dstDir}`, 'success');
+                    ui.showOperationSummary({
+                        title: 'Copy complete',
+                        completed: data.new_paths?.length || 0,
+                        details: dstDir,
+                    });
                     App.refreshProject();
                 } catch (e) { ui.showToast("Copy failed: " + e.message, 'danger'); }
             }
@@ -655,6 +699,11 @@ const App = {
                     const count = data.extracted_paths ? data.extracted_paths.length : 0;
                     ui.closeActionModal();
                     ui.showToast(`Extracted ${count} entries`, 'success');
+                    ui.showOperationSummary({
+                        title: 'Extraction complete',
+                        completed: count,
+                        details: dstDir,
+                    });
                     App.refreshProject();
                 } catch (e) { ui.showToast("Extract failed: " + e.message, 'danger'); }
             }
@@ -701,6 +750,7 @@ const App = {
                             await api.batchRename(App.state.projectPath, files, pattern, replacement, false);
                             ui.closeActionModal();
                             ui.showToast("Batch rename completed!");
+                            ui.showOperationSummary({ title: 'Batch rename complete', completed: files.length });
                             App.state.selectedFiles.clear();
                             App.updateBulkUI();
                             App.refreshProject();
@@ -732,12 +782,14 @@ const App = {
 
         const leftList = document.getElementById('searchResultsList');
         if (leftList) leftList.innerHTML = '';
+        App.state.searchResults = [];
+        ui.clearVirtualSearchResults();
 
         const overlay = document.getElementById('searchOverlay');
         const list = document.getElementById('searchOverlayList');
         const count = document.getElementById('searchOverlayCount');
         overlay.style.display = 'flex';
-        list.innerHTML = '<div class="text-center p-3 small text-muted">Searching...</div>';
+        list.innerHTML = '<div class="empty-state"><div class="empty-state-icon skeleton" style="width:24px;height:24px;border-radius:50%"></div><div class="empty-state-text">Searching...</div></div>';
         count.innerText = '...';
 
         const wsUrl = buildWsUrl(config.endpoints.wsSearch, {
@@ -758,7 +810,7 @@ const App = {
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.status === "DONE") {
                 if (resultCount === 0) {
-                    list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">?</div><div>No results found.</div></div>';
+        list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-text">No results found</div></div>';
                 }
                 count.innerText = `${resultCount} results`;
                 document.getElementById('btnStopSearch').style.display = 'none';
@@ -772,11 +824,11 @@ const App = {
             }
             resultCount++;
             count.innerText = `${resultCount} results`;
-            ui.renderSearchResultItem(data, true);
-            list.scrollTop = list.scrollHeight;
+            App.state.searchResults.push(data);
+            ui.renderVirtualSearchResults(App.state.searchResults);
         };
         App.state.socket.onerror = () => {
-            list.innerHTML = '<div class="text-center p-3 text-danger">Search connection failed.</div>';
+            list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128268;</div><div class="empty-state-text">Search connection failed</div></div>';
             count.innerText = 'Error';
             document.getElementById('btnStopSearch').style.display = 'none';
             App.state.socket = null;
@@ -809,6 +861,7 @@ const App = {
         try {
             const data = await api.categorizeFiles(App.state.projectPath, Array.from(App.state.staging), catName);
             ui.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
+            ui.showOperationSummary({ title: 'Categorization complete', completed: data.moved_count, details: catName });
             App.state.staging.clear();
             ui.renderStaging();
             App.syncStagingToBackend();
@@ -835,7 +888,7 @@ const App = {
             stopBtn.id = 'btnStopTool';
             stopBtn.className = 'btn btn-outline-danger btn-sm ms-auto me-3';
             stopBtn.innerText = '🛑 Stop';
-            stopBtn.onclick = () => App.terminateProcess();
+            stopBtn.addEventListener('click', () => App.terminateProcess());
             modalHeader.insertBefore(stopBtn, modalHeader.lastElementChild);
         }
         stopBtn.style.display = 'none';
@@ -1179,12 +1232,14 @@ const App = {
             bodyHtml: `<p class="mb-0">Delete <strong>${App.state.selectedFiles.size}</strong> files forever? This cannot be undone.</p>`,
             onConfirm: async () => {
                 try {
+                    const selectedCount = App.state.selectedFiles.size;
                     await api.deleteFiles(App.state.projectPath, Array.from(App.state.selectedFiles));
                     ui.closeActionModal();
                     App.state.selectedFiles.clear();
                     App.updateBulkUI();
                     App.openProject();
                     ui.showToast("Batch delete successful.");
+                    ui.showOperationSummary({ title: 'Batch delete complete', completed: selectedCount });
                 } catch (e) { ui.showToast("Bulk delete failed: " + e.message, 'danger'); }
             }
         });
@@ -1207,6 +1262,13 @@ const App = {
                     const data = await api.moveFiles(Array.from(App.state.selectedFiles), dstDir);
                     ui.closeActionModal();
                     ui.showToast(`Batch Move: ${data.new_paths.length} items moved.`);
+                    ui.showOperationSummary({
+                        title: 'Batch move complete',
+                        completed: data.new_paths?.length || 0,
+                        skipped: data.skipped?.length || 0,
+                        details: dstDir,
+                        level: data.skipped?.length ? 'warning' : 'success',
+                    });
                     App.state.selectedFiles.clear();
                     App.updateBulkUI();
                     App.openProject();
@@ -1240,6 +1302,7 @@ const App = {
                     ui.closeActionModal();
                     const count = data.new_paths ? data.new_paths.length : 0;
                     ui.showToast(`Copied ${count} item(s).`, 'success');
+                    ui.showOperationSummary({ title: 'Batch copy complete', completed: count, details: dstDir });
                     App.state.selectedFiles.clear();
                     App.updateBulkUI();
                     App.openProject();
@@ -1284,6 +1347,13 @@ const App = {
                     }
                     ui.closeActionModal();
                     ui.showToast(`Extracted ${extracted} entries from ${zips.length} archive(s).`, 'success');
+                    ui.showOperationSummary({
+                        title: 'Batch extraction complete',
+                        completed: extracted,
+                        skipped: ignored,
+                        details: `${zips.length} archive(s)`,
+                        level: ignored ? 'warning' : 'success',
+                    });
                     App.state.selectedFiles.clear();
                     App.updateBulkUI();
                     App.openProject();
@@ -1343,6 +1413,8 @@ const App = {
         }
     },
 
+    closeOperationSummary: () => ui.hideOperationSummary(),
+
     _updateProgress: (pct, text = null) => {
         const inner = document.getElementById('operationProgressBar');
         if (inner) {
@@ -1373,6 +1445,7 @@ const App = {
             const data = await api.stageAll(App.state.projectPath, 'files', true);
             await App.refreshProject();
             ui.showToast(`Staged ${data.added_count} files`);
+            ui.showOperationSummary({ title: 'Stage all complete', completed: data.added_count });
         } catch (e) { ui.showToast("Stage All failed: " + e.message, 'danger'); }
     },
 
@@ -1428,6 +1501,8 @@ const App = {
         state.contextPath = path;
         const menu = document.getElementById('customContextMenu');
         if (menu) {
+            const extractAction = menu.querySelector('[data-context-action="extract"]');
+            if (extractAction) extractAction.hidden = getFileExt(path) !== 'zip';
             let left = e.clientX;
             let top = e.clientY;
             const menuW = 180;
@@ -1547,15 +1622,14 @@ const App = {
     toggleSection: (sectionId) => {
         const body = document.getElementById(`section-${sectionId}`);
         const toggle = document.getElementById(`toggle-${sectionId}`);
+        const control = document.querySelector(`[data-action="toggleSection"][data-section="${sectionId}"]`);
         if (!body) return;
         const isHidden = body.style.display === 'none';
         body.style.display = isHidden ? 'block' : 'none';
         if (toggle) toggle.innerHTML = isHidden ? '&#9662;' : '&#9656;';
+        if (control) control.setAttribute('aria-expanded', String(isHidden));
     }
 };
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => App.init());
-
-// Expose to window for inline onclick handlers
-window.App = App;

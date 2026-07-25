@@ -84,6 +84,31 @@ async def verify_api_token(
     return await call_next(request)
 
 
+async def apply_csp_header(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Adds Content-Security-Policy header to HTML responses."""
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if "text/html" not in content_type:
+        return response
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' "
+        "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' "
+        "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com "
+        "https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'"
+    )
+    return response
+
+
 def create_app() -> FastAPI:
     """Creates and configures the FastAPI application."""
     app = FastAPI(title=f"FileCortex v{__version__} API")
@@ -98,6 +123,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.middleware("http")(verify_api_token)
+    app.middleware("http")(apply_csp_header)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     app.include_router(http_router)
     app.include_router(ws_router)

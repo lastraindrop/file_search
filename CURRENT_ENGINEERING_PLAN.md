@@ -3,7 +3,7 @@
 > Date: 2026-06-30  
 > Scope: final repository state after File System Completion Tranches 1 & 2, frontend stabilization, and real progress wiring.  
 > Goal: make FileCortex a lightweight, complete, locally usable file/workspace context system before expanding into heavier semantic-search/RAG features.  
-> Status: ✅ Current Stabilization Tranche — COMPLETE. 768 tests passing, all gates green.
+> Status: ✅ Current Stabilization Tranche — COMPLETE. 773 tests passing, all gates green.
 
 ## 1. Executive Summary
 
@@ -153,7 +153,7 @@ These are important but not all urgent. The current tranche should fix correctne
 - ✅ File System Completion Tranche 1: safe copy/extract with no-overwrite, zip-slip, batch copy.
 - ✅ File System Completion Tranche 2: transactional extract, ProgressTracker, progress API, frontend progress wiring.
 - ✅ Frontend stabilization: FE-1 UX fixes, FE-2 real progress polling, visual QA.
-- ✅ Run targeted tests, full tests (768 passed), and lint (ruff 0 errors, JS clean).
+- ✅ Run targeted tests, full tests (773 passed), and lint (ruff 0 errors, JS clean).
 - ✅ Update this plan with actual verification evidence.
 
 ### Phase 1 — UX Enhancement & Hardening (Next)

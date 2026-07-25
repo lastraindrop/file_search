@@ -81,7 +81,19 @@ def _ensure_tool_registry(mcp: FastMCP) -> FastMCP:
                 "function": func,
                 "description": description or func.__doc__ or "",
             }
-            return sdk_decorator(func)
+            try:
+                return sdk_decorator(func)
+            except Exception:
+                logger.warning(
+                    "MCP SDK tool registration failed for '%s'. "
+                    "The function is available for introspection but "
+                    "not registered with the real SDK transport. "
+                    "This usually indicates a version mismatch between "
+                    "mcp and pydantic.",
+                    tool_name,
+                    exc_info=True,
+                )
+                return func
 
         return decorator
 

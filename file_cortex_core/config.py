@@ -90,7 +90,6 @@ class ProjectConfig(BaseModel):
             "Simple List": CollectionProfile(prefix="", suffix="", sep="\\n"),
         }
     )
-    token_threshold: int = 100000
 
 
 class GlobalSettings(BaseModel):

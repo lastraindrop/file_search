@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.5.1 | **测试**: 768 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **测试**: 773 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -16,8 +16,8 @@
 │  Entry Points (4)                                              │
 │  ┌─────────┐ ┌──────────────┐ ┌──────┐ ┌─────────────────┐    │
 │  │ Desktop │ │ Web (FastAPI) │ │ CLI  │ │ MCP Server      │    │
-│  │tkinter  │ │ REST + WS     │ │fctx  │ │ FastMCP         │    │
-│  │ main()  │ │ uvicorn       │ │main()│ │ get_mcp().tool()│    │
+│  │tkinter  │ │ REST + WS +  │ │fctx  │ │ FastMCP         │    │
+│  │ main()  │ │ CSP Header   │ │main()│ │ get_mcp().tool()│    │
 │  └────┬────┘ └──────┬───────┘ └──┬───┘ └───────┬─────────┘    │
 │       │              │            │              │              │
 ├───────┴──────────────┴────────────┴──────────────┴────────────┤
@@ -43,9 +43,20 @@
 │  │         │ │DI v6.3.2 │ │         │ │ daemon v6.5.0  │      │
 │  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
 │  ┌──────────────────┐ ┌────────────────────────────┐           │
-│  │ process_utils    │ │ fctx.py CLI v6.5.0         │           │
-│  │terminate/cleanup │ │ search + export commands   │           │
+│  │ process_utils    │ │ ProgressTracker v6.5.1+    │           │
+│  │terminate/cleanup │ │ TTL + capacity eviction    │           │
 │  └──────────────────┘ └────────────────────────────┘           │
+├───────────────────────────────────────────────────────────────┤
+│  Frontend (static/)                                            │
+│  ┌────────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────┐    │
+│  │ state.js   │ │ api.js   │ │ main.js      │ │ ui.js    │    │
+│  │config+store│ │_fetch/_  │ │App init+biz  │ │renderers │    │
+│  └─────┬──────┘ └────┬─────┘ └──────┬───────┘ └────┬─────┘    │
+│  ┌─────┴──────┐ ┌────┴─────┐ ┌──────┴───────┐                │
+│  │ events.js  │ │layout.js │ │virtual-list  │  (v6.5.1+)    │
+│  │data-action  │ │panel re- │ │.js            │                │
+│  │delegation   │ │size+kbd  │ │rAF overscan  │                │
+│  └────────────┘ └──────────┘ └──────────────┘                │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,8 +66,12 @@
 |------|------|------|
 | **单源真理 (SSOT)** | `DataManager` Pydantic 模型驱动，所有配置经由此处 | `config.py` |
 | **路径归一化** | `PathValidator.norm_path()` 确保跨平台 key 唯一性 | `security.py` |
-| **防御深度** | HTTP + WebSocket 双通道 Token 认证 | `web_app.py`, `ws_routes.py` |
+| **防御深度** | HTTP + WebSocket 双通道 Token + CSP Header + meta 标签注入 | `web_app.py`, `ws_routes.py` |
 | **遍历共享** | `FileUtils.walk_filtered()` 统一所有目录遍历 | `file_io.py` |
+| **原子写入** | 配置保存使用 tempfile + os.replace + Windows 锁重试 | `config.py` |
+| **事件委托** | `data-action` + `addEventListener` 全局委托，消除内联 handler | `events.js` (v6.5.1+) |
+| **主题隔离** | CSS `data-theme` 变量切换，`prefers-reduced-motion` 响应 | `style.css` (v6.5.1+) |
+| **视口渲染** | `requestAnimationFrame` + overscan 虚拟滚动，避免 DOM 堆积 | `virtual-list.js` (v6.5.1+) |
 | **原子写入** | 配置保存使用 tempfile + os.replace + Windows 锁重试 | `config.py` |
 | **策略解耦** | `PathMatcher` / `ContentMatcher` 匹配逻辑与遍历分离 | `search.py` |
 | **进程终止统一** | `process_utils.py` 统一跨平台进程终止 (Windows/POSIX) | `process_utils.py` |
@@ -83,7 +98,7 @@ v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 12800
 | 2 | `token_ratio` | `state.js` (4) | `GlobalSettings.token_ratio` | `POST /api/global/settings` |
 | 3 | `preview_limit_mb` | `main.js` (1.0) | `GlobalSettings.preview_limit_mb` | `POST /api/global/settings` |
 | 4 | `allowed_extensions` | `main.js` ("") | `GlobalSettings.allowed_extensions` | `POST /api/global/settings` |
-| 5 | `api_token` | `window.__FCTX_API_TOKEN__` | `os.getenv("FCTX_API_TOKEN")` | HTTP `X-API-Token` + WS `token` |
+| 5 | `api_token` | `<meta name="fctx-api-token">` | `os.getenv("FCTX_API_TOKEN")` | HTTP `X-API-Token` + WS `token` |
 | 6 | `__version__` | `index.html` `{{ version }}` | `__init__.py` | Jinja2 注入 |
 | 7 | `max_search_size_mb` | `state.js` (10) | `ProjectConfig.max_search_size_mb` | `POST /api/project/settings` |
 | 8 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL |
@@ -488,6 +503,7 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托/暗亮双主题/三栏可拖拽布局/虚拟滚动/SVG 文件图标/骨架屏/操作摘要栏; MCP 兼容修复; 桌面持久化修复; 弃用 API 清理; ProgressTracker TTL; BatchRename count; DOMPurify fail-closed; CSP Header; 依赖源统一; 文档全量同步; 773 passed** |
 | **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 tests** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |
@@ -610,19 +626,16 @@ XML 输出: <instruction> + <blueprint> + <context> + 文件列表 + </context>
 ```
 工具执行超时 / WebSocket 断开 / 测试清理
     ↓
-process_utils.terminate_process(proc, timeout=3.0)
+process_utils.terminate_process(proc.pid)
     ↓
 平台检测:
-    ├── Windows: subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)])
+    ├── Windows: subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)])
     │   └── /T → 终止整个进程树
-    └── POSIX: proc.terminate() (SIGTERM)
-        ├── proc.wait(timeout) → 成功
-        └── TimeoutExpired → proc.kill() (SIGKILL)
+    └── POSIX: os.killpg(pid, SIGTERM)
+        ├── ProcessLookupError 兜底 → direct os.kill(pid, SIGTERM)
     ↓
-返回 bool (True=成功终止, False=超时/失败)
+返回 None (fire-and-forget, 记录 warning 日志)
     ↓
-cleanup_processes(process_list) → 批量清理, 记录日志
-```
 
 调用点:
 - `action_routes.py` → `terminate_process(process)`
@@ -678,25 +691,109 @@ fallback: decode("utf-8", errors="ignore") → 返回空字符串兜底
 
 ---
 
-## 10. 前端安全架构
+## 10. 前端架构 (v6.5.1+)
 
-### 10.1 API 请求集中化
+### 10.1 模块分层
+
+```
+static/js/
+├── state.js            # 配置中心 + 全局状态 + 工具函数
+├── api.js              # API 封装 (_fetch/_post/_postJson 集中化)
+├── main.js             # 流程控制(business logic) + App 初始化
+├── ui.js               # UI 渲染(renderTree/renderStaging/renderFavorites/...)
+├── events.js           # data-action 事件委托(所有交互入口)
+├── layout.js           # 三栏拖拽调整 + 键盘辅助 + localStorage 持久化
+└── virtual-list.js     # 虚拟滚动列表(requestAnimationFrame + overscan)
+```
+
+### 10.2 事件委托架构
+
+所有用户交互通过 `[data-action]` 属性统一路由，无内联 `onclick="/onchange="`:
+
+```
+DOM ready
+    ↓
+App.init() → bindStaticEvents(App)
+    ↓
+document.addEventListener('click', ...)  ← 全局委托
+    ├── target.closest('[data-action]')   ← 查找最近的 action 元素
+    ├── 解析 data-action / data-section / data-context-action / data-separator
+    └── 路由到 App[action](...)           ← 动态分派
+    ↓
+document.addEventListener('change', ...)  ← 仅 data-action 元素
+document.addEventListener('keydown', ...)  ← Enter/Space 激活 role=button/menuitem
+```
+
+**CSP 兼容**: 无内联事件处理器，Token 通过 `<meta name="fctx-api-token">` 注入，Mermaid 延迟初始化。
+
+### 10.3 API 请求集中化
 
 ```
 前端 API 调用 (12处 fetch → 2个辅助方法)
     ↓
 api._post(url, data)
-    ├── URLSearchParams 表单编码 → 统一 Content-Type
-    └── fetch() → resp.json()
+    ├── JSON.stringify() 序列化 → Content-Type: application/json
+    └── _fetch() → fetch() → resp.json()
     ↓
 api._postJson(url, json)
-    ├── JSON.stringify() 序列化 → 统一 Content-Type: application/json
-    └── fetch() → resp.json()
+    ├── 调用 _post() → 返回解析后的 JSON body
 ```
 
-所有端点 URL 来自 `state.js:config.endpoints` 单一来源。
+所有端点 URL 来自 `state.js:config.endpoints` 单一来源。API Token 由 `getInjectedApiToken()` 从 meta 标签读取。
 
-### 10.2 XSS 防御数据流
+### 10.4 主题系统
+
+```
+theme = localStorage.theme || state.globalSettings.theme
+    ↓
+App.applyTheme(theme)
+    ├── document.documentElement.dataset.theme = 'light' | 'dark'
+    ├── localStorage.setItem('theme', activeTheme)
+    ├── Mermaid 同步 theme 设置
+    └── 服务端留存(api.saveGlobalSettings)
+    ↓
+CSS :root 变量随 html[data-theme="light"] 切换
+    ├── 深色: --bg-darkest=#020617, --text-main=#f1f5f9, --accent=#38bdf8
+    └── 亮色: --bg-darkest=#eef4fb, --text-main=#0f172a, --accent=#0284c7
+```
+
+减动效: `@media (prefers-reduced-motion: reduce)` 全局覆盖 `animation-duration: 0.01ms`。
+
+### 10.5 虚拟滚动
+
+```
+WebSocket 搜索结果流
+    ↓
+App.startSearch() → ui.clearVirtualSearchResults()
+    ↓
+每条结果: App.state.searchResults.push(data) + ui.renderVirtualSearchResults(all)
+    ↓
+createVirtualList(container, createSearchResultItem)
+    ├── 监听 scrollHost.scroll
+    ├── requestAnimationFrame 合并渲染
+    ├── overscan=6: 仅渲染 [scrollTop-6*76, scrollBottom+6*76] 行
+    └── translateY(offset) 定位视口
+    ↓
+createSearchResultItem(data) → DOM fragment(仅可视行)
+```
+
+### 10.6 可拖拽布局
+
+```
+pointerdown on .panel-resizer
+    ↓
+setPointerCapture + body.is-resizing 全局光标
+    ↓
+pointermove → clamp(percent, min, max)
+    ├── 左栏: (clientX - bounds.left) / bounds.width * 100
+    └── 右栏: (bounds.right - clientX) / bounds.width * 100
+    ↓
+CSS --panel-left-width / --panel-right-width 属性 + localStorage 持久化
+    ↓
+键盘调整: ArrowLeft/ArrowRight + Shift 加速, 步长 1%/3%
+```
+
+### 10.7 XSS 防御数据流
 
 ```
 用户输入 (搜索框/标签名/文件名)
@@ -704,37 +801,18 @@ api._postJson(url, json)
 后端返回 (JSON 或 HTML 片段)
     ↓
 前端渲染:
-    ├── Markdown 内容 → marked.parse(content, { sanitize: true })
-    ├── HTML 文本 → escapeHtml(str) → 创建 textNode 再读 innerHTML
-    ├── DOM 属性 → textContent 赋值 (非 innerHTML)
-    └── CDN 资源 → SRI integrity 哈希校验
+    ├── Markdown 内容 → DOMPurify.sanitize(marked.parse(...))
+    ├── DOMPurify 缺失 → fail-closed innerText (不降级到手写过滤)
+    ├── HTML 文本 → escapeHtml(str) → textContent 赋值
+    └── CDN 资源 → SRI integrity 哈希
     ↓
 浏览器渲染 (安全)
 ```
 
-### 10.3 WebSocket 健壮性
+### 10.8 WebSocket 健壮性
 
-```
-WebSocket onmessage
-    ↓
-try:
-    data = JSON.parse(event.data)
-    ↓
-    消息路由 (search_result / execute_output / error)
-    ↓
-    UI 更新
-except (SyntaxError, TypeError):
-    console.error("Invalid WS message", event.data)
-    // 跳过该消息，不中断连接
-```
+与 v6.5.0 保持一致: 所有 `onmessage` 中 `JSON.parse` 有 try/catch 保护; `search_task` finally 取消。
 
-### 10.4 stageAll BUG 修复 (v6.5.0)
-
-**问题**: `stageAll` 按钮发送搜索模式字符串 (`"smart"`) 给后端 staging API，但后端期望固定模式 `"files"`。
-
-**修复**: 前端 `stageAll` 方法直接发送 `mode="files"` 而非 `state.searchMode`。
-
-**影响范围**: 仅 Web 前端 `main.js` 中的 `stageAll` handler。
 
 ---
 
@@ -750,7 +828,7 @@ GET /
 _is_local_request(request)
   ├── client=None (TestClient CI) → True → 注入 token
   ├── client.host in (127.0.0.1, ::1, localhost) → True → 注入 token
-  └── 其他 (网络) → False → 空字符串 → window.__FCTX_API_TOKEN__ = ""
+   └── 其他 (网络) → False → 空字符串 → `<meta name="fctx-api-token" content="">`
 ```
 
 同时，`verify_api_token` 中间件将 token 比较从 `!=` 改为 `hmac.compare_digest`，消除时序侧信道（BUG-W10）。WebSocket 鉴权 `verify_ws_token` 同理。
@@ -843,7 +921,7 @@ finally:
 
 | 参数 | 前端 | 后端 | 默认 | v6.5.1 变更 |
 |------|------|------|------|-------------|
-| `api_token` | `window.__FCTX_API_TOKEN__` | `web_app._is_local_request` 守卫 | (环境) | 网络模式不注入 HTML |
+| `api_token` | `<meta name="fctx-api-token">` | `web_app._is_local_request` 守卫 | (环境) | 网络模式不注入 HTML |
 | `token_compare` | N/A | `hmac.compare_digest` | — | 常量时间比较 |
 | `max_list_length` | N/A | `Field(..., max_length=1000)` | 1000 | 新增 |
 | `max_dict_bytes` | N/A | `field_validator` | 100KB | 新增 |

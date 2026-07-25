@@ -1,6 +1,6 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 768 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 773 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 ---
 
@@ -33,7 +33,7 @@
 ### 测试补强
 - [x] `tests/test_packaging.py`: 15 项 (D1/D2/Doc5/依赖与文档一致性回归)
 - [x] `tests/test_security_v9.py`: 17 项 (W1/W2/W5/W6/W7/W9/W10/F1 回归)
-- [x] **768 passed, 0 failed** (稳定化/copy-extract/批量copy+事务extract+progress/前端稳定化 回归覆盖；文件数 25)
+- [x] **773 passed, 0 failed** (稳定化/copy-extract/批量copy+事务extract+progress/前端稳定化/CSP 事件委托/主题/布局/虚拟滚动 回归覆盖）
 
 ### 收尾一致化与运行时验证 (Closeout)
 - [x] **DEP-1**: `fastapi`/`starlette` 依赖基线锁定，避免 Starlette 1.x 破坏性变更提前进入
@@ -217,18 +217,21 @@
 - [x] **[DONE v6.5.1] API Token 安全**: 本地注入/网络不泄露 + `hmac.compare_digest` 常量时间
 - [x] **[DONE v6.5.1] 输入校验**: 所有 `list[str]` 字段 `max_length=1000`；dict 字段 size validator
 - [ ] **[PLANNED] 静态类型分析**: 集成 `mypy` 实现 100% 静态类型覆盖
-- [ ] **[PLANNED] 前端亮色主题**: 通过 CSS 变量实现亮色/暗色主题切换
+- [x] **[DONE] 前端亮色主题**: CSS 变量实现亮色/暗色主题切换，并通过 localStorage 与全局设置持久化
 - [ ] **[PLANNED] 拖拽支持**: 实现文件拖拽到 Staging 面板
 - [ ] **[PLANNED] Rate Limiting**: API 端点限流中间件
 - [ ] **[PLANNED] 前端 E2E 测试**: Playwright 浏览器端回归
 
 ### 中优先级 (v7.0 增强)
-- [ ] **[PLANNED] Virtual Scroll**: Web 端引入虚拟滚动，支持万级文件树
+- [x] **[DONE] Virtual Scroll**: Web 端搜索结果引入虚拟滚动，基于 `requestAnimationFrame` + overscan 视口渲染
+- [ ] **[PLANNED] Virtual Scroll File Tree**: 扩展虚拟滚动至文件目录树，支持万级目录
 - [ ] **[PLANNED] 语义指纹**: 为文件生成快速哈希指纹，加速增量索引
 - [ ] **[PLANNED] Tree-sitter 压缩导出**: 保留签名剥离实现体，~70% token 削减（借鉴 Repomix）
 - [ ] **[PLANNED] PageRank 上下文优先级**: 智能导出按依赖图排名纳入相关文件（借鉴 Aider）
 - [ ] **[PLANNED] 插件系统**: 定义标准 Hook 接口，支持自定义搜索/导出插件
-- [ ] **[PLANNED] CSP 落地**: 内联事件处理器 → `addEventListener` 迁移
+- [x] **[DONE] CSP 事件迁移**: 内联事件处理器 → `data-action` + `addEventListener` 委托；Token 改为 meta 注入
+- [x] **[DONE] CSP Header**: 服务端 `Content-Security-Policy` 头部，含 CDN SRI 白名单 + `frame-ancestors 'none'`
+- [x] **[DONE] 前端布局与反馈**: 三栏可拖拽分隔(含键盘调整)、操作结果摘要栏、骨架屏与减动效支持
 - [ ] **[PLANNED] CI Windows runner**: `.github/workflows/test.yml` matrix 加 `windows-latest`
 
 ### 低优先级
@@ -249,7 +252,8 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 passed** |
+| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托 (0 inline handler)、暗/亮双主题、三栏可拖拽布局+键盘可调、虚拟滚动搜索结果、SVG 文件类型图标、骨架屏、操作结果摘要栏、MCP 兼容修复、桌面持久化 bug 修复、弃用 API 清理、dead field 清除、ProgressTracker TTL/容量上限、BatchRename count 参数全链路贯通、DOMPurify fail-closed、依赖源统一、CSP Header、文档全量同步；773 passed** |
+| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); copy-extract/批量copy+事务extract+progress 回归** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |
 | **6.4.0** | **2026-05-24** | **14 类型标注, process_utils 提取, 3 处 XSS 修复, api.js 集中化, 前端可折叠面板, SRI 哈希, tag 管理, file 创建, actionModal, 479 passed** |

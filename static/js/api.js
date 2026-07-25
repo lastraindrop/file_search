@@ -1,9 +1,8 @@
-import { state, config } from './state.js';
+import { state, config, getInjectedApiToken } from './state.js';
 
 function _getApiToken() {
     if (state.globalSettings.api_token) return state.globalSettings.api_token;
-    if (window.__FCTX_API_TOKEN__ && window.__FCTX_API_TOKEN__ !== "") return window.__FCTX_API_TOKEN__;
-    return "";
+    return getInjectedApiToken();
 }
 
 export async function _fetch(url, options = {}) {
@@ -89,8 +88,8 @@ export async function renameFile(projectPath, oldPath, newName) {
     await _post(config.endpoints.rename, { project_path: projectPath, path: oldPath, new_name: newName });
 }
 
-export async function batchRename(projectPath, paths, pattern, replacement, dryRun = true) {
-    return await _postJson(config.endpoints.batchRename, { project_path: projectPath, paths, pattern, replacement, dry_run: dryRun });
+export async function batchRename(projectPath, paths, pattern, replacement, dryRun = true, count = 1) {
+    return await _postJson(config.endpoints.batchRename, { project_path: projectPath, paths, pattern, replacement, dry_run: dryRun, count });
 }
 
 export async function deleteFiles(projectPath, paths) {

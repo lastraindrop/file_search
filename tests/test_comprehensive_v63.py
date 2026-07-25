@@ -394,10 +394,10 @@ class TestWebAPIExtended:
             assert res.status_code == 200
 
     def test_api_index_page_injects_token(self, api_client):
-        """Index page injects API token into template."""
+        """Index page injects the token through a non-script metadata field."""
         res = api_client.get("/")
         assert res.status_code == 200
-        assert "window.__FCTX_API_TOKEN__" in res.text
+        assert 'name="fctx-api-token"' in res.text
 
     def test_api_index_page_injects_version(self, api_client):
         """Index page injects version into template."""

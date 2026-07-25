@@ -3,7 +3,7 @@
 __version__ = "6.5.1"
 
 from .actions import ActionBridge, FileOps, ProgressTracker
-from .config import DataManager, get_app_dir, logger
+from .config import DataManager, GlobalSettings, ProjectConfig, get_app_dir, logger
 from .context import ContextFormatter, NoiseReducer
 from .duplicate import DuplicateWorker
 from .file_io import FileUtils
@@ -21,6 +21,8 @@ except ImportError:
 
 __all__ = [
     "DataManager",
+    "GlobalSettings",
+    "ProjectConfig",
     "FileUtils",
     "SearchWorker",
     "FileOps",

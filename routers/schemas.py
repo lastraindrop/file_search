@@ -294,6 +294,7 @@ class BatchRenameRequest(BaseModel):
     pattern: str
     replacement: str
     dry_run: bool = True
+    count: int = 1
 
 
 class ProcessTerminateRequest(BaseModel):

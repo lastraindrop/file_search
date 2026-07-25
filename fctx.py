@@ -59,7 +59,7 @@ def cmd_open(args: argparse.Namespace, data_mgr: DataManager) -> None:
 
 def cmd_projects(args: argparse.Namespace, data_mgr: DataManager) -> None:
     """Handles the 'projects' subcommand."""
-    projects = data_mgr.data["projects"]
+    projects = data_mgr.config.projects
     if not projects:
         print("No registered projects.")
         return

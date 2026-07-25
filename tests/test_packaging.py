@@ -5,7 +5,7 @@ import re
 
 import tomllib
 
-EXPECTED_TEST_COUNT = 768
+EXPECTED_TEST_COUNT = 773
 
 
 def test_pyproject_declares_routers() -> None:

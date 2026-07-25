@@ -1,6 +1,6 @@
 # FileCortex v6.5.1 (工作区编排助手)
 
-> **版本**: 6.5.1 | **日期**: 2026-06-15 | **测试**: 768 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **日期**: 2026-06-15 | **测试**: 773 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -120,7 +120,7 @@ python -m pytest
 
 ### 测试覆盖
 - **764 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
-- **测试结果**: 768 passed, 0 failed
+- **测试结果**: 773 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -159,13 +159,17 @@ routers/                  # FastAPI 路由层
 └── common.py           # ProcessManager (线程安全进程管理)
 
 static/js/                # ES6 模块化前端
-├── main.js             # 流程控制 + debounced syncStagingToBackend
+├── main.js             # 流程控制 + App 初始化
 ├── state.js            # 状态中心 + config.endpoints 集中管理
 ├── api.js              # API 封装 (_post / _postJson 集中化)
-└── ui.js               # UI 渲染驱动
+├── ui.js               # UI 渲染驱动 (树/暂存/收藏/工具)
+├── events.js           # data-action 事件委托 (v6.5.1+)
+├── layout.js           # 三栏拖拽调整 (v6.5.1+)
+└── virtual-list.js     # 虚拟滚动列表 (v6.5.1+)
+static/css/style.css     # CSS 变量 + 双主题 + 骨架屏 + 减动效 (v6.5.1+)
 
 file_search.py           # Tkinter 桌面版 (入口 main())
-web_app.py              # FastAPI Web 入口
+web_app.py              # FastAPI Web 入口 (含 CSP Header)
 fctx.py                # CLI 工具入口
 mcp_server.py          # MCP 协议服务
 build_exe.py            # PyInstaller 打包脚本 (入口 main())
@@ -183,7 +187,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `token_ratio` | `state.js` | `GlobalSettings` | 4 (dynamic via `GlobalSettings()`) |
 | `preview_limit_mb` | settings modal | `GlobalSettings` | 1.0 |
 | `allowed_extensions` | settings modal | `GlobalSettings` | "" |
-| `api_token` | `window.__FCTX_API_TOKEN__` | env `FCTX_API_TOKEN` | - |
+| `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
 | `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.1 |

@@ -13,6 +13,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from collections.abc import Generator
@@ -31,6 +32,11 @@ class ProgressTracker:
     ``"done"`` / ``"failed"``), ``message``, ``done`` and ``total``. All access
     is serialized through a class-level :class:`threading.Lock`.
 
+    The registry is capped at ``MAX_ENTRIES`` tasks. When the cap is exceeded
+    during :meth:`start_task`, completed (done/failed) entries are evicted
+    oldest-first to make room. Completed tasks older than ``TASK_TTL_SECONDS``
+    are also automatically pruned when :meth:`get` is called.
+
     Typical usage::
 
         task_id = ProgressTracker.new_task(total=len(items))
@@ -41,8 +47,44 @@ class ProgressTracker:
         state = ProgressTracker.get(task_id)
     """
 
+    MAX_ENTRIES: int = 1000
+    TASK_TTL_SECONDS: float = 3600.0  # 1 hour
+
     _tasks: dict[str, dict] = {}
     _lock = threading.Lock()
+
+    @classmethod
+    def _created_now(cls) -> float:
+        return time.monotonic()
+
+    @classmethod
+    def _prune_stale(cls) -> None:
+        terminal_statuses = {"done", "failed"}
+        now = cls._created_now()
+        stale = [
+            tid
+            for tid, e in cls._tasks.items()
+            if e.get("status") in terminal_statuses
+            and now - e.get("_created_at", now) > cls.TASK_TTL_SECONDS
+        ]
+        for tid in stale:
+            cls._tasks.pop(tid, None)
+
+    @classmethod
+    def _evict_over_cap(cls) -> None:
+        terminal_statuses = {"done", "failed"}
+        while len(cls._tasks) > cls.MAX_ENTRIES:
+            candidates = sorted(
+                (
+                    (tid, e)
+                    for tid, e in cls._tasks.items()
+                    if e.get("status") in terminal_statuses
+                ),
+                key=lambda item: item[1].get("_created_at", 0),
+            )
+            if not candidates:
+                break
+            cls._tasks.pop(candidates[0][0], None)
 
     @classmethod
     def new_task(cls, total: int) -> str:
@@ -62,20 +104,24 @@ class ProgressTracker:
     def start_task(cls, task_id: str, total: int) -> None:
         """Creates a new progress entry for ``task_id``.
 
-        Overwrites any pre-existing entry for the same id.
+        Overwrites any pre-existing entry for the same id.  Evicts completed
+        tasks when the registry exceeds :attr:`MAX_ENTRIES`.
 
         Args:
             task_id: Unique identifier supplied by the caller.
             total: Total number of units in the task.
         """
         with cls._lock:
+            cls._prune_stale()
             cls._tasks[task_id] = {
                 "task_id": task_id,
                 "status": "pending",
                 "message": None,
                 "done": 0,
                 "total": total,
+                "_created_at": cls._created_now(),
             }
+            cls._evict_over_cap()
 
     @classmethod
     def update(
@@ -111,15 +157,21 @@ class ProgressTracker:
     def get(cls, task_id: str) -> dict | None:
         """Returns a shallow copy of the progress entry, or ``None`` if unknown.
 
+        Automatically prunes stale completed entries that exceed
+        :attr:`TASK_TTL_SECONDS`.
+
         Args:
             task_id: Unique identifier supplied to :meth:`start_task`.
 
         Returns:
-            A copy of the progress dict, or ``None``.
+            A copy of the progress dict (internal keys stripped), or ``None``.
         """
         with cls._lock:
+            cls._prune_stale()
             entry = cls._tasks.get(task_id)
-            return dict(entry) if entry is not None else None
+            if entry is None:
+                return None
+            return {k: v for k, v in entry.items() if not k.startswith("_")}
 
 
 class FileOps:

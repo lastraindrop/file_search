@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 768 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 773 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -68,7 +68,7 @@ routers/
 | `preview_limit_mb` | `main.js` | `GlobalSettings.preview_limit_mb` | `/api/global/settings` | `test_global_settings_roundtrip` |
 | `allowed_extensions` | `main.js` | `GlobalSettings.allowed_extensions` | `/api/global/settings` | `test_global_settings_handles_allowed_extensions` |
 | `apply_noise_reducer` | `schemas.py` | `GenerateRequest` | `/api/generate` | `test_api_generate_with_noise_reducer` |
-| `api_token` | `window.__FCTX_API_TOKEN__` | `web_app.py` | HTTP `X-API-Token` + WS `token` | `test_api_token_header_forward` |
+| `api_token` | `<meta name="fctx-api-token">` | `web_app.py` | HTTP `X-API-Token` + WS `token` | `test_api_token_header_forward` |
 | 版本号 | `index.html` `{{ version }}` | `file_cortex_core/__init__.py` | Jinja2 模板注入 | `test_api_index_page_injects_version` |
 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL | `test_ws_search_endpoint` |
 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/actions/execute` | WebSocket URL | `test_ws_execute_endpoint` |
@@ -136,7 +136,7 @@ def example_method(path: str) -> bool:
   WS:    query ?token=xxx     → ws_routes.py verify_ws_token → 验证
 
 Token 来源:
-  window.__FCTX_API_TOKEN__  ← index.html Jinja2 注入 ← web_app.py api_token
+  <meta name="fctx-api-token">  ← index.html Jinja2 注入 ← web_app.py api_token
   state.globalSettings.api_token  (备用路径，通常为空)
 ```
 
@@ -148,12 +148,26 @@ Token 来源:
 `static/js/api.js` 采用集中化的请求辅助方法：
 
 ```javascript
-// _post(url, data) — 标准 POST, 返回 JSON
+// _post(url, data) — JSON 序列化 POST, 返回 Response
 async _post(url, data) { ... }
 
-// _postJson(url, json) — JSON 序列化 POST, 返回 JSON
+// _postJson(url, json) — JSON POST + 自动解析, 返回 JSON
 async _postJson(url, json) { ... }
 ```
+
+### 5.1b 事件系统 (v6.5.1+)
+`static/js/events.js` 实现全局事件委托，取代所有内联 handler：
+
+```javascript
+// 所有按钮/区域使用 data-action 属性，在 DOMContentLoaded 时绑定
+bindStaticEvents(App)
+// 自动路由 data-action / data-section / data-context-action / data-separator
+```
+
+**新增模块**:
+- `events.js`: `bindStaticEvents()` 全局事件委托
+- `layout.js`: `initializePanelResizers()` 三栏拖拽 + 键盘调整
+- `virtual-list.js`: `createVirtualList()` rAF + overscan 虚拟滚动
 
 ### 5.2 端点集中管理
 所有后端端点 URL 集中在 `static/js/state.js` 的 `config.endpoints` 对象中。
