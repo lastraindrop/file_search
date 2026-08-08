@@ -13,6 +13,7 @@ from tkinter import (
 from ..config import DataManager, logger
 from ..duplicate import DuplicateWorker
 from ..format_utils import FormatUtils
+from ..security import PathValidator
 
 
 class DuplicateFinderWindow(tk.Toplevel):
@@ -241,6 +242,13 @@ class DuplicateFinderWindow(tk.Toplevel):
             deleted_count = 0
             for p_str in to_delete:
                 try:
+                    # L7b: confine deletion to the scanned workspace; symlinks
+                    # resolved during the scan could otherwise escape the root.
+                    if not PathValidator.is_safe(p_str, str(self.current_dir)):
+                        logger.warning(
+                            f"Duplicate-delete blocked (outside root): {p_str}"
+                        )
+                        continue
                     FileOps.delete_file(p_str)
                     deleted_count += 1
                     # Find and remove item from tree

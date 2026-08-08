@@ -1,6 +1,6 @@
 # FileCortex 技术指南 — 架构、参数对齐与测试策略
 
-> **版本**: 6.5.1 | **测试**: 773 passed | **日期**: 2026-06-15 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.2 | **测试**: 776 passed | **日期**: 2026-08-08 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
 常见 BUG 模式与预防策略，以及测试架构设计。
@@ -385,6 +385,43 @@ super().__init__(daemon=True)
 - 所有 `onmessage` 中 `JSON.parse()` 必须包装在 try/catch 中
 - 解析失败应记录日志并跳过该消息（而非断开连接）
 
+### 4.7 安全闸门分散 (v6.5.2)
+
+**模式**: 桌面端各文件操作 (save/stage/favorite/tool/open/rename) 各自决定是否校验路径，导致 save/execute/open 等入口绕过沙盒。
+
+**根因**: 缺少统一的入口校验辅助，每个 handler 自行判断，易遗漏。
+
+**预防**:
+- 所有文件操作的入口统一调用单一闸门辅助（桌面端 `_is_within_project(p)`）
+- 项目加载入口必须经 `PathValidator.validate_project()`，与 CLI/MCP/Web 一致
+- 新增文件操作 handler 时，第一行即校验，再执行业务逻辑
+
+### 4.8 异步轮询泄漏 (v6.5.2)
+
+**模式**: `setInterval` 轮询进度，当 owning 操作失败时 `Promise.all` 立即 reject，但 interval 永不清除（服务端可能永不返回终态）。
+
+**预防**:
+- 轮询函数返回 `{ promise, cancel }` 而非裸 Promise
+- 调用方在 `catch`/`finally` 中 `cancel()`
+- 增加最大迭代次数安全上限（maxAttempts），保证即使调用方遗忘 cancel 也能终止
+
+### 4.9 弱子串遍历校验 (v6.5.2)
+
+**模式**: `if ".." in rel_dir` 子串匹配会误拒合法目录名（如 `v2..0`、`my..dir`），又不能精确拦截 `a/../b`。
+
+**预防**:
+- 遍历检测必须基于路径**段**：`any(seg == ".." for seg in path.replace("\\","/").split("/"))`
+- 不要用子串匹配做安全校验
+
+### 4.10 Tk 跨线程访问 (v6.5.2)
+
+**模式**: 后台线程调用 `tk.StringVar.get()` 或迭代主线程正在增删的 `list`，导致 Tcl 状态损坏或 `RuntimeError: list changed size during iteration`。
+
+**预防**:
+- Tk **非线程安全**：后台线程禁止读取 `tk.Variable`
+- 在主线程快照所有 Tk 变量值与 `list(x)` 副本，传入工作线程
+- 结果通过 `root.after(0, callback)` 回传主线程
+
 ---
 
 ## 5. 测试架构
@@ -392,7 +429,7 @@ super().__init__(daemon=True)
 ### 5.1 测试分层
 
 ```
-tests/                              764 项测试 (v6.5.1 + 当前稳定化/copy-extract/批量copy+事务extract+progress 回归)
+tests/                              776 项测试 (v6.5.1 + 当前稳定化/copy-extract/批量copy+事务extract+progress 回归)
 ├── test_v8_comprehensive.py        90 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
 ├── test_security_fixes_v650.py     38 tests  ← v6.5.0 安全修复回归
 ├── test_coverage_fill.py           20 tests  ← v6.5.0 新增 (process_utils/ProcessManager)
@@ -421,7 +458,7 @@ tests/                              764 项测试 (v6.5.1 + 当前稳定化/copy
 └── conftest.py                              ← 共享 fixture + DataManager.reset()
 ```
 
-> **当前稳定化变更**: 在既有 v6.5.1 测试基础上，新增 CLI 持久化、archive traversal、WebSocket fallback、search pool 恢复、run legacy config 与 copy/extract 回归覆盖；并新增批量 copy、事务 extract + progress 追踪覆盖；总数提升至 764。
+> **当前稳定化变更**: 在既有 v6.5.1 测试基础上，新增 CLI 持久化、archive traversal、WebSocket fallback、search pool 恢复、run legacy config 与 copy/extract 回归覆盖；并新增批量 copy、事务 extract + progress 追踪覆盖；后续安全/健壮性加固与回归测试将总数提升至 776。
 
 ### 5.2 测试隔离
 
@@ -503,7 +540,8 @@ for full_path, rel_path in FileUtils.walk_filtered(
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托/暗亮双主题/三栏可拖拽布局/虚拟滚动/SVG 文件图标/骨架屏/操作摘要栏; MCP 兼容修复; 桌面持久化修复; 弃用 API 清理; ProgressTracker TTL; BatchRename count; DOMPurify fail-closed; CSP Header; 依赖源统一; 文档全量同步; 773 passed** |
+| **6.5.2** | **2026-08-08** | **全仓深度 code review 后安全与健壮性收口: 桌面端统一安全沙盒闸门 `_is_within_project` (覆盖 save/stage/favorite/tool/open/rename)、Tk 线程安全快照、`validate_project` 接入; 前端资源泄漏清除 (_pollProgress cancel+maxAttempts、工具 WS 可取消、socket 身份守卫、Confirm 重置、XSS 残留转义); 内核边界 (分类段校验/进程泄漏/WS stop_event/MCP 告警/类型注解/弃用API); CI ruff 唯一门禁; +3 回归测试; 文档全量同步; 776 passed** |
+| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托/暗亮双主题/三栏可拖拽布局/虚拟滚动/SVG 文件图标/骨架屏/操作摘要栏; MCP 兼容修复; 桌面持久化修复; 弃用 API 清理; ProgressTracker TTL; BatchRename count; DOMPurify fail-closed; CSP Header; 依赖源统一; 文档全量同步; 776 passed** |
 | **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 tests** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |

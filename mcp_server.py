@@ -175,13 +175,20 @@ async def get_file_context(
     if not root:
         return "Error: Unauthorized project path."
 
-    safe_paths = [
-        p for p in file_paths if PathValidator.is_safe(p, root)
-    ]
+    # B8: surface dropped paths instead of silently returning fewer files
+    # than requested, so the caller knows context was filtered for safety.
+    safe_paths = [p for p in file_paths if PathValidator.is_safe(p, root)]
+    dropped = len(file_paths) - len(safe_paths)
+    prefix = ""
+    if dropped:
+        prefix = (
+            f"Warning: {dropped} path(s) were outside the project root "
+            f"and were skipped.\n\n"
+        )
 
     if fmt == "xml":
-        return ContextFormatter.to_xml(safe_paths, root_dir=root)
-    return ContextFormatter.to_markdown(safe_paths, root_dir=root)
+        return prefix + ContextFormatter.to_xml(safe_paths, root_dir=root)
+    return prefix + ContextFormatter.to_markdown(safe_paths, root_dir=root)
 
 
 @get_mcp().tool()

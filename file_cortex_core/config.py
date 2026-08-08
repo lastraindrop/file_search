@@ -567,7 +567,11 @@ class DataManager:
         with self._lock:
             proj = self.get_project_data_obj(project_path)
             for _name, rel_dir in categories.items():
-                if ".." in rel_dir:
+                # Reject any ".." path segment (works for "a/../b", "..\\x",
+                # and bare ".."). A naive substring check would also reject
+                # legitimate names like "v2..0" or "my..dir".
+                segments = rel_dir.replace("\\", "/").split("/")
+                if any(seg == ".." for seg in segments):
                     raise ValueError(f"Category path '{rel_dir}' contains illegal '..' traversal.")
             proj.quick_categories = categories
             self.save()

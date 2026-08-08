@@ -33,7 +33,7 @@ const App = {
                     App.config.ui.searchDebounceMs
                 );
             });
-            searchInput.addEventListener('keypress', (e) => {
+            searchInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     clearTimeout(searchTimer);
@@ -66,7 +66,9 @@ const App = {
                 if (e.ctrlKey && e.key === 's') {
                     e.preventDefault();
                     e.stopPropagation();
-                    App.toggleEdit();
+                    // Only save (exit edit mode) when currently editing; the
+                    // first Ctrl+S must not toggle INTO edit mode.
+                    if (App.state.isEditing) App.toggleEdit();
                 }
             });
         }
@@ -802,10 +804,11 @@ const App = {
         });
 
         if (App.state.socket) App.state.socket.close();
-        App.state.socket = new WebSocket(wsUrl);
+        const sock = new WebSocket(wsUrl);
+        App.state.socket = sock;
         let resultCount = 0;
-        App.state.socket.onopen = () => { list.innerHTML = ''; };
-        App.state.socket.onmessage = (event) => {
+        sock.onopen = () => { list.innerHTML = ''; };
+        sock.onmessage = (event) => {
             let data;
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.status === "DONE") {
@@ -814,24 +817,26 @@ const App = {
                 }
                 count.innerText = `${resultCount} results`;
                 document.getElementById('btnStopSearch').style.display = 'none';
-                return App.state.socket.close();
+                return sock.close();
             }
             if (data.status === "ERROR") {
                 list.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
                 count.innerText = 'Error';
                 document.getElementById('btnStopSearch').style.display = 'none';
-                return App.state.socket.close();
+                return sock.close();
             }
             resultCount++;
             count.innerText = `${resultCount} results`;
             App.state.searchResults.push(data);
             ui.renderVirtualSearchResults(App.state.searchResults);
         };
-        App.state.socket.onerror = () => {
+        sock.onerror = () => {
             list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128268;</div><div class="empty-state-text">Search connection failed</div></div>';
             count.innerText = 'Error';
             document.getElementById('btnStopSearch').style.display = 'none';
-            App.state.socket = null;
+            // Only clear the reference if it still points at THIS socket;
+            // otherwise a newer search's socket would be nulled.
+            if (App.state.socket === sock) App.state.socket = null;
         };
     },
 
@@ -893,7 +898,25 @@ const App = {
         }
         stopBtn.style.display = 'none';
 
+        // M2: track the active tool socket + a cancellation flag so closing
+        // the modal mid-run aborts the recursive runNext chain and closes the
+        // in-flight socket instead of leaking it and continuing to write into
+        // a hidden modal.
+        let cancelled = false;
+        App.state.activeToolSocket = null;
+        const onModalHidden = () => {
+            cancelled = true;
+            if (App.state.activeToolSocket) {
+                try { App.state.activeToolSocket.close(); } catch { /* noop */ }
+                App.state.activeToolSocket = null;
+            }
+            App.state.activePid = null;
+            stopBtn.style.display = 'none';
+        };
+        modalWrapper.addEventListener('hidden.bs.modal', onModalHidden, { once: true });
+
         const runNext = async (index) => {
+            if (cancelled) return;
             if (index >= paths.length) {
                 modalBody.innerHTML += `<div class="p-3 border-top border-secondary text-success fw-bold">All ${paths.length} tasks completed.</div>`;
                 const bsToolModal = bootstrap.Modal.getInstance(modalWrapper);
@@ -927,7 +950,9 @@ const App = {
             });
 
             return new Promise((resolve) => {
+                if (cancelled) { resolve(); return; }
                 const socket = new WebSocket(wsUrl);
+                App.state.activeToolSocket = socket;
                 socket.onmessage = (event) => {
                     let data;
                     try { data = JSON.parse(event.data); } catch { return; }
@@ -943,6 +968,7 @@ const App = {
                     if (data.exit_code !== undefined || data.status === "DONE" || data.error) {
                         stopBtn.style.display = 'none';
                         App.state.activePid = null;
+                        if (App.state.activeToolSocket === socket) App.state.activeToolSocket = null;
                         if (data.error) outputDiv.innerText += `\nERROR: ${data.error}`;
                         if (data.exit_code !== undefined) outputDiv.innerText += `\n[Process exited with code: ${data.exit_code}]`;
                         socket.close();
@@ -950,6 +976,7 @@ const App = {
                     }
                 };
                 socket.onerror = () => {
+                    if (App.state.activeToolSocket === socket) App.state.activeToolSocket = null;
                     if (outputDiv) outputDiv.innerText += '\n[Connection error]';
                     resolve();
                 };
@@ -1293,12 +1320,15 @@ const App = {
                 const dstDir = document.getElementById('bulkCopyInput').value.trim();
                 if (!dstDir) return ui.showToast("Destination directory is required", 'warning');
                 App._showProgress();
+                let poller = null;
                 try {
                     const files = Array.from(App.state.selectedFiles);
                     const { task_id: taskId } = await api.newProgressTask(files.length);
-                    const copyPromise = api.copyFile(files, dstDir, App.state.projectPath, taskId);
-                    const pollPromise = App._pollProgress(taskId, files.length, 'Copying');
-                    const [data] = await Promise.all([copyPromise, pollPromise]);
+                    poller = App._pollProgress(taskId, files.length, 'Copying');
+                    const [data] = await Promise.all([
+                        api.copyFile(files, dstDir, App.state.projectPath, taskId),
+                        poller.promise,
+                    ]);
                     ui.closeActionModal();
                     const count = data.new_paths ? data.new_paths.length : 0;
                     ui.showToast(`Copied ${count} item(s).`, 'success');
@@ -1306,7 +1336,10 @@ const App = {
                     App.state.selectedFiles.clear();
                     App.updateBulkUI();
                     App.openProject();
-                } catch (e) { ui.showToast("Batch copy failed: " + e.message, 'danger'); }
+                } catch (e) {
+                    if (poller) poller.cancel();
+                    ui.showToast("Batch copy failed: " + e.message, 'danger');
+                }
                 finally { App._hideProgress(); }
             }
         });
@@ -1339,10 +1372,15 @@ const App = {
                 try {
                     for (const [index, zip] of zips.entries()) {
                         const { task_id: taskId } = await api.newProgressTask(1);
-                        const poll = App._pollProgress(taskId, 1, `Extracting ${index + 1}/${zips.length}`);
-                        const data = await api.extractArchive(zip, dstDir, App.state.projectPath, taskId);
-                        await poll;
-                        extracted += data.extracted_paths ? data.extracted_paths.length : 0;
+                        const poller = App._pollProgress(taskId, 1, `Extracting ${index + 1}/${zips.length}`);
+                        try {
+                            const data = await api.extractArchive(zip, dstDir, App.state.projectPath, taskId);
+                            await poller.promise;
+                            extracted += data.extracted_paths ? data.extracted_paths.length : 0;
+                        } catch (innerE) {
+                            poller.cancel();
+                            throw innerE;
+                        }
                         App._updateProgress(((index + 1) / zips.length) * 100, `${index + 1}/${zips.length} Extracted...`);
                     }
                     ui.closeActionModal();
@@ -1366,9 +1404,23 @@ const App = {
         });
     },
 
-    _pollProgress: async (taskId, total, label = 'Processing') => {
-        return new Promise((resolve) => {
-            const interval = setInterval(async () => {
+    _pollProgress: (taskId, total, label = 'Processing') => {
+        // Returns { promise, cancel } so callers can stop the interval when
+        // the owning operation fails (prevents a leaked 400ms poller when the
+        // backend never reaches a terminal status). A maxAttempts safety cap
+        // guarantees termination even if the caller forgets to cancel.
+        let intervalId = null;
+        let stopped = false;
+        const cancel = () => {
+            stopped = true;
+            if (intervalId !== null) clearInterval(intervalId);
+        };
+        const promise = new Promise((resolve) => {
+            let attempts = 0;
+            const maxAttempts = 1800; // ~12 min at 400ms
+            intervalId = setInterval(async () => {
+                if (stopped) return;
+                attempts++;
                 try {
                     const prog = await api.getProgress(taskId);
                     const done = prog.done || 0;
@@ -1381,15 +1433,19 @@ const App = {
                         inner.innerText = `${done}/${progressTotal} ${message || label}...`;
                     }
                     if (prog.status === 'done' || prog.status === 'failed' || prog.status === 'error' || done >= progressTotal) {
-                        clearInterval(interval);
+                        cancel();
                         resolve(prog);
+                    } else if (attempts >= maxAttempts) {
+                        cancel();
+                        resolve({ status: 'error', message: 'Progress polling timed out' });
                     }
                 } catch (e) {
-                    clearInterval(interval);
+                    cancel();
                     resolve({ status: 'error', message: e.message });
                 }
             }, 400);
         });
+        return { promise, cancel };
     },
 
     _showProgress: () => {

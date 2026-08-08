@@ -100,6 +100,30 @@ def test_dm_categorizer_logic(clean_config, mock_project):
     dm.update_quick_categories(p, {"Logs": "logs"})
     assert dm.get_project_data(p)["quick_categories"]["Logs"] == "logs"
 
+
+def test_dm_quick_categories_segment_traversal(clean_config, mock_project):
+    r"""BUG-B1: traversal check must use path segments, not a substring.
+
+    Legitimate names containing a '..' substring (e.g. 'v2..0', 'my..dir')
+    must be accepted, while real traversal ('a/../b', '..\\x', bare '..')
+    must still be rejected.
+    """
+    dm = clean_config
+    p = str(mock_project)
+
+    # Legitimate names with a '..' substring are NOT traversal and must pass.
+    dm.update_quick_categories(
+        p, {"Version": "v2..0", "Nested": "my..dir/sub"}
+    )
+    data = dm.get_project_data(p)
+    assert data["quick_categories"]["Version"] == "v2..0"
+    assert data["quick_categories"]["Nested"] == "my..dir/sub"
+
+    # Real traversal (all separator forms) must still be rejected.
+    for evil in ("../etc", "a/../b", "..\\x", ".."):
+        with pytest.raises(ValueError, match="illegal"):
+            dm.update_quick_categories(p, {"Bad": evil})
+
 # -----------------------------------------------------------------------------
 # 4. Global Settings & History
 # -----------------------------------------------------------------------------

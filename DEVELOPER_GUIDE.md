@@ -1,6 +1,6 @@
 # FileCortex - 开发者指南
 
-> **版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 773 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.2 | **更新日期**: 2026-08-08 | **测试**: 776 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
 
 欢迎参与 FileCortex 的开发。本项目采用微内核架构，致力于构建一个本地优先、AI 友好的工作区编排工具。
 
@@ -88,7 +88,7 @@ routers/
 
 ### 2.1 自动化检查
 1. **Ruff**: `ruff check .` (强制执行 D, I, N, B, UP, RET, C4, SIM 等规则 + Google pydocstyle)
-2. **Pytest**: `python -m pytest` (验证 **764** 项核心测试)
+2. **Pytest**: `python -m pytest` (验证 **776** 项核心测试)
 
 ### 2.2 Docstrings 样例
 ```python
@@ -120,11 +120,15 @@ def example_method(path: str) -> bool:
 ---
 
 ## 3. 安全基线
-*   **路径沙盒**: 所有外部路径输入必须通过 `PathValidator.is_safe`。
+*   **路径沙盒 (统一闸门)**: 所有外部路径输入必须通过 `PathValidator.is_safe`。各入口的统一做法：
+    *   **Web/CLI/MCP**: 路由/命令内逐项 `is_path_safe(p, project_root)` 校验。
+    *   **桌面端**: 所有文件操作 handler 第一行调用 `self._is_within_project(p)`（封装 `is_safe`），覆盖 save/stage/favorite/tool/open/rename/delete。
+    *   **项目注册**: 四端入口统一经 `PathValidator.validate_project()`（拦截 UNC/系统目录/敏感目录）。
 *   **注入防御**: `ActionBridge` 使用 `subprocess.run(list_args)` 避免 shell 注入风险。
-*   **Token 审计**: 生产环境下所有 `/api/` 及 `/ws/` 请求均需通过 Token 校验。
-*   **XSS 防御 (前端)**: `marked.parse()` 配置 sanitizer 选项；所有用户控制的 `innerHTML` 赋值经过 `escapeHtml()` 包装器。
-*   **WebSocket 健壮性**: 所有 `onmessage` 中 `JSON.parse()` 使用 try/catch 保护。
+*   **Token 审计**: 生产环境下所有 `/api/` 及 `/ws/` 请求均需通过 Token 校验（`hmac.compare_digest` 常量时间比较）。
+*   **XSS 防御 (前端)**: `marked.parse()` 经 DOMPurify；所有用户控制的 `innerHTML` 赋值经过 `escapeHtml()` 包装器（含 `mtime_fmt`/`size_fmt` 等服务端格式化字段）。
+*   **WebSocket 健壮性**: 所有 `onmessage` 中 `JSON.parse()` 使用 try/catch 保护；搜索 `finally` 统一 `stop_event.set()` 防孤儿线程。
+*   **异步资源回收 (前端)**: 轮询返回 `{promise, cancel}` + maxAttempts 上限；WS 连接跟踪于 state 便于模态关闭时回收。
 
 ---
 

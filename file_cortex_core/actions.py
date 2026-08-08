@@ -332,7 +332,7 @@ class FileOps:
         def _handle_readonly(
             func: Any,
             path: str,
-            exc_info: tuple[type[BaseException], BaseException, ...],
+            exc_info: tuple[type[BaseException], BaseException, Any],
         ) -> None:
             os.chmod(path, stat.S_IWRITE)
             func(path)
@@ -497,8 +497,10 @@ class FileOps:
             List of new file paths.
         """
         dm = data_mgr or DataManager()
-        proj = dm.get_project_data(project_path)
-        cat_dir_rel = proj["quick_categories"].get(category_name)
+        # B5: use the live ProjectConfig model (not a disconnected
+        # model_dump() snapshot) for consistency with the rest of the core.
+        proj = dm.get_project_data_obj(project_path)
+        cat_dir_rel = proj.quick_categories.get(category_name)
         if not cat_dir_rel:
             raise ValueError(f"Category '{category_name}' not defined.")
 

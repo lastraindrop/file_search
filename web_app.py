@@ -136,7 +136,9 @@ app = create_app()
 @app.exception_handler(Exception)
 async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Fallback handler for unhandled server-side exceptions."""
-    logger.error(f"Global Unhandled Exception: {exc}", exc_info=True)
+    # B9: use logger.exception for consistent stack-trace capture per the
+    # project's logging convention (was logger.error(..., exc_info=True)).
+    logger.exception(f"Global Unhandled Exception: {exc}")
 
     detail = f"Internal Server Error: {str(exc)}"
     if os.getenv("FCTX_PROD") == "1":

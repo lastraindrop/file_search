@@ -65,3 +65,23 @@ def test_language_tag_unknown():
     from file_cortex_core import FileUtils
     assert FileUtils.get_language_tag(".unknown_xyz") == ""
     assert FileUtils.get_language_tag("") == ""
+
+
+def test_collect_paths_newline_separator_contract(tmp_path):
+    r"""L2: the UI's NewLine button sends a 2-char ``\n`` (backslash + n).
+
+    FormatUtils.collect_paths must turn that literal ``\n`` into a real
+    newline separating the (relative) paths. A double-backslashed ``\\n``
+    (what the buggy button sent) must NOT leak a stray backslash between
+    entries.
+    """
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    (tmp_path / "b.py").write_text("y", encoding="utf-8")
+    paths = [str(tmp_path / "a.py"), str(tmp_path / "b.py")]
+
+    # The 2-char form the fixed UI sends: backslash + n.
+    out = FormatUtils.collect_paths(paths, root_dir=str(tmp_path), separator="\\n")
+    # Entries are joined by a real newline, with no stray backslash from the
+    # separator itself.
+    assert out == "a.py\nb.py"
+

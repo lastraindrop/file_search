@@ -1,6 +1,55 @@
 # FileCortex - 路线图 (ROADMAP)
 
-> **当前版本**: 6.5.1 | **更新日期**: 2026-06-15 | **测试**: 773 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> **当前版本**: 6.5.2 | **更新日期**: 2026-08-08 | **测试**: 776 passed | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+
+---
+
+## 阶段 6.5.2：安全与健壮性收口 (v6.5.2 — 2026-08-08)
+
+> 全仓深度 code review 后的系统性修复：统一桌面端安全沙盒闸门、清除前后端资源泄漏、补齐内核边界校验，并同步全部文档与 CI。**776 passed, Ruff 0 errors**。
+
+### 桌面端安全沙盒统一 (P0 — 历史最大短板)
+- [x] **H1** 保存绕过沙盒：`toggle_preview_edit` 保存前 `is_safe` 校验
+- [x] **H2** 暂存/收藏仅 `norm_path`：`_add_paths_to_staging` 越界过滤
+- [x] **H3** 工具执行无边界：`execute_tool_on_paths` 越界跳过（防 `shell=True`）
+- [x] **H4** 统计线程违反 Tk 线程安全：主线程快照 Tk 变量 + `list(staging_files)` 副本
+- [x] **H5** 桌面端从不校验项目：`on_browse`/`load_project` 接入 `validate_project`，与 CLI/MCP/Web 对齐
+- [x] **统一闸门**：新增 `_is_within_project()` 辅助，覆盖 save/stage/favorite/tool/open/rename 全入口
+- [x] **L7b** 查重删除无校验：`duplicate_finder` 删除前 `is_safe`
+
+### 前端资源泄漏与状态污染 (P1)
+- [x] **M1** `_pollProgress` 400ms 永久泄漏：重构为 `{promise, cancel}` + maxAttempts 安全上限；调用方失败即 cancel
+- [x] **M2** 工具执行 WS 不可取消：跟踪 `activeToolSocket` + `cancelled` + `hidden.bs.modal` 监听
+- [x] **M5** 树渲染 XSS 残留：`mtime_fmt`/`size_fmt` 经 `escapeHtml`
+- [x] **M6** 旧 socket `onerror` 置空新 socket：身份比较守卫
+- [x] **M7** Ctrl+S 首次进入编辑态：`isEditing` 守卫
+- [x] **M10** Confirm 按钮永久禁用：`showActionModal` 重置 `disabled`
+
+### 核心内核边界与一致性 (P1/P2)
+- [x] **B1** 分类弱校验误拒合法名：`update_quick_categories` 改路径段判断
+- [x] **B2** 进程容量满子进程泄漏：`register_process` 失败即 `proc.kill()`
+- [x] **B4** 类型注解非法：`_handle_readonly` `...` → `Any`
+- [x] **B5** 弃用 dict API：`batch_categorize` 改用模型属性
+- [x] **B6** WS 搜索 max_size 默认不一致：兜底 `5` → `10`
+- [x] **B7** WS 通用异常不停止搜索：`finally` 统一 `stop_event.set()`
+- [x] **B8** MCP 静默丢弃越界路径：返回 `Warning: N path(s) skipped`
+- [x] **B9** 全局异常日志规范：`logger.error(...)` → `logger.exception(...)`
+
+### 桌面端低危清理 (P2)
+- [x] **L1** 移除 write-only `results_count`；**L3** `except: pass` → `logger.exception`
+- [x] **L4** 暂存清理失效条目回写持久化
+- [x] **L6** `WM_DELETE_WINDOW` 协议 + `destroy()` 替代 `quit()`
+- [x] **L7** `DuplicateFinderWindow` 保持引用防 GC
+- [x] **M1/M4/M5/M6/M8/M9/M10** 收藏组加载、open/rename 校验、项目切换重置、空组名兜底、copy_tree 守卫、refresh None 守卫
+
+### 前端低危清理 (P2)
+- [x] **L1** 删除死代码 `renderSearchResultItem`；**L2** NewLine 分隔符双转义修正
+- [x] **L10** `escapeHtml` 仅折叠 `null/undefined`；**L14** `keypress` → `keydown`
+
+### 工程化与文档 (P2)
+- [x] **CI 一致化**：`lint.yml` 移除持续失败的 `black/isort` 硬门禁，ruff 为唯一权威
+- [x] **回归测试 +3**：分类段校验、轮询可取消契约、分隔符契约
+- [x] **文档全量同步**：版本 6.5.1 → 6.5.2，测试数 773 → 776，参数对齐与技术指南补全
 
 ---
 
@@ -33,7 +82,7 @@
 ### 测试补强
 - [x] `tests/test_packaging.py`: 15 项 (D1/D2/Doc5/依赖与文档一致性回归)
 - [x] `tests/test_security_v9.py`: 17 项 (W1/W2/W5/W6/W7/W9/W10/F1 回归)
-- [x] **773 passed, 0 failed** (稳定化/copy-extract/批量copy+事务extract+progress/前端稳定化/CSP 事件委托/主题/布局/虚拟滚动 回归覆盖）
+- [x] **776 passed, 0 failed** (稳定化/copy-extract/批量copy+事务extract+progress/前端稳定化/CSP 事件委托/主题/布局/虚拟滚动 回归覆盖）
 
 ### 收尾一致化与运行时验证 (Closeout)
 - [x] **DEP-1**: `fastapi`/`starlette` 依赖基线锁定，避免 Starlette 1.x 破坏性变更提前进入
@@ -252,7 +301,8 @@
 
 | 版本 | 日期 | 重大变更 |
 |-----|------|---------|
-| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托 (0 inline handler)、暗/亮双主题、三栏可拖拽布局+键盘可调、虚拟滚动搜索结果、SVG 文件类型图标、骨架屏、操作结果摘要栏、MCP 兼容修复、桌面持久化 bug 修复、弃用 API 清理、dead field 清除、ProgressTracker TTL/容量上限、BatchRename count 参数全链路贯通、DOMPurify fail-closed、依赖源统一、CSP Header、文档全量同步；773 passed** |
+| **6.5.2** | **2026-08-08** | **全仓深度 code review 后安全与健壮性收口: 桌面端安全沙盒统一闸门 (H1-H5, _is_within_project 覆盖 save/stage/favorite/tool/open/rename)、前端资源泄漏清除 (_pollProgress cancel+maxAttempts、工具 WS 可取消、socket 身份守卫、Confirm 重置)、内核边界修复 (分类段校验/进程泄漏/WS stop_event/MCP 告警/类型注解/弃用API)、桌面低危清理 (results_count/except日志/暂存回写/WM_DELETE_WINDOW/DupFinder引用)、前端低危 (死代码/分隔符双转义/escapeHtml/keypress); CI 一致化 (ruff 为唯一门禁); +3 回归测试; 文档全量同步; 776 passed** |
+| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托 (0 inline handler)、暗/亮双主题、三栏可拖拽布局+键盘可调、虚拟滚动搜索结果、SVG 文件类型图标、骨架屏、操作结果摘要栏、MCP 兼容修复、桌面持久化 bug 修复、弃用 API 清理、dead field 清除、ProgressTracker TTL/容量上限、BatchRename count 参数全链路贯通、DOMPurify fail-closed、依赖源统一、CSP Header、文档全量同步；776 passed** |
 | **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复+D2 MCP 依赖/categorize 路径遍历修补/token 泄露修复+mermaid SRI; 13 项安全加固 (输入上限/时序/WS task/PID复用/Popen终止/context日志/archive/long-path/rename count/search pool/SearchWorker/ctxAction); copy-extract/批量copy+事务extract+progress 回归** |
 | **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
 | **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 597 passed** |

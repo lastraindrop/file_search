@@ -81,7 +81,8 @@ class FileCortexApp:
         self.negative_tags: list[str] = []
         self.current_preview_path: pathlib.Path | None = None
         self.is_editing = False
-        self.results_count = 0
+        self.active_tree = None  # set on context-menu open; guarded elsewhere
+        # L1: dead `results_count` state removed (was written, never read).
 
         self._init_ui()
         self._init_context_menu()
@@ -647,6 +648,34 @@ class FileCortexApp:
                 command=lambda name=tool_name: self.ctx_execute_custom_tool(name),
             )
 
+    def _is_within_project(self, p: pathlib.Path | str | None) -> bool:
+        """Checks whether a path is safely inside the current project root.
+
+        Centralized sandbox gate for all desktop file operations. Returns
+        False when no project is loaded or the path escapes the workspace.
+        """
+        if not self.current_dir or not p:
+            return False
+        return PathValidator.is_safe(str(p), str(self.current_dir))
+
+    def _validate_project_or_alert(self, path_str: str) -> bool:
+        """Validates a project path through the security gate.
+
+        Mirrors the CLI/MCP/Web entry points which all call
+        ``PathValidator.validate_project``. Shows a Tk error dialog on failure.
+        Returns True when the path is safe to register as a project root.
+        """
+        try:
+            PathValidator.validate_project(path_str)
+            return True
+        except FileNotFoundError as e:
+            messagebox.showerror("路径无效", str(e))
+        except NotADirectoryError as e:
+            messagebox.showerror("路径无效", str(e))
+        except PermissionError as e:
+            messagebox.showerror("安全限制", str(e))
+        return False
+
     def on_browse(self, fixed_path: str | None = None) -> None:
         """Opens a directory browser dialog.
 
@@ -655,6 +684,9 @@ class FileCortexApp:
         """
         path = fixed_path if fixed_path else filedialog.askdirectory()
         if not path:
+            return
+
+        if not self._validate_project_or_alert(path):
             return
 
         if fixed_path:
@@ -691,7 +723,11 @@ class FileCortexApp:
         Args:
             path_str: The project root path to load.
         """
-        self.results_count = 0
+        # H5: route every project load through the security gate so the
+        # desktop entry point matches CLI/MCP/Web behavior.
+        if not self._validate_project_or_alert(path_str):
+            return
+
         self.lbl_status.config(text="正在加载项目...")
 
         self.tree_proj.delete(*self.tree_proj.get_children())
@@ -709,8 +745,31 @@ class FileCortexApp:
         self.exclude_var.set(self.current_proj_config.excludes)
         self._update_pin_button()
 
+        # M6: reset preview/edit state so a stale path from the previous
+        # project cannot be saved into after switching projects.
+        self.current_preview_path = None
+        self.is_editing = False
+        if hasattr(self, "preview_text"):
+            self.preview_text.config(state=tk.NORMAL)
+            self.preview_text.delete("1.0", tk.END)
+            self.preview_text.config(state=tk.DISABLED)
+        if hasattr(self, "btn_edit_save"):
+            self.btn_edit_save.config(text="✏️ 开启编辑")
+        if hasattr(self, "staging_filter_var"):
+            self.staging_filter_var.set("")
+
         self.data_mgr.add_to_recent(path_str)
         self._update_history_menus()
+
+        # M1: populate the favorites group combo and sync the selected group
+        # so pre-existing groups are visible immediately after load.
+        self.update_group_combo()
+        if hasattr(self, "current_group_var"):
+            grp = self.current_proj_config.current_group or "Default"
+            if grp not in self.current_proj_config.groups:
+                group_keys = list(self.current_proj_config.groups.keys())
+                grp = group_keys[0] if group_keys else "Default"
+            self.current_group_var.set(grp)
 
         self.refresh_fav_tree()
         self.refresh_tools_ui()
@@ -753,6 +812,8 @@ class FileCortexApp:
 
     def refresh_tools_ui(self) -> None:
         """Refreshes the tools tab buttons."""
+        if not self.current_proj_config:
+            return
         for w in self.cat_btn_frame.winfo_children():
             w.destroy()
         for w in self.tool_btn_frame.winfo_children():
@@ -778,6 +839,8 @@ class FileCortexApp:
 
     def refresh_template_combo(self) -> None:
         """Refreshes the template dropdown."""
+        if not self.current_proj_config:
+            return
         templates = self.current_proj_config.prompt_templates
         vals = ["None"] + list(templates.keys())
         self.combo_templates["values"] = vals
@@ -832,6 +895,11 @@ class FileCortexApp:
         self.tools_scroll.config(state=tk.NORMAL)
         self.tools_scroll.insert(tk.END, f"\n> 执行: {tool_name}\n", "cyan")
         for path_obj in paths:
+            # H3: never hand an out-of-workspace path to an external tool
+            # (tool templates may run with shell=True).
+            if not self._is_within_project(path_obj):
+                logger.warning(f"Tool exec Skip: path outside project root: {path_obj}")
+                continue
             file_name = path_obj.name
             res = ActionBridge.execute_tool(
                 template, str(path_obj), str(self.current_dir)
@@ -888,18 +956,26 @@ class FileCortexApp:
 
     def _run_stats_calc_thread(self) -> None:
         """Background thread for calculating file statistics."""
+        # H4: Tk is not thread-safe, so snapshot all Tk Variable values and a
+        # shallow copy of the staging list ON THE MAIN THREAD here, then pass
+        # the immutable snapshots into the worker. Previously the worker read
+        # self.exclude_var.get() / self.use_gitignore_var.get() and iterated
+        # the live self.staging_files list, risking Tcl corruption and
+        # "list changed size during iteration" errors.
+        ex_str = self.exclude_var.get()
+        use_git = self.use_gitignore_var.get()
+        staging_snapshot = list(self.staging_files)
+        current_dir_str = str(self.current_dir) if self.current_dir else None
 
         def run_calc() -> None:
             try:
-                ex_str = self.exclude_var.get()
-                use_git = self.use_gitignore_var.get()
                 manual_excludes = [
                     e.lower().strip() for e in ex_str.split() if e.strip()
                 ]
 
                 all_files = FileUtils.flatten_paths(
-                    self.staging_files,
-                    str(self.current_dir),
+                    staging_snapshot,
+                    current_dir_str,
                     manual_excludes,
                     use_git,
                 )
@@ -915,7 +991,7 @@ class FileCortexApp:
                         except Exception:
                             pass
 
-                item_count = len(self.staging_files)
+                item_count = len(staging_snapshot)
                 self.root.after(
                     0,
                     lambda: self._update_stats_ui(item_count, count, total_tokens),
@@ -1279,10 +1355,16 @@ class FileCortexApp:
                     if entry.is_dir():
                         self.tree_proj.insert(node, "end", text="加载中...")
         except Exception:
-            pass
+            # L3: was `pass` — log so permission/FS errors during tree
+            # population are diagnosable instead of silently swallowed.
+            logger.exception("Failed to populate project tree")
 
     def copy_project_tree(self) -> None:
         """Copies the project structure to clipboard."""
+        # M9: guard against no project loaded (button is always visible).
+        if not self.current_dir:
+            self.show_status("请先打开项目", is_error=True)
+            return
         tree_text = FileUtils.generate_ascii_tree(
             self.current_dir,
             self.exclude_var.get(),
@@ -1305,6 +1387,7 @@ class FileCortexApp:
             staging_data = list(self.current_proj_config.staging_list)
             filter_text = self.staging_filter_var.get().lower() if apply_filter else ""
 
+            pruned = False
             for p_raw in staging_data:
                 p_str = PathValidator.norm_path(p_raw)
                 p = pathlib.Path(p_str)
@@ -1316,6 +1399,9 @@ class FileCortexApp:
                     continue
 
                 if not p.exists():
+                    # L4: record that a stale entry was dropped so we can
+                    # persist the cleaned list back to disk below.
+                    pruned = True
                     continue
 
                 self.staging_files.append(p_str)
@@ -1328,6 +1414,12 @@ class FileCortexApp:
                     text=("📁 " if p.is_dir() else "📄 ") + p.name,
                     values=(p_str, sz_str),
                 )
+
+            # L4: persist pruned staging list so stale entries don't reappear
+            # on the next load.
+            if pruned and self.staging_files != list(staging_data):
+                self.current_proj_config.staging_list = list(self.staging_files)
+                self.data_mgr.save()
 
         self.update_stats()
 
@@ -1361,6 +1453,10 @@ class FileCortexApp:
         """Adds paths to the staging list."""
         for p_raw in paths:
             p_str = PathValidator.norm_path(p_raw)
+            # H2: defense-in-depth — never stage paths outside the workspace.
+            if not self._is_within_project(p_str):
+                logger.warning(f"Staging Skip: path outside project root: '{p_str}'")
+                continue
             if p_str not in self.staging_files:
                 p = pathlib.Path(p_str)
                 if not p.exists():
@@ -1478,6 +1574,10 @@ class FileCortexApp:
 
     def on_group_changed(self, event: tk.Event) -> None:
         """Handles group selection change."""
+        # Persist the selected group so it survives reload (was lost before).
+        if self.current_proj_config:
+            self.current_proj_config.current_group = self.current_group_var.get()
+            self.data_mgr.save()
         self.refresh_fav_tree()
 
     def refresh_fav_tree(self) -> None:
@@ -1527,6 +1627,16 @@ class FileCortexApp:
         else:
             try:
                 content = self.preview_text.get("1.0", "end-1c")
+                # H1: the save path must stay inside the workspace sandbox.
+                if not self._is_within_project(self.current_preview_path):
+                    logger.warning(
+                        f"Save blocked: path outside project root: "
+                        f"{self.current_preview_path}"
+                    )
+                    messagebox.showerror(
+                        "安全限制", "保存目标不在当前项目根目录下，已阻止写入。"
+                    )
+                    return
                 FileOps.save_content(str(self.current_preview_path), content)
                 self.is_editing = False
                 self.preview_text.config(state=tk.DISABLED)
@@ -1576,12 +1686,21 @@ class FileCortexApp:
         paths = self._get_ctx_paths()
         if paths:
             p = paths[0]
+            # M4: open_path_in_os may execute the target (e.g. .exe/.bat), so
+            # require it to be within the workspace.
+            if not self._is_within_project(p):
+                logger.warning(f"Open-location blocked (outside project): {p}")
+                return
             FileUtils.open_path_in_os(p.parent if p.is_file() else p)
 
     def ctx_open_file(self) -> None:
         """Opens the selected file with the default application."""
         paths = self._get_ctx_paths()
         for p in paths:
+            # M4: opening a file can execute it; confine to the workspace.
+            if not self._is_within_project(p):
+                logger.warning(f"Open-file blocked (outside project): {p}")
+                continue
             if p.is_file():
                 FileUtils.open_path_in_os(p)
 
@@ -1689,6 +1808,13 @@ class FileCortexApp:
         )
         if new_name and new_name != p.name:
             try:
+                # M5: boundary-check the source path, consistent with
+                # delete/move.
+                if not self._is_within_project(p):
+                    messagebox.showerror(
+                        "安全限制", "目标路径不在当前项目根目录下。"
+                    )
+                    return
                 FileOps.rename_file(str(p), new_name)
                 self.load_project(str(self.current_dir))
             except Exception as e:
@@ -1746,12 +1872,19 @@ class FileCortexApp:
         paths = self._get_ctx_paths()
         if not paths:
             return
-        group = self.current_group_var.get()
+        # M8: never create a blank-named group (current_group_var may be empty
+        # before the combo is populated); fall back to a sane default.
+        group = self.current_group_var.get() or "Default"
+        safe_paths = [str(p) for p in paths if self._is_within_project(p)]
+        if not safe_paths:
+            return
         self.data_mgr.add_to_group(
-            str(self.current_dir), group, [str(p) for p in paths]
+            str(self.current_dir), group, safe_paths
         )
+        self.current_proj_config.current_group = group
+        self.data_mgr.save()
         self.refresh_fav_tree()
-        self.lbl_status.config(text=f"已将 {len(paths)} 个项目添加至收藏组: {group}")
+        self.lbl_status.config(text=f"已将 {len(safe_paths)} 个项目添加至收藏组: {group}")
 
     def _init_menu(self) -> None:
         """Initializes the application menu bar."""
@@ -1769,7 +1902,7 @@ class FileCortexApp:
         file_menu.add_cascade(label="置顶工作区", menu=self.pinned_menu)
 
         file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
+        file_menu.add_command(label="退出", command=self.on_close_window)
         self._update_history_menus()
 
     def _update_history_menus(self) -> None:
@@ -1791,7 +1924,8 @@ class FileCortexApp:
                     command=lambda p=item["path"]: self.on_browse(p),
                 )
         except Exception:
-            pass
+            # L3: was `pass` — log menu-build failures instead of hiding them.
+            logger.exception("Failed to update history menus")
 
     def on_toggle_pin(self) -> None:
         """Toggles the pin status of the current project."""
@@ -1817,7 +1951,9 @@ class FileCortexApp:
         if not self.current_dir:
             messagebox.showwarning("提示", "请先打开一个项目目录。")
             return
-        DuplicateFinderWindow(
+        # L7: keep a reference so the Toplevel (and its DuplicateWorker) is
+        # not garbage-collected while still running.
+        self._dup_finder_win = DuplicateFinderWindow(
             self.root,
             self.data_mgr,
             self.current_dir,
@@ -1825,11 +1961,27 @@ class FileCortexApp:
             self.use_gitignore_var.get(),
         )
 
+    def on_close_window(self) -> None:
+        """Handles the main window close (WM_DELETE_WINDOW).
+
+        L6: signals the search thread to stop, then destroys the root so all
+        child Toplevels and daemon workers are released cleanly.
+        """
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.stop_event.set()
+        with contextlib.suppress(Exception):
+            self.root.destroy()
+
 
 def main() -> None:
     """Launches the desktop GUI application."""
     root = tk.Tk()
     app = FileCortexApp(root)  # noqa: F841
+    # L6: install a close handler so window-close stops the search thread and
+    # destroys the root (cleaner than relying solely on root.quit()).
+    root.protocol("WM_DELETE_WINDOW", app.on_close_window)
     root.mainloop()
 
 

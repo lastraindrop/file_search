@@ -83,7 +83,9 @@ export const state = {
 };
 
 export function escapeHtml(str) {
-    if (!str) return "";
+    // L10: distinguish null/undefined (-> "") from falsy values like 0/"0"
+    // which should render their string form, not be collapsed to empty.
+    if (str === null || str === undefined) return "";
     return String(str)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")

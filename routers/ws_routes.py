@@ -71,7 +71,10 @@ async def websocket_search(
 
     def run_search() -> None:
         try:
-            max_size = proj_config.get("max_search_size_mb", 5)
+            # B6: align the fallback with ProjectConfig.max_search_size_mb
+            # (10). The dict always carries the key in practice, but the
+            # fallback must not contradict the documented default.
+            max_size = proj_config.get("max_search_size_mb", 10)
             for res_dict in search_generator(
                 p,
                 query,
@@ -119,6 +122,10 @@ async def websocket_search(
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
     finally:
+        # Always signal the background search thread to stop, not just on
+        # WebSocketDisconnect. Without this, a generic exception path leaves
+        # the sync generator scanning the disk until it naturally completes.
+        stop_event.set()
         # BUG-W4 fix: always cancel + await search_task to prevent orphan threads.
         search_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -171,6 +178,13 @@ async def websocket_action_stream(
             proc = ActionBridge.create_process(template, path, project_root)
             current_pid[0] = proc.pid
             if not register_process(proc.pid, proc):
+                # Capacity exceeded: the process was already spawned by
+                # create_process, so it must be terminated to avoid an
+                # orphan/leaked subprocess.
+                try:
+                    proc.kill()
+                except Exception:
+                    logger.exception("Failed to kill unregistered process")
                 main_loop.call_soon_threadsafe(
                     result_queue.put_nowait, {"error": "Too many active processes"}
                 )

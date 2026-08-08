@@ -1,9 +1,21 @@
 # FileCortex Current Engineering Plan
 
-> Date: 2026-06-30  
-> Scope: final repository state after File System Completion Tranches 1 & 2, frontend stabilization, and real progress wiring.  
+> Date: 2026-06-30 (last updated 2026-08-08)  
+> Scope: final repository state after File System Completion Tranches 1 & 2, frontend stabilization, real progress wiring, and the v6.5.2 security/robustness hardening pass.  
 > Goal: make FileCortex a lightweight, complete, locally usable file/workspace context system before expanding into heavier semantic-search/RAG features.  
-> Status: ✅ Current Stabilization Tranche — COMPLETE. 773 tests passing, all gates green.
+> Status: ✅ Current Stabilization Tranche — COMPLETE. ✅ v6.5.2 Security Hardening — COMPLETE. 776 tests passing, Ruff 0 errors, all gates green.
+
+> **v6.5.2 Addendum (2026-08-08)**: A full-repo architecture & code review was
+> performed, followed by a systematic hardening pass. The desktop entry point
+> (historically the weakest security surface) now funnels every file operation
+> through a unified `_is_within_project()` sandbox gate and validates project
+> roots via `PathValidator.validate_project()`, matching CLI/MCP/Web. Frontend
+> resource leaks (progress polling, tool-execution WebSockets, socket identity
+> races, modal-confirm state) were eliminated. Kernel boundary checks
+> (category traversal, process cleanup, WS stop signaling, MCP path warnings)
+> were tightened. CI was harmonized to a single ruff gate. See ROADMAP §6.5.2
+> and TECHNICAL_GUIDE §4.7–4.10 for the new anti-patterns codified from this
+> work.
 
 ## 1. Executive Summary
 

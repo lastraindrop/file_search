@@ -323,7 +323,12 @@ export function updateWorkspaceSummary() {
 export function showActionModal({ title, bodyHtml, confirmText = 'Confirm', onConfirm }) {
     document.getElementById('actionModalTitle').innerText = title;
     document.getElementById('actionModalBody').innerHTML = bodyHtml;
-    document.getElementById('actionModalConfirm').innerText = confirmText;
+    const confirmBtn = document.getElementById('actionModalConfirm');
+    confirmBtn.innerText = confirmText;
+    // Always reset the confirm button so a previous run that left it disabled
+    // (e.g. modal hidden before the handler resolved) cannot permanently
+    // swallow subsequent confirm clicks.
+    confirmBtn.disabled = false;
     state.actionModalHandler = onConfirm;
     new bootstrap.Modal(document.getElementById('actionModal')).show();
 }
@@ -397,55 +402,11 @@ export function renderVirtualSearchResults(results) {
 }
 
 export function renderSearchResultItem(data, overlayMode = false) {
-    const targets = [];
-    const leftList = document.getElementById('searchResultsList');
-    if (leftList) targets.push({ list: leftList, withStageBtn: true });
-    if (overlayMode) {
-        const overlayList = document.getElementById('searchOverlayList');
-        if (overlayList) targets.push({ list: overlayList, withStageBtn: true });
-    }
-
-    targets.forEach(({ list, withStageBtn }) => {
-        const item = document.createElement('div');
-        item.className = 'list-group-item bg-transparent text-white border-0 animate-in p-2 cursor-pointer d-flex align-items-center';
-        item.setAttribute('data-path', data.path);
-        item.style.cursor = 'pointer';
-
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'flex-grow-1 overflow-hidden';
-        const snippetHtml = data.snippet ? `<div class="x-small text-warning mt-1 text-truncate border-start border-warning ps-2" style="background: rgba(255,193,7,0.05)">${escapeHtml(data.snippet)}</div>` : "";
-        contentDiv.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <div class="fw-bold text-info">${escapeHtml(data.name)}</div>
-                <div class="text-muted x-small" style="font-size:0.7rem">${escapeHtml(data.mtime_fmt || '')}</div>
-            </div>
-            <div class="small text-muted text-truncate">${escapeHtml(data.path)}</div>
-            ${snippetHtml}
-        `;
-        item.appendChild(contentDiv);
-
-        if (withStageBtn) {
-            const stageBtn = document.createElement('button');
-            stageBtn.className = 'btn btn-sm btn-link text-success p-0 ms-2';
-            stageBtn.innerHTML = '&#43;';
-            stageBtn.title = 'Stage this file';
-            stageBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                app.state.staging.add(data.path);
-                app.syncStagingToBackend();
-                app.updateWorkspaceSummary();
-                showToast('Added to staging');
-            });
-            item.appendChild(stageBtn);
-        }
-
-        item.addEventListener('click', () => app.previewFile(data.path));
-        item.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            app.showContextMenu(e, data.path);
-        });
-        list.appendChild(item);
-    });
+    // L1: this function was dead code (search results use the virtual-scroll
+    // path renderVirtualSearchResults -> createSearchResultItem). Removed to
+    // shrink the XSS review surface and avoid confusion. Kept as a thin
+    // stub for backward-compatible imports if any.
+    return renderVirtualSearchResults([data]);
 }
 
 export function renderTree(node, options = {}) {
@@ -482,7 +443,7 @@ export function renderTree(node, options = {}) {
         header.appendChild(toggle);
     }
 
-    const metaInfo = node.type === 'file' ? ` (${node.size_fmt})` : '';
+    const metaInfo = node.type === 'file' ? ` (${escapeHtml(node.size_fmt || '')})` : '';
 
     if (node.type === 'dir') {
         const iconSpan = document.createElement('span');
@@ -502,7 +463,7 @@ export function renderTree(node, options = {}) {
     nameSpan.className = 'flex-grow-1 text-truncate';
     nameSpan.innerHTML = `
         <span>${escapeHtml(node.name)}</span>
-        <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${node.mtime_fmt || ''}${metaInfo}</span>
+        <span class="ms-2 text-muted x-small d-none d-lg-inline" style="font-size:0.7rem">${escapeHtml(node.mtime_fmt || '')}${metaInfo}</span>
     `;
     header.appendChild(nameSpan);
     container.appendChild(header);

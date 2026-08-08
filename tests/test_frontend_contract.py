@@ -151,6 +151,22 @@ def test_frontend_uses_real_progress_polling(api_client):
     assert "_pollProgress" in main_js
 
 
+def test_frontend_poll_progress_cancellable_contract(api_client):
+    """M1: poller must be cancellable to avoid a leaked interval.
+
+    _pollProgress must expose a cancel handle plus a safety cap so a failed
+    copy/extract cannot leak a forever-running 400ms interval.
+    """
+    main_js = api_client.get("/static/js/main.js").text
+
+    # The poller must return a cancel handle (not just a bare promise).
+    assert "cancel" in main_js and "poller.cancel" in main_js
+    # A safety maximum-attempts cap guarantees termination.
+    assert "maxAttempts" in main_js
+    # Callers must cancel on failure to avoid orphan pollers.
+    assert "poller = App._pollProgress" in main_js
+
+
 def test_frontend_bulk_extract_progress_regression_contract(api_client):
     """Bulk extract should avoid indexOf progress bugs and warn about non-ZIP items."""
     main_js = api_client.get("/static/js/main.js").text

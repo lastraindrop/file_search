@@ -159,6 +159,8 @@ def clean_config(tmp_path):
         DataManager.reset()
         FileUtils.clear_cache()
         dm = DataManager()
+        # Expose the patched config path so tests can force a fresh reload
+        # from the same on-disk file (used by CLI persistence tests).
         dm.config_path = config_path
         yield dm
         DataManager.reset()
