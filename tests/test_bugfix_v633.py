@@ -100,10 +100,12 @@ class TestCDATALoopingEscape:
 class TestCORSOriginWildcardDetection:
     """Tests for BUG-3: CORS origin wildcard detection robustness."""
 
-    def test_parse_wildcard_default(self):
-        """Default (empty) should return ['*']."""
+    def test_parse_localhost_default(self):
+        """Default CORS policy is restricted to local web origins."""
         result = _parse_allowed_origins(None)
-        assert result == ["*"]
+        assert "http://127.0.0.1:8000" in result
+        assert "http://localhost:8000" in result
+        assert "*" not in result
 
     def test_parse_wildcard_explicit(self):
         """Explicit '*' should return ['*']."""

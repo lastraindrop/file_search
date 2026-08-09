@@ -74,7 +74,11 @@ def get_content(path: str, dm: DataManager = _dm_dep) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="File not found")
 
     if FileUtils.is_binary(p):
-        return {"content": "--- Binary File (Preview Unavailable) ---"}
+        return {
+            "content": "--- Binary File (Preview Unavailable) ---",
+            "is_binary": True,
+            "is_truncated": False,
+        }
     try:
         limit_mb = dm.config.global_settings.preview_limit_mb
         max_preview = int(round(limit_mb * 1024 * 1024))
@@ -334,13 +338,18 @@ def collect_paths_api(
 ) -> dict[str, str]:
     """Collects and formats paths."""
     try:
-        if req.project_root and not get_valid_project_root(req.project_root, dm):
+        if not req.project_root:
+            raise HTTPException(status_code=403, detail="A registered project root is required")
+        project_root = get_valid_project_root(req.project_root, dm)
+        if not project_root:
             raise HTTPException(status_code=403, detail="Unauthorized project root")
+        if any(not is_path_safe(path, project_root) for path in req.paths):
+            raise HTTPException(status_code=403, detail="All paths must stay inside the project")
 
         return {
             "result": FormatUtils.collect_paths(
                 req.paths,
-                req.project_root,
+                project_root,
                 req.mode,
                 req.separator,
                 req.file_prefix,

@@ -46,7 +46,7 @@ class GenerateRequest(BaseModel):
     template_name: str | None = None
     export_format: str = "markdown"
     include_blueprint: bool = True
-    apply_noise_reducer: bool = True
+    apply_noise_reducer: bool | None = None
 
 
 class FileRenameRequest(BaseModel):
@@ -180,12 +180,12 @@ class TagRequest(BaseModel):
 class GlobalSettingsRequest(BaseModel):
     """Request model for updating global settings."""
 
-    preview_limit_mb: float | None = None
+    preview_limit_mb: float | None = Field(default=None, gt=0, le=100)
     allowed_extensions: str | None = None
-    token_threshold: int | None = None
+    token_threshold: int | None = Field(default=None, ge=1, le=10_000_000)
     enable_noise_reducer: bool | None = None
     theme: str | None = None
-    token_ratio: float | None = None
+    token_ratio: float | None = Field(default=None, gt=0, le=100)
     settings: dict[str, Any] | None = None
 
 
@@ -226,11 +226,11 @@ class ToolsUpdateRequest(BaseModel):
     """Request model for updating custom tools."""
 
     project_path: str
-    tools: dict[str, Any]
+    tools: dict[str, str]
 
     @field_validator("tools")
     @classmethod
-    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def _check_size(cls, v: dict[str, str]) -> dict[str, str]:
         return _validate_dict_size(v)
 
 
@@ -238,11 +238,11 @@ class CategoriesUpdateRequest(BaseModel):
     """Request model for updating categories."""
 
     project_path: str
-    categories: dict[str, Any]
+    categories: dict[str, str]
 
     @field_validator("categories")
     @classmethod
-    def _check_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def _check_size(cls, v: dict[str, str]) -> dict[str, str]:
         return _validate_dict_size(v)
 
 

@@ -58,6 +58,14 @@ export async function saveProjectSettings(path, settings) {
     await _post(config.endpoints.projectSettings, { project_path: path, settings });
 }
 
+export async function saveProjectTools(path, tools) {
+    await _post(config.endpoints.projectTools, { project_path: path, tools });
+}
+
+export async function saveProjectCategories(path, categories) {
+    await _post(config.endpoints.projectCategories, { project_path: path, categories });
+}
+
 export async function fetchGlobalSettings() {
     const res = await _fetch(config.endpoints.globalSettings);
     return await res.json();

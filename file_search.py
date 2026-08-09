@@ -860,7 +860,12 @@ class FileCortexApp:
                 str(self.current_dir), self.staging_files, cat_name
             )
             self.show_status(f"已将 {len(moved)} 个文件移动至 {cat_name}")
-            self.clear_staging()
+            self.staging_files = [
+                path for path in self.staging_files if pathlib.Path(path).exists()
+            ]
+            if self.current_proj_config:
+                self.current_proj_config.staging_list = list(self.staging_files)
+                self.data_mgr.save()
             self.on_refresh()
         except Exception as e:
             messagebox.showerror("错误", str(e))
@@ -1381,30 +1386,27 @@ class FileCortexApp:
         """
         for i in self.tree_staging.get_children():
             self.tree_staging.delete(i)
-        self.staging_files.clear()
 
         if self.current_proj_config:
             staging_data = list(self.current_proj_config.staging_list)
             filter_text = self.staging_filter_var.get().lower() if apply_filter else ""
 
             pruned = False
+            full_staging = []
             for p_raw in staging_data:
                 p_str = PathValidator.norm_path(p_raw)
                 p = pathlib.Path(p_str)
+
+                if not p.exists():
+                    pruned = True
+                    continue
+                full_staging.append(p_str)
 
                 if apply_filter and filter_text and (
                     filter_text not in p.name.lower()
                     and filter_text not in p_str.lower()
                 ):
                     continue
-
-                if not p.exists():
-                    # L4: record that a stale entry was dropped so we can
-                    # persist the cleaned list back to disk below.
-                    pruned = True
-                    continue
-
-                self.staging_files.append(p_str)
 
                 sz = p.stat().st_size if p.is_file() else 0
                 sz_str = FormatUtils.format_size(sz)
@@ -1417,8 +1419,9 @@ class FileCortexApp:
 
             # L4: persist pruned staging list so stale entries don't reappear
             # on the next load.
-            if pruned and self.staging_files != list(staging_data):
-                self.current_proj_config.staging_list = list(self.staging_files)
+            self.staging_files = full_staging
+            if pruned and full_staging != list(staging_data):
+                self.current_proj_config.staging_list = full_staging
                 self.data_mgr.save()
 
         self.update_stats()

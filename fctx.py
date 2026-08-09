@@ -54,6 +54,8 @@ def cmd_open(args: argparse.Namespace, data_mgr: DataManager) -> None:
         return
 
     data_mgr.add_to_recent(abs_path)
+    data_mgr.get_project_data_obj(abs_path)
+    data_mgr.save()
     print(f"PROJECT REGISTERED: {abs_path}")
 
 
@@ -182,7 +184,7 @@ def cmd_categorize(args: argparse.Namespace, data_mgr: DataManager) -> None:
     try:
         moved = FileOps.batch_categorize(proj_root, paths, args.category)
         print(f"Moved {len(moved)} files to {args.category}")
-        proj.staging_list = []
+        proj.staging_list = [path for path in paths if pathlib.Path(path).exists()]
         data_mgr.save()
     except Exception as e:
         print(f"ERROR: {e}")

@@ -204,6 +204,25 @@ class TestCopyItem:
         # Sources are untouched.
         assert (mock_project / "src" / "main.py").exists()
 
+    def test_batch_copy_rolls_back_completed_items_on_later_failure(self, mock_project):
+        """A later conflict must remove copies created earlier in the batch."""
+        dst = mock_project / "rollback_out"
+        dst.mkdir()
+        (dst / "README.md").write_text("existing", encoding="utf-8")
+
+        with pytest.raises(FileExistsError):
+            FileOps.copy_item(
+                [
+                    str(mock_project / "src" / "main.py"),
+                    str(mock_project / "README.md"),
+                ],
+                str(dst),
+                str(mock_project),
+            )
+
+        assert not (dst / "main.py").exists()
+        assert (dst / "README.md").read_text(encoding="utf-8") == "existing"
+
     def test_batch_copy_mixed_files_and_dirs(self, mock_project):
         """A batch may mix a single file and a whole directory."""
         file_src = str(mock_project / "src" / "main.py")
@@ -547,3 +566,18 @@ class TestZipSlipProtection:
         assert (dst / "ok.txt").read_bytes() == b"ok"
         assert (dst / "a" / "b.txt").read_bytes() == b"ab"
         assert len(result) >= 2
+
+    def test_extract_rejects_archive_over_member_limit(
+        self, mock_project, tmp_path, monkeypatch
+    ):
+        """Archive limits are enforced before any output is written."""
+        monkeypatch.setattr("file_cortex_core.actions.MAX_ZIP_MEMBERS", 1)
+        archive = _make_zip(
+            {"first.txt": b"one", "second.txt": b"two"}, tmp_path / "many.zip"
+        )
+        dst = mock_project / "limited_target"
+
+        with pytest.raises(ValueError, match="members"):
+            FileOps.extract_archive(str(archive), str(dst), str(mock_project))
+
+        assert not (dst / "first.txt").exists()

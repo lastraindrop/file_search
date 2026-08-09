@@ -24,6 +24,19 @@ def test_to_xml_cdata_escaping(mock_project):
     # The ]]> should be handled by replacing with ]]] ]><![CDATA[>
     assert "]]]]><![CDATA[>" in res
 
+def test_to_xml_escapes_instruction_and_parses(mock_project):
+    """Instruction content must not break XML structure or parsing."""
+    from xml.etree import ElementTree
+
+    result = ContextFormatter.to_xml(
+        [str(mock_project / "src" / "main.py")],
+        root_dir=str(mock_project),
+        prompt_prefix="Use <tag> & preserve ]]>",
+    )
+    root = ElementTree.fromstring(result)
+    assert root.find("instruction").text == "Use <tag> & preserve ]]>"
+
+
 def test_to_xml_empty_files(tmp_path):
     """Empty file list should produce valid empty XML."""
     res = ContextFormatter.to_xml([], root_dir=str(tmp_path))

@@ -5,7 +5,7 @@ import re
 
 import tomllib
 
-EXPECTED_TEST_COUNT = 776
+EXPECTED_TEST_COUNT = 788
 
 
 def test_pyproject_declares_routers() -> None:
@@ -64,6 +64,17 @@ def test_entry_modules_importable() -> None:
     import fctx  # noqa: F401
     import mcp_server  # noqa: F401
     import web_app  # noqa: F401
+
+
+def test_pyproject_declares_web_resources() -> None:
+    """The wheel must install the web application assets it mounts at runtime."""
+    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        data = tomllib.load(f)
+    data_files = data["tool"]["setuptools"].get("data-files", {})
+    assert "templates" in data_files
+    assert "static/js" in data_files
+    assert "static/css" in data_files
 
 
 # ---------------------------------------------------------------------------

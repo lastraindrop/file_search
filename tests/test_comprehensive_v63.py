@@ -380,8 +380,8 @@ class TestWebAPIExtended:
             )
             assert res.status_code == 403
 
-    def test_cors_wildcard_origin_allows_all(self, api_client, mock_project):
-        """CORS with wildcard allows all origins."""
+    def test_cors_default_origin_rejects_untrusted_site(self, api_client, mock_project):
+        """The secure default must reject cross-site local API requests."""
         with patch("web_app.API_TOKEN", "tok123"):
             res = api_client.post(
                 "/api/open",
@@ -391,7 +391,7 @@ class TestWebAPIExtended:
                     "origin": "https://any-origin.com",
                 },
             )
-            assert res.status_code == 200
+            assert res.status_code == 403
 
     def test_api_index_page_injects_token(self, api_client):
         """Index page injects the token through a non-script metadata field."""

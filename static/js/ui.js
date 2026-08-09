@@ -366,6 +366,7 @@ function createSearchResultItem(data) {
     stageBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         app.state.staging.add(data.path);
+        renderStaging();
         app.syncStagingToBackend();
         app.updateWorkspaceSummary();
         showToast('Added to staging');

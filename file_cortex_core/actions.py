@@ -4,6 +4,7 @@
 Provides file manipulation utilities and external tool execution.
 """
 
+import contextlib
 import os
 import pathlib
 import re
@@ -22,6 +23,11 @@ from typing import Any
 from .config import DataManager, logger
 from .file_io import FileUtils
 from .security import PathValidator
+
+MAX_ZIP_MEMBERS = 10_000
+MAX_ZIP_MEMBER_BYTES = 512 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 1024 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 200
 
 
 class ProgressTracker:
@@ -219,11 +225,16 @@ class FileOps:
         new_names = {}
         for p_str in paths:
             p = pathlib.Path(p_str)
+            if not PathValidator.is_safe(p, project_path):
+                raise PermissionError("Source path is outside the project workspace.")
             new_name = regex.sub(replacement, p.name, count=count if count > 0 else 0)
             if new_name == p.name:
                 continue
+            FileOps._validate_item_name(new_name)
 
             new_path = p.parent / new_name
+            if not PathValidator.is_safe(new_path, project_path):
+                raise PermissionError("Rename target is outside the project workspace.")
             new_names[p_str] = new_path
 
         final_targets: dict[str, tuple[pathlib.Path, str]] = {}
@@ -247,6 +258,8 @@ class FileOps:
                 max_attempts = 1000
                 while counter <= max_attempts:
                     candidate = new_p.parent / f"{base}_{counter}{ext}"
+                    if not PathValidator.is_safe(candidate, project_path):
+                        raise PermissionError("Rename target is outside the project workspace.")
                     norm_candidate = norm_path_str(candidate)
                     if not candidate.exists() and norm_candidate not in target_norm_set:
                         new_p = candidate
@@ -391,10 +404,15 @@ class FileOps:
         if FileUtils.is_binary(path):
             raise ValueError("Cannot save binary file as text.")
 
+        original_stat = path.stat()
+        encoding = FileUtils._detect_encoding(
+            str(path.absolute()), original_stat.st_mtime, original_stat.st_size
+        )
         temp_fd, temp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            with os.fdopen(temp_fd, "w", encoding=encoding) as f:
                 f.write(content)
+            os.chmod(temp_path, stat.S_IMODE(original_stat.st_mode))
             os.replace(temp_path, path)
         except Exception:
             try:
@@ -452,30 +470,47 @@ class FileOps:
         """
         output_path = pathlib.Path(output_path_str)
         root_dir_p = pathlib.Path(root_dir).resolve() if root_dir else None
-        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for p_str in paths:
-                p = pathlib.Path(p_str).resolve()
-                if not p.exists():
-                    continue
-                arcname = (
-                    p.relative_to(root_dir_p)
-                    if root_dir_p and (root_dir_p == p or root_dir_p in p.parents)
-                    else p.name
-                )
-                if p.is_file():
-                    zipf.write(p, arcname)
-                elif p.is_dir():
-                    for root, _, files in os.walk(p):
-                        for file in files:
-                            full_f = pathlib.Path(root) / file
-                            # BUG-C2 fix: per-file arcname decision, same logic as file branch.
-                            if root_dir_p and (
-                                root_dir_p == full_f or root_dir_p in full_f.parents
-                            ):
-                                arc = full_f.relative_to(root_dir_p)
-                            else:
-                                arc = full_f.relative_to(p.parent)
-                            zipf.write(full_f, arc)
+        if output_path.exists():
+            raise FileExistsError("Archive output already exists.")
+        resolved_output = output_path.resolve()
+        for p_str in paths:
+            source = pathlib.Path(p_str).resolve()
+            if source == resolved_output or (source.is_dir() and source in resolved_output.parents):
+                raise ValueError("Archive output cannot be one of the selected paths.")
+
+        temp_fd, temp_name = tempfile.mkstemp(
+            prefix=".fctx_archive_", suffix=".tmp", dir=str(output_path.parent)
+        )
+        os.close(temp_fd)
+        try:
+            with zipfile.ZipFile(temp_name, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for p_str in paths:
+                    p = pathlib.Path(p_str).resolve()
+                    if not p.exists():
+                        continue
+                    arcname = (
+                        p.relative_to(root_dir_p)
+                        if root_dir_p and (root_dir_p == p or root_dir_p in p.parents)
+                        else p.name
+                    )
+                    if p.is_file():
+                        zipf.write(p, arcname)
+                    elif p.is_dir():
+                        for root, _, files in os.walk(p):
+                            for file in files:
+                                full_f = pathlib.Path(root) / file
+                                if root_dir_p and (
+                                    root_dir_p == full_f or root_dir_p in full_f.parents
+                                ):
+                                    arc = full_f.relative_to(root_dir_p)
+                                else:
+                                    arc = full_f.relative_to(p.parent)
+                                zipf.write(full_f, arc)
+            os.replace(temp_name, output_path)
+        except Exception:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temp_name)
+            raise
         return str(output_path)
 
     @staticmethod
@@ -484,6 +519,7 @@ class FileOps:
         paths: list[str],
         category_name: str,
         data_mgr: DataManager | None = None,
+        failures: list[dict[str, str]] | None = None,
     ) -> list[str]:
         """Categorizes files into a project category directory.
 
@@ -492,6 +528,7 @@ class FileOps:
             paths: Files to categorize.
             category_name: Category name.
             data_mgr: Optional DataManager instance for DI.
+            failures: Optional list populated with a result for every failed move.
 
         Returns:
             List of new file paths.
@@ -520,6 +557,8 @@ class FileOps:
                 moved.append(new_p)
             except Exception:
                 logger.exception(f"Failed to categorize {p_str}")
+                if failures is not None:
+                    failures.append({"path": p_str, "error": "Move failed; see server log."})
         return moved
 
     @staticmethod
@@ -621,6 +660,17 @@ class FileOps:
                         message=f"Copied {src_path.name}",
                     )
         except Exception:
+            for created_path in reversed(results):
+                target = pathlib.Path(created_path)
+                try:
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    logger.exception(f"Failed to roll back copied path: {target}")
             if task_id is not None:
                 ProgressTracker.update(
                     task_id,
@@ -768,6 +818,24 @@ class FileOps:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             infolist = zf.infolist()
+            if len(infolist) > MAX_ZIP_MEMBERS:
+                raise ValueError(f"Archive has more than {MAX_ZIP_MEMBERS} members.")
+
+            total_uncompressed = 0
+            for member in infolist:
+                if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                    raise ValueError(f"Archive member is too large: {member.filename}")
+                total_uncompressed += member.file_size
+                if total_uncompressed > MAX_ZIP_TOTAL_BYTES:
+                    raise ValueError("Archive exceeds the total extraction size limit.")
+                if (
+                    member.file_size
+                    and member.compress_size
+                    and member.file_size / member.compress_size > MAX_ZIP_COMPRESSION_RATIO
+                ):
+                    raise ValueError(
+                        f"Archive member compression ratio is too high: {member.filename}"
+                    )
 
             if task_id is not None:
                 ProgressTracker.start_task(task_id, total=len(infolist))
@@ -777,6 +845,8 @@ class FileOps:
             temp_dir = pathlib.Path(
                 tempfile.mkdtemp(prefix=".fctx_extract_", dir=str(dst_dir.parent))
             )
+            committed_files: list[pathlib.Path] = []
+            created_dirs: list[pathlib.Path] = []
             try:
                 # Pass 1: validate every member and resolve final + staging
                 # targets. Re-apply the no-overwrite + duplicate-target checks
@@ -819,17 +889,33 @@ class FileOps:
                     else:
                         temp_target.parent.mkdir(parents=True, exist_ok=True)
                         with zf.open(member) as src, open(temp_target, "wb") as out:
-                            shutil.copyfileobj(src, out)
+                            copied = 0
+                            while chunk := src.read(1024 * 1024):
+                                copied += len(chunk)
+                                if copied > member.file_size or copied > MAX_ZIP_MEMBER_BYTES:
+                                    raise ValueError(
+                                        f"Archive member exceeded declared size: {member.filename}"
+                                    )
+                                out.write(chunk)
 
                 # Pass 3: atomically promote each staged member to its final
                 # destination. Per-file atomicity comes from shutil.move using
                 # os.rename on the same filesystem.
                 for idx, (member, target, temp_target) in enumerate(plan):
                     if member.is_dir():
+                        if not target.exists():
+                            created_dirs.append(target)
                         target.mkdir(parents=True, exist_ok=True)
                     else:
+                        missing_parents = [
+                            parent
+                            for parent in target.parents
+                            if parent != dst_dir and not parent.exists()
+                        ]
                         target.parent.mkdir(parents=True, exist_ok=True)
+                        created_dirs.extend(missing_parents)
                         shutil.move(str(temp_target), str(target))
+                        committed_files.append(target)
                     extracted.append(str(target))
 
                     if task_id is not None:
@@ -840,6 +926,14 @@ class FileOps:
                             message=f"Extracted {member.filename}",
                         )
             except Exception:
+                for target in reversed(committed_files):
+                    with contextlib.suppress(FileNotFoundError, IsADirectoryError):
+                        target.unlink()
+                for directory in sorted(
+                    created_dirs, key=lambda path: len(path.parts), reverse=True
+                ):
+                    with contextlib.suppress(OSError):
+                        directory.rmdir()
                 if task_id is not None:
                     ProgressTracker.update(
                         task_id,

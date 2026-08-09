@@ -1,6 +1,6 @@
 # FileCortex v6.5.2 (工作区编排助手)
 
-> **版本**: 6.5.2 | **日期**: 2026-08-08 | **测试**: 776 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.2 | **日期**: 2026-08-09 | **测试**: 788 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -119,8 +119,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **776 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
-- **测试结果**: 776 passed, 0 failed
+- **788 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
+- **测试结果**: 788 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -190,15 +190,15 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.1 |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.2 |
 
 ---
 
 ## 环境变量
 | 变量 | 说明 | 默认值 |
 |-----|------|-------|
-| FCTX_API_TOKEN | API 认证 Token | (无) |
-| FCTX_ALLOWED_ORIGINS | 允许的跨域来源 | * |
+| FCTX_API_TOKEN | API 认证 Token；绑定非 localhost 时必填 | (仅 localhost 可省略) |
+| FCTX_ALLOWED_ORIGINS | 允许的跨域来源，逗号分隔 | localhost/127.0.0.1/::1 的 8000 端口 |
 | FCTX_PROD | 生产模式 (隐藏错误详情) | (无) |
 | FCTX_EXEC_TIMEOUT | 工具执行超时(秒) | 300 |
 

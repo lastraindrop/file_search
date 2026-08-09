@@ -3,6 +3,7 @@
 
 import pathlib
 from typing import Final
+from xml.sax.saxutils import escape as xml_escape
 
 from .config import logger
 from .file_io import FileUtils
@@ -56,6 +57,11 @@ class ContextFormatter:
     """Formats file contents for LLM context."""
 
     @staticmethod
+    def _cdata(value: str) -> str:
+        """Makes arbitrary text safe for a CDATA section."""
+        return value.replace("]]>", "]]]]><![CDATA[>")
+
+    @staticmethod
     def to_markdown(
         paths: list[str],
         root_dir: str | None = None,
@@ -83,7 +89,8 @@ class ContextFormatter:
             paths, root_dir, manual_excludes, use_gitignore
         )
 
-        if len(all_files) > max_files:
+        found_file_count = len(all_files)
+        if found_file_count > max_files:
             logger.warning(
                 f"Export truncated: {len(all_files)} files found, "
                 f"limiting to {max_files}."
@@ -97,7 +104,7 @@ class ContextFormatter:
 
         root = pathlib.Path(root_dir).resolve() if root_dir else None
 
-        for f_str in all_files:
+        for index, f_str in enumerate(all_files):
             if total_bytes >= MAX_TOTAL_CONTENT_BYTES:
                 logger.warning(
                     f"Export truncated at {total_bytes} bytes "
@@ -105,7 +112,7 @@ class ContextFormatter:
                 )
                 blocks.append(
                     f"\n> [Export truncated: reached {MAX_TOTAL_CONTENT_BYTES // (1024*1024)}MB "
-                    f"content limit. {len(all_files) - len(blocks)} files skipped.]\n"
+                    f"content limit. {len(all_files) - index} files skipped.]\n"
                 )
                 break
 
@@ -124,16 +131,24 @@ class ContextFormatter:
                 stat = p.stat()
                 size_kb = stat.st_size / 1024
 
-                content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
+                read_limit = min(1024 * 1024, MAX_TOTAL_CONTENT_BYTES - total_bytes)
+                content = FileUtils.read_text_smart(p, max_bytes=read_limit)
                 if apply_noise_reducer:
                     content = NoiseReducer.clean(content)
 
                 total_bytes += len(content.encode("utf-8", errors="replace"))
+                if stat.st_size > read_limit:
+                    content += "\n[File content truncated for export budget.]"
                 header = f"File: {rel_path} ({size_kb:.1f} KB)\n"
                 blocks.append(f"{header}```{lang}\n{content}\n```\n\n")
             except Exception:
                 logger.exception(f"Failed to format file {f_str} for context")
 
+        if found_file_count > max_files:
+            blocks.append(
+                f"\n> [Export truncated: {found_file_count - max_files} files exceed "
+                f"the {max_files}-file limit.]\n"
+            )
         return "".join(blocks)
 
     @staticmethod
@@ -166,17 +181,21 @@ class ContextFormatter:
             paths, root_dir, manual_excludes, use_gitignore
         )
 
-        if len(all_files) > max_files:
+        found_file_count = len(all_files)
+        if found_file_count > max_files:
             logger.warning(
                 f"Export truncated: {len(all_files)} files found, "
                 f"limiting to {max_files}."
             )
             all_files = all_files[:max_files]
 
-        blocks = []
+        blocks = ["<filecortex>\n"]
         total_bytes = 0
         if prompt_prefix:
-            blocks.append(f"<instruction>\n{prompt_prefix}\n</instruction>\n\n")
+            blocks.append(
+                f"<instruction><![CDATA[{ContextFormatter._cdata(prompt_prefix)}]]>"
+                "</instruction>\n\n"
+            )
 
         root = pathlib.Path(root_dir).resolve() if root_dir else None
 
@@ -184,7 +203,7 @@ class ContextFormatter:
             ex_str = " ".join(manual_excludes) if manual_excludes else ""
             blueprint = ContextFormatter.generate_blueprint(str(root), ex_str, use_gitignore)
             blocks.append("<blueprint>\n<![CDATA[\n")
-            blocks.append(blueprint)
+            blocks.append(ContextFormatter._cdata(blueprint))
             blocks.append("\n]]>\n</blueprint>\n\n")
 
         blocks.append("<context>\n")
@@ -214,22 +233,31 @@ class ContextFormatter:
                 )
                 size_kb = p.stat().st_size / 1024
 
-                content = FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
+                read_limit = min(1024 * 1024, MAX_TOTAL_CONTENT_BYTES - total_bytes)
+                content = FileUtils.read_text_smart(p, max_bytes=read_limit)
                 if apply_noise_reducer:
                     content = NoiseReducer.clean(content)
 
                 total_bytes += len(content.encode("utf-8", errors="replace"))
 
-                safe_content = content.replace("]]>", "]]]]><![CDATA[>")
+                safe_content = ContextFormatter._cdata(content)
+                if p.stat().st_size > read_limit:
+                    safe_content += "\n[File content truncated for export budget.]"
+                safe_path = xml_escape(str(rel_path), {'"': "&quot;"})
 
                 blocks.append(
-                    f'  <file path="{rel_path}" size="{size_kb:.1f}KB">\n'
+                    f'  <file path="{safe_path}" size="{size_kb:.1f}KB">\n'
                     f"<![CDATA[\n{safe_content}\n]]>\n  </file>\n"
                 )
             except Exception:
                 logger.exception(f"Failed to format file {f_str} for XML context")
 
-        blocks.append("</context>")
+        if found_file_count > max_files:
+            blocks.append(
+                f"  <!-- Export truncated: {found_file_count - max_files} files exceed "
+                f"the {max_files}-file limit. -->\n"
+            )
+        blocks.append("</context>\n</filecortex>")
         return "".join(blocks)
 
     @staticmethod

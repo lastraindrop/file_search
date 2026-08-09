@@ -76,6 +76,5 @@ def test_parameter_combination_security_stress(project_client, mock_project, sys
         "export_format": "xml"
     })
 
-    # It should succeed but return an empty context because evil_path is unsafe
-    assert res.status_code == 200
-    assert "<file" not in res.json()["content"]
+    # Reject the request rather than silently accepting an unsafe file list.
+    assert res.status_code == 403

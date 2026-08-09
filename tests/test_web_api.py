@@ -240,6 +240,38 @@ class TestWebAPIAdvanced:
         # The archive must be written inside the project root.
         assert (mock_project / safe_name).exists()
 
+    def test_api_batch_rename_rejects_target_traversal(self, project_client, mock_project):
+        """A regex replacement must not turn a rename into an external move."""
+        source = mock_project / "src" / "main.py"
+        res = project_client.post(
+            "/api/fs/batch_rename",
+            json={
+                "project_path": str(mock_project),
+                "paths": [str(source)],
+                "pattern": "main",
+                "replacement": "../escape",
+                "dry_run": False,
+            },
+        )
+        assert res.status_code in (400, 403)
+        assert source.exists()
+        assert not (mock_project / "escape.py").exists()
+
+    def test_api_collect_paths_rejects_external_file(
+        self, project_client, mock_project, tmp_path
+    ):
+        """Path collection cannot disclose paths outside its workspace."""
+        external = tmp_path / "external.txt"
+        external.write_text("secret", encoding="utf-8")
+        res = project_client.post(
+            "/api/fs/collect_paths",
+            json={
+                "project_root": str(mock_project),
+                "paths": [str(external)],
+            },
+        )
+        assert res.status_code == 403
+
     def test_api_copy_file(self, project_client, mock_project):
         """Verify copying a file via API."""
         src = str(mock_project / "src" / "main.py")
@@ -533,6 +565,16 @@ class TestAPITokenMiddleware:
         finally:
             monkeypatch.delenv("FCTX_ALLOWED_ORIGINS", raising=False)
             importlib.reload(web_app)
+
+    def test_same_origin_custom_port_is_allowed(self):
+        """A custom local Web port must not reject its own API requests."""
+        import web_app
+
+        client = TestClient(web_app.app, base_url="http://localhost:8123")
+        response = client.get(
+            "/api/whoami", headers={"Origin": "http://localhost:8123"}
+        )
+        assert response.status_code == 200
 
 
 # ==============================================================================

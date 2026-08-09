@@ -90,6 +90,16 @@ def test_search_tags_logic(mock_project, pos_tag, neg_tag, expected_present):
     has_main = any("main.py" in r["path"] for r in results)
     assert has_main == expected_present
 
+
+def test_exact_search_applies_positive_tags(mock_project):
+    """Exact mode must honor explicit tags, not only its search text."""
+    results = list(
+        search_generator(
+            str(mock_project), "main", "exact", "", positive_tags=["README"]
+        )
+    )
+    assert not any("main.py" in result["path"] for result in results)
+
 # -----------------------------------------------------------------------------
 # 4. Resource Efficiency & Interruption
 # -----------------------------------------------------------------------------

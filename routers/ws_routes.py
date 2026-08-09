@@ -65,9 +65,20 @@ async def websocket_search(
     p = pathlib.Path(path)
     excludes = proj_config.get("excludes", "")
 
-    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue()
+    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue(maxsize=100)
     main_loop = asyncio.get_running_loop()
     stop_event = threading.Event()
+
+    def enqueue(item: dict[str, Any] | str) -> bool:
+        """Applies backpressure when the WebSocket consumer is slow."""
+        while not stop_event.is_set():
+            future = asyncio.run_coroutine_threadsafe(result_queue.put(item), main_loop)
+            try:
+                future.result(timeout=0.1)
+                return True
+            except TimeoutError:
+                future.cancel()
+        return False
 
     def run_search() -> None:
         try:
@@ -88,22 +99,20 @@ async def websocket_search(
             ):
                 if stop_event.is_set():
                     break
-                main_loop.call_soon_threadsafe(
-                    result_queue.put_nowait,
-                    {
-                        "name": os.path.basename(res_dict["path"]),
-                        "path": res_dict["path"],
-                        "type": res_dict["match_type"],
-                        "size": res_dict["size"],
-                        "size_fmt": FormatUtils.format_size(res_dict["size"]),
-                        "mtime": res_dict["mtime"],
-                        "mtime_fmt": res_dict.get("mtime_fmt", ""),
-                        "ext": res_dict["ext"],
-                        "snippet": res_dict.get("snippet", ""),
-                    },
-                )
+                if not enqueue({
+                    "name": os.path.basename(res_dict["path"]),
+                    "path": res_dict["path"],
+                    "type": res_dict["match_type"],
+                    "size": res_dict["size"],
+                    "size_fmt": FormatUtils.format_size(res_dict["size"]),
+                    "mtime": res_dict["mtime"],
+                    "mtime_fmt": res_dict.get("mtime_fmt", ""),
+                    "ext": res_dict["ext"],
+                    "snippet": res_dict.get("snippet", ""),
+                }):
+                    break
         finally:
-            main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+            enqueue("DONE")
 
     search_task = asyncio.create_task(asyncio.to_thread(run_search))
 
@@ -169,8 +178,31 @@ async def websocket_action_stream(
         return
 
     current_pid = [None]
-    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue()
+    stop_event = threading.Event()
+    result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue(maxsize=100)
     main_loop = asyncio.get_running_loop()
+
+    def enqueue(item: dict[str, Any] | str) -> bool:
+        """Blocks the reader thread instead of accumulating unlimited output."""
+        while not stop_event.is_set():
+            future = asyncio.run_coroutine_threadsafe(result_queue.put(item), main_loop)
+            try:
+                future.result(timeout=0.1)
+                return True
+            except TimeoutError:
+                future.cancel()
+        return False
+
+    def terminate_current_process() -> None:
+        if not current_pid[0]:
+            return
+        try:
+            from file_cortex_core.process_utils import terminate_process
+
+            terminate_process(current_pid[0])
+            unregister_process(current_pid[0])
+        except Exception:
+            logger.exception(f"Cleanup failed for pid {current_pid[0]}")
 
     def run_stream() -> None:
         proc = None
@@ -185,29 +217,26 @@ async def websocket_action_stream(
                     proc.kill()
                 except Exception:
                     logger.exception("Failed to kill unregistered process")
-                main_loop.call_soon_threadsafe(
-                    result_queue.put_nowait, {"error": "Too many active processes"}
-                )
-                main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+                enqueue({"error": "Too many active processes"})
                 return
 
-            main_loop.call_soon_threadsafe(result_queue.put_nowait, {"pid": proc.pid})
+            enqueue({"pid": proc.pid})
 
             if proc.stdout:
                 for line in proc.stdout:
-                    main_loop.call_soon_threadsafe(result_queue.put_nowait, {"out": line})
+                    if not enqueue({"out": line}):
+                        terminate_current_process()
+                        return
 
             proc.wait()
             unregister_process(proc.pid)
-            main_loop.call_soon_threadsafe(
-                result_queue.put_nowait, {"exit_code": proc.returncode}
-            )
+            enqueue({"exit_code": proc.returncode})
         except Exception as e:
-            main_loop.call_soon_threadsafe(result_queue.put_nowait, {"error": str(e)})
+            enqueue({"error": str(e)})
         finally:
             if proc and proc.pid:
                 unregister_process(proc.pid)
-            main_loop.call_soon_threadsafe(result_queue.put_nowait, "DONE")
+            enqueue("DONE")
 
     stream_task = asyncio.create_task(asyncio.to_thread(run_stream))
 
@@ -219,25 +248,17 @@ async def websocket_action_stream(
                 break
             await websocket.send_json(res)
     except WebSocketDisconnect:
+        stop_event.set()
         if current_pid[0]:
-            pid = current_pid[0]
-            logger.info(
-                f"AUDIT - Terminating abandoned process {pid} "
-                "due to WebSocket disconnect"
-            )
-            try:
-                from file_cortex_core.process_utils import terminate_process
-
-                terminate_process(pid)
-
-                unregister_process(pid)
-            except Exception:
-                logger.exception(f"Cleanup failed for pid {pid}")
+            logger.info(f"AUDIT - Terminating abandoned process {current_pid[0]}")
+            terminate_current_process()
     except Exception as e:
         logger.exception("Action stream error")
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "ERROR", "msg": str(e)})
     finally:
+        stop_event.set()
+        terminate_current_process()
         stream_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await stream_task

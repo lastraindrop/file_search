@@ -15,6 +15,7 @@ import pathlib
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Generator
 from typing import Any, Final
 
@@ -27,6 +28,81 @@ APP_NAME: Final = "FileCortex"
 MAX_LOG_SIZE: Final = 10 * 1024 * 1024  # 10MB
 BACKUP_COUNT: Final = 5
 MAX_SAVE_RETRIES: Final = 5
+CONFIG_LOCK_TIMEOUT: Final = 10.0
+CONFIG_LOCK_STALE_AFTER: Final = 60.0
+_MISSING: Final = object()
+
+
+@contextlib.contextmanager
+def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
+    """Serializes read-merge-write config updates across local processes."""
+    lock_file = config_file.with_suffix(config_file.suffix + ".lock")
+    deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
+    owner = f"{os.getpid()}:{uuid.uuid4().hex}"
+    while True:
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, owner.encode("ascii"))
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                lock_owner = lock_file.read_text(encoding="ascii").strip()
+                owner_pid = int(lock_owner.split(":", maxsplit=1)[0])
+                try:
+                    os.kill(owner_pid, 0)
+                    owner_is_alive = True
+                except OSError:
+                    owner_is_alive = False
+                if (
+                    not owner_is_alive
+                    and time.time() - lock_file.stat().st_mtime > CONFIG_LOCK_STALE_AFTER
+                ):
+                    lock_file.unlink()
+                    continue
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                if time.time() - lock_file.stat().st_mtime > CONFIG_LOCK_STALE_AFTER:
+                    with contextlib.suppress(FileNotFoundError):
+                        lock_file.unlink()
+                    continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for the configuration lock.") from None
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            if lock_file.read_text(encoding="ascii").strip() == owner:
+                lock_file.unlink()
+
+
+def _merge_config_values(base: Any, local: Any, disk: Any, key: str = "") -> Any:
+    """Three-way merges independent config edits while preferring local conflicts."""
+    if local is _MISSING:
+        return disk if base is _MISSING else _MISSING
+    if disk is _MISSING:
+        return local
+    if local == base:
+        return disk
+    if disk == base or local == disk:
+        return local
+    if isinstance(base, dict) and isinstance(local, dict) and isinstance(disk, dict):
+        merged = {}
+        for item_key in base.keys() | local.keys() | disk.keys():
+            value = _merge_config_values(
+                base.get(item_key, _MISSING),
+                local.get(item_key, _MISSING),
+                disk.get(item_key, _MISSING),
+                item_key,
+            )
+            if value is not _MISSING:
+                merged[item_key] = value
+        return merged
+    if key in {"staging_list", "recent_projects", "pinned_projects"}:
+        return list(dict.fromkeys([*disk, *local]))
+    return local
 
 
 class SearchSettings(BaseModel):
@@ -50,7 +126,7 @@ class ProjectConfig(BaseModel):
         ".git .idea __pycache__ venv node_modules .vscode dist build "
         ".DS_Store *.pyc *.png *.jpg *.exe *.dll *.so *.dylib .env .cache"
     )
-    max_search_size_mb: int = 10
+    max_search_size_mb: int = Field(default=10, ge=1, le=1024)
     staging_list: list[str] = Field(default_factory=list)
     current_group: str = "Default"
     groups: dict[str, list[str]] = Field(default_factory=lambda: {"Default": []})
@@ -94,10 +170,10 @@ class ProjectConfig(BaseModel):
 
 class GlobalSettings(BaseModel):
     """Global application-wide settings."""
-    preview_limit_mb: float = 1.0
-    token_threshold: int = 128000
+    preview_limit_mb: float = Field(default=1.0, gt=0, le=100)
+    token_threshold: int = Field(default=128000, ge=1, le=10_000_000)
     enable_noise_reducer: bool = False
-    token_ratio: float = 4.0
+    token_ratio: float = Field(default=4.0, gt=0, le=100)
     theme: str = "dark"
     allowed_extensions: str = ""
 
@@ -193,6 +269,8 @@ class DataManager:
             "current_group",
             "prompt_templates",
             "search_settings",
+            "custom_tools",
+            "quick_categories",
         }
     )
 
@@ -214,6 +292,7 @@ class DataManager:
     def _init_data(self) -> None:
         """Initializes the internal config state."""
         self.config: AppConfig = AppConfig()
+        self._base_config_data: dict[str, Any] = self.config.model_dump()
         self.load()
 
     @classmethod
@@ -327,6 +406,7 @@ class DataManager:
                     ]
                     if p
                 ]
+                self._base_config_data = self.config.model_dump()
 
             except Exception:
                 logger.exception("Failed to load or validate configuration")
@@ -337,29 +417,39 @@ class DataManager:
             config_file = _get_config_file()
             temp_path: str | None = None
             try:
-                # model_dump_json ensures we have a valid serialization
-                data_json = self.config.model_dump_json(indent=4)
+                config_file.parent.mkdir(parents=True, exist_ok=True)
+                with _config_file_lock(config_file):
+                    disk_data: dict[str, Any] = self._base_config_data
+                    if config_file.exists():
+                        with open(config_file, encoding="utf-8") as f:
+                            disk_data = AppConfig.model_validate(json.load(f)).model_dump()
 
-                with tempfile.NamedTemporaryFile(
-                    "w",
-                    encoding="utf-8",
-                    suffix=".json.tmp",
-                    dir=str(config_file.parent),
-                    delete=False,
-                ) as f:
-                    temp_path = f.name
-                    f.write(data_json)
+                    merged_data = _merge_config_values(
+                        self._base_config_data, self.config.model_dump(), disk_data
+                    )
+                    self.config = AppConfig.model_validate(merged_data)
+                    data_json = self.config.model_dump_json(indent=4)
 
-                # Atomic replacement with retries for Windows locking issues
-                for attempt in range(MAX_SAVE_RETRIES):
-                    try:
-                        os.replace(temp_path, config_file)
-                        temp_path = None
-                        break
-                    except PermissionError:
-                        if attempt == MAX_SAVE_RETRIES - 1:
-                            raise
-                        time.sleep(0.05 * (attempt + 1))
+                    with tempfile.NamedTemporaryFile(
+                        "w",
+                        encoding="utf-8",
+                        suffix=".json.tmp",
+                        dir=str(config_file.parent),
+                        delete=False,
+                    ) as f:
+                        temp_path = f.name
+                        f.write(data_json)
+
+                    for attempt in range(MAX_SAVE_RETRIES):
+                        try:
+                            os.replace(temp_path, config_file)
+                            temp_path = None
+                            break
+                        except PermissionError:
+                            if attempt == MAX_SAVE_RETRIES - 1:
+                                raise
+                            time.sleep(0.05 * (attempt + 1))
+                    self._base_config_data = self.config.model_dump()
 
             except Exception:
                 if temp_path and os.path.exists(temp_path):
@@ -478,12 +568,13 @@ class DataManager:
         """
         with self._lock:
             try:
-                target = PathValidator.norm_path(target_path_str)
-                if not target:
+                if not target_path_str:
                     return None
                 # Search from longest root to shortest to handle nested projects correctly
                 for p_root in sorted(self.config.projects.keys(), key=len, reverse=True):
-                    if target == p_root or target.startswith(p_root.rstrip("/") + "/"):
+                    # A lexical prefix is not a workspace boundary: an in-project
+                    # symlink can otherwise point to files outside the workspace.
+                    if PathValidator.is_safe(target_path_str, p_root):
                         return p_root
             except (ValueError, OSError):
                 pass
@@ -536,27 +627,56 @@ class DataManager:
         """
         with self._lock:
             proj = self.get_project_data_obj(project_path)
+            candidate = proj.model_dump()
             for k, v in settings.items():
                 if k in self.MUTABLE_SETTINGS:
                     if k == "staging_list" and isinstance(v, list):
-                        proj.staging_list = [
+                        normalized = [
                             p for p in [PathValidator.norm_path(x) for x in v] if p
                         ]
+                        if any(
+                            not PathValidator.is_safe(path, project_path)
+                            for path in normalized
+                        ):
+                            raise ValueError("Staging paths must stay inside the project.")
+                        candidate[k] = normalized
                     elif k == "search_settings" and isinstance(v, dict):
-                        proj.search_settings = SearchSettings.model_validate(v)
+                        candidate[k] = SearchSettings.model_validate(v).model_dump()
+                    elif k == "custom_tools":
+                        if not isinstance(v, dict) or not all(
+                            isinstance(name, str) and isinstance(template, str)
+                            for name, template in v.items()
+                        ):
+                            raise ValueError("Custom tools must map names to command templates.")
+                        candidate[k] = v
+                    elif k == "quick_categories":
+                        if not isinstance(v, dict) or not all(
+                            isinstance(name, str) and isinstance(path, str)
+                            for name, path in v.items()
+                        ):
+                            raise ValueError("Categories must map names to relative paths.")
+                        for rel_dir in v.values():
+                            segments = rel_dir.replace("\\", "/").split("/")
+                            if any(segment == ".." for segment in segments):
+                                raise ValueError("Category paths cannot contain '..' traversal.")
+                        candidate[k] = v
                     else:
-                        setattr(proj, k, v)
+                        candidate[k] = v
                 else:
                     logger.warning(f"Blocked attempt to modify protected project key: {k}")
+            proj = ProjectConfig.model_validate(candidate)
+            self.config.projects[PathValidator.norm_path(project_path)] = proj
             self.save()
 
     def update_custom_tools(self, project_path: str, tools: dict[str, str]) -> None:
         """Updates the custom tools dictionary for a project."""
         if not isinstance(tools, dict):
             raise ValueError("tools must be a dictionary.")
-        for k in tools:
-            if not isinstance(k, str):
-                raise ValueError(f"Tool name must be a string, got {type(k).__name__}.")
+        for name, template in tools.items():
+            if not isinstance(name, str):
+                raise ValueError(f"Tool name must be a string, got {type(name).__name__}.")
+            if not isinstance(template, str):
+                raise ValueError("Tool command template must be a string.")
         with self._lock:
             proj = self.get_project_data_obj(project_path)
             proj.custom_tools = tools
@@ -564,6 +684,11 @@ class DataManager:
 
     def update_quick_categories(self, project_path: str, categories: dict[str, str]) -> None:
         """Updates quick categories, ensuring no traversal in relative paths."""
+        if not isinstance(categories, dict) or not all(
+            isinstance(name, str) and isinstance(path, str)
+            for name, path in categories.items()
+        ):
+            raise ValueError("Categories must map string names to string paths.")
         with self._lock:
             proj = self.get_project_data_obj(project_path)
             for _name, rel_dir in categories.items():

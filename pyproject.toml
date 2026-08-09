@@ -52,8 +52,13 @@ fctx-web = "web_app:main"
 fctx-mcp = "mcp_server:main"
 
 [tool.setuptools]
-packages = ["file_cortex_core", "routers"]
+packages = ["file_cortex_core", "file_cortex_core.gui", "routers"]
 py-modules = ["fctx", "web_app", "file_search", "mcp_server", "build_exe"]
+
+[tool.setuptools.data-files]
+"templates" = ["templates/index.html"]
+"static/css" = ["static/css/style.css"]
+"static/js" = ["static/js/api.js", "static/js/events.js", "static/js/layout.js", "static/js/main.js", "static/js/state.js", "static/js/ui.js", "static/js/virtual-list.js"]
 
 [tool.ruff]
 line-length = 100

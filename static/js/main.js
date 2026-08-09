@@ -419,7 +419,7 @@ const App = {
             const modalInstance = bootstrap.Modal.getInstance(document.getElementById('projectSettingsModal'));
             if (modalInstance) modalInstance.hide();
             ui.showToast("Project settings saved");
-            App.refreshProject();
+            await App.openProject(App.state.projectPath);
         } catch (e) { ui.showToast("Failed to save project settings: " + e.message, 'danger'); }
     },
 
@@ -444,8 +444,13 @@ const App = {
 
         App.state.currentFile = path;
         App.state.isEditing = false;
+        App.state.currentFileEditable = false;
+        const requestId = ++App.state.previewRequestId;
         document.getElementById('fileControls').style.display = 'inline-flex';
-        document.getElementById('btnEditSave').innerText = 'Edit';
+        const editButton = document.getElementById('btnEditSave');
+        editButton.innerText = 'Edit';
+        editButton.disabled = true;
+        editButton.title = 'Loading file preview';
         document.getElementById('codeEditor').style.display = 'none';
         document.getElementById('preBlock').style.display = 'block';
 
@@ -458,7 +463,13 @@ const App = {
 
         try {
             const data = await api.fetchContent(path);
+            if (requestId !== App.state.previewRequestId || App.state.currentFile !== path) return;
             App.state.rawContent = data.content;
+            App.state.currentFileEditable = !data.is_binary && !data.is_truncated;
+            editButton.disabled = !App.state.currentFileEditable;
+            editButton.title = App.state.currentFileEditable
+                ? ''
+                : (data.is_binary ? 'Binary files cannot be edited' : 'Large previews cannot be edited');
 
             const ext = getFileExt(path);
             codeEl.className = 'hljs h-100 d-block p-4';
@@ -479,7 +490,10 @@ const App = {
                 codeEl.innerText = data.content;
                 hljs.highlightElement(codeEl);
             }
-        } catch (e) { codeEl.innerText = "Error loading file: " + e.message; }
+        } catch (e) {
+            if (requestId !== App.state.previewRequestId || App.state.currentFile !== path) return;
+            codeEl.innerText = "Error loading file: " + e.message;
+        }
     },
 
     copyPath: async () => {
@@ -536,9 +550,9 @@ const App = {
                     ui.showToast("Archive name is required", 'warning');
                     return;
                 }
+                const btn = document.getElementById('btnArchiveSelection');
+                const originalText = btn.innerText;
                 try {
-                    const btn = document.getElementById('btnArchiveSelection');
-                    const originalText = btn.innerText;
                     btn.innerText = 'Archiving...';
                     btn.disabled = true;
                     await api.archiveFiles(App.state.projectPath, Array.from(App.state.staging), name);
@@ -549,9 +563,11 @@ const App = {
                         completed: App.state.staging.size,
                         details: name,
                     });
+                } catch (e) { ui.showToast(e.message, 'danger'); }
+                finally {
                     btn.innerText = originalText;
                     btn.disabled = false;
-                } catch (e) { ui.showToast(e.message, 'danger'); }
+                }
             }
         });
     },
@@ -620,19 +636,23 @@ const App = {
         });
     },
 
-    deleteFile: async () => {
-        if (!App.state.currentFile) return;
+    deleteFile: async (path = App.state.currentFile) => {
+        if (!path) return;
+        const targetPath = path;
+        const projectPath = App.state.projectPath;
         ui.showActionModal({
             title: 'Delete file',
             confirmText: 'Delete',
-            bodyHtml: `<p class="mb-0">Delete <strong>${App.escapeHtml(getFileName(App.state.currentFile))}</strong>? This cannot be undone.</p>`,
+            bodyHtml: `<p class="mb-0">Delete <strong>${App.escapeHtml(getFileName(targetPath))}</strong>? This cannot be undone.</p>`,
             onConfirm: async () => {
                 try {
-                    await api.deleteFiles(App.state.projectPath, [App.state.currentFile]);
+                    await api.deleteFiles(projectPath, [targetPath]);
                     ui.closeActionModal();
                     App.openProject();
-                    App.state.currentFile = null;
-                    document.getElementById('fileControls').style.display = 'none';
+                    if (App.state.currentFile === targetPath) {
+                        App.state.currentFile = null;
+                        document.getElementById('fileControls').style.display = 'none';
+                    }
                     ui.showToast("File deleted", 'success');
                     ui.showOperationSummary({ title: 'File deleted', completed: 1 });
                 } catch (e) { ui.showToast("Delete failed: " + e.message, 'danger'); }
@@ -765,6 +785,7 @@ const App = {
 
     startSearch: () => {
         if (!App.state.projectPath) return;
+        const generation = ++App.state.searchGeneration;
         const settings = App.getSearchUiSettings();
         App.persistSearchUiState();
         ui.updateWorkspaceSummary();
@@ -807,8 +828,11 @@ const App = {
         const sock = new WebSocket(wsUrl);
         App.state.socket = sock;
         let resultCount = 0;
-        sock.onopen = () => { list.innerHTML = ''; };
+        sock.onopen = () => {
+            if (App.state.socket === sock && App.state.searchGeneration === generation) list.innerHTML = '';
+        };
         sock.onmessage = (event) => {
+            if (App.state.socket !== sock || App.state.searchGeneration !== generation) return;
             let data;
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.status === "DONE") {
@@ -831,6 +855,7 @@ const App = {
             ui.renderVirtualSearchResults(App.state.searchResults);
         };
         sock.onerror = () => {
+            if (App.state.socket !== sock || App.state.searchGeneration !== generation) return;
             list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128268;</div><div class="empty-state-text">Search connection failed</div></div>';
             count.innerText = 'Error';
             document.getElementById('btnStopSearch').style.display = 'none';
@@ -838,9 +863,16 @@ const App = {
             // otherwise a newer search's socket would be nulled.
             if (App.state.socket === sock) App.state.socket = null;
         };
+        sock.onclose = () => {
+            if (App.state.socket === sock && App.state.searchGeneration === generation) {
+                App.state.socket = null;
+                document.getElementById('btnStopSearch').style.display = 'none';
+            }
+        };
     },
 
     stopSearch: () => {
+        App.state.searchGeneration++;
         if (App.state.socket) {
             App.state.socket.close();
             App.state.socket = null;
@@ -853,6 +885,7 @@ const App = {
     },
 
     closeSearchOverlay: () => {
+        App.state.searchGeneration++;
         if (App.state.socket) {
             App.state.socket.close();
             App.state.socket = null;
@@ -866,8 +899,15 @@ const App = {
         try {
             const data = await api.categorizeFiles(App.state.projectPath, Array.from(App.state.staging), catName);
             ui.showToast(`✅ Successfully moved ${data.moved_count} files to ${catName}`, 'success');
-            ui.showOperationSummary({ title: 'Categorization complete', completed: data.moved_count, details: catName });
-            App.state.staging.clear();
+            const failed = new Set(data.failed_paths || []);
+            ui.showOperationSummary({
+                title: 'Categorization complete',
+                completed: data.moved_count,
+                skipped: failed.size,
+                details: catName,
+                level: failed.size ? 'warning' : 'success',
+            });
+            App.state.staging = failed;
             ui.renderStaging();
             App.syncStagingToBackend();
             App.refreshProject();
@@ -1081,7 +1121,9 @@ const App = {
                 const isDir = document.getElementById('newFileIsDir')?.checked || false;
                 if (!name) return ui.showToast('Name is required', 'warning');
                 try {
-                    const parent = App.state.currentFile || App.state.projectPath;
+                    const current = App.state.currentFile;
+                    const separator = current ? Math.max(current.lastIndexOf('/'), current.lastIndexOf('\\')) : -1;
+                    const parent = separator >= 0 ? current.slice(0, separator) : App.state.projectPath;
                     const data = await api.createFile(parent, name, isDir);
                     ui.showToast(`Created ${name}`);
                     App.refreshProject();
@@ -1182,6 +1224,9 @@ const App = {
         const btn = document.getElementById('btnEditSave');
 
         if (!App.state.isEditing) {
+            if (!App.state.currentFileEditable) {
+                return ui.showToast('This preview cannot be edited safely', 'warning');
+            }
             App.state.isEditing = true;
             editor.value = App.state.rawContent;
             editor.style.display = 'block';
@@ -1325,10 +1370,11 @@ const App = {
                     const files = Array.from(App.state.selectedFiles);
                     const { task_id: taskId } = await api.newProgressTask(files.length);
                     poller = App._pollProgress(taskId, files.length, 'Copying');
-                    const [data] = await Promise.all([
+                    const [data, progress] = await Promise.all([
                         api.copyFile(files, dstDir, App.state.projectPath, taskId),
                         poller.promise,
                     ]);
+                    if (progress.status !== 'done') throw new Error(progress.message || 'Copy failed');
                     ui.closeActionModal();
                     const count = data.new_paths ? data.new_paths.length : 0;
                     ui.showToast(`Copied ${count} item(s).`, 'success');
@@ -1375,7 +1421,10 @@ const App = {
                         const poller = App._pollProgress(taskId, 1, `Extracting ${index + 1}/${zips.length}`);
                         try {
                             const data = await api.extractArchive(zip, dstDir, App.state.projectPath, taskId);
-                            await poller.promise;
+                            const progress = await poller.promise;
+                            if (progress.status !== 'done') {
+                                throw new Error(progress.message || 'Extraction failed');
+                            }
                             extracted += data.extracted_paths ? data.extracted_paths.length : 0;
                         } catch (innerE) {
                             poller.cancel();
@@ -1411,18 +1460,23 @@ const App = {
         // guarantees termination even if the caller forgets to cancel.
         let intervalId = null;
         let stopped = false;
+        let inFlight = false;
+        App.state.activeProgressTask = taskId;
         const cancel = () => {
             stopped = true;
             if (intervalId !== null) clearInterval(intervalId);
+            if (App.state.activeProgressTask === taskId) App.state.activeProgressTask = null;
         };
         const promise = new Promise((resolve) => {
             let attempts = 0;
             const maxAttempts = 1800; // ~12 min at 400ms
             intervalId = setInterval(async () => {
-                if (stopped) return;
+                if (stopped || inFlight) return;
+                inFlight = true;
                 attempts++;
                 try {
                     const prog = await api.getProgress(taskId);
+                    if (stopped || App.state.activeProgressTask !== taskId) return;
                     const done = prog.done || 0;
                     const progressTotal = prog.total || total;
                     const message = prog.message || '';
@@ -1442,7 +1496,7 @@ const App = {
                 } catch (e) {
                     cancel();
                     resolve({ status: 'error', message: e.message });
-                }
+                } finally { inFlight = false; }
             }, 400);
         });
         return { promise, cancel };
@@ -1614,13 +1668,7 @@ const App = {
                 App.openInExplorer(path);
                 break;
             case 'delete': {
-                const savedCurrent = App.state.currentFile;
-                App.state.currentFile = path;
-                try {
-                    await App.deleteFile();
-                } finally {
-                    App.state.currentFile = savedCurrent;
-                }
+                await App.deleteFile(path);
                 break;
             }
         }

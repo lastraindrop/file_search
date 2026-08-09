@@ -44,49 +44,40 @@ def generate_context(
     req: GenerateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
     """Generates formatted context for files."""
-    noise_reducer = dm.config.global_settings.enable_noise_reducer or req.apply_noise_reducer
-    if req.project_path:
-        root, proj_config = get_project_config_for_path(req.project_path, dm)
-        if not root:
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied (Project path not registered)",
-            )
-        final_root = root
-        prompt_prefix = None
-        if proj_config and req.template_name:
-            prompt_prefix = proj_config.get("prompt_templates", {}).get(
-                req.template_name
-            )
-        if req.export_format == "xml":
-            content = ContextFormatter.to_xml(
-                req.files,
-                root_dir=final_root,
-                prompt_prefix=prompt_prefix,
-                include_blueprint=req.include_blueprint,
-                apply_noise_reducer=noise_reducer,
-            )
-        else:
-            content = ContextFormatter.to_markdown(
-                req.files,
-                root_dir=final_root,
-                prompt_prefix=prompt_prefix,
-                apply_noise_reducer=noise_reducer,
-            )
+    noise_reducer = (
+        dm.config.global_settings.enable_noise_reducer
+        if req.apply_noise_reducer is None
+        else req.apply_noise_reducer
+    )
+    if not req.project_path:
+        raise HTTPException(status_code=403, detail="A registered project path is required")
+
+    root, proj_config = get_project_config_for_path(req.project_path, dm)
+    if not root:
+        raise HTTPException(status_code=403, detail="Access denied (Project path not registered)")
+    if any(not is_path_safe(path, root) for path in req.files):
+        raise HTTPException(
+            status_code=403, detail="All context paths must stay inside the project"
+        )
+
+    prompt_prefix = None
+    if proj_config and req.template_name:
+        prompt_prefix = proj_config.get("prompt_templates", {}).get(req.template_name)
+    if req.export_format == "xml":
+        content = ContextFormatter.to_xml(
+            req.files,
+            root_dir=root,
+            prompt_prefix=prompt_prefix,
+            include_blueprint=req.include_blueprint,
+            apply_noise_reducer=noise_reducer,
+        )
     else:
-        if req.export_format == "xml":
-            content = ContextFormatter.to_xml(
-                req.files,
-                prompt_prefix=None,
-                include_blueprint=req.include_blueprint,
-                apply_noise_reducer=noise_reducer,
-            )
-        else:
-            content = ContextFormatter.to_markdown(
-                req.files,
-                prompt_prefix=None,
-                apply_noise_reducer=noise_reducer,
-            )
+        content = ContextFormatter.to_markdown(
+            req.files,
+            root_dir=root,
+            prompt_prefix=prompt_prefix,
+            apply_noise_reducer=noise_reducer,
+        )
 
     return {"content": content, "tokens": FormatUtils.estimate_tokens(content)}
 
@@ -94,14 +85,19 @@ def generate_context(
 @action_router.post("/api/project/stats")
 def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str, int]:
     """Gets aggregate token stats for selected files."""
-    root = get_valid_project_root(req.project_path, dm) if req.project_path else None
+    if not req.project_path:
+        raise HTTPException(status_code=403, detail="A registered project path is required")
+    root = get_valid_project_root(req.project_path, dm)
+    if not root:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if any(not is_path_safe(path, root) for path in req.paths):
+        raise HTTPException(status_code=403, detail="All stats paths must stay inside the project")
 
     manual_excludes = []
     use_git = True
-    if root:
-        proj_data = dm.get_project_data(root)
-        ex_str = proj_data.get("excludes", "")
-        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+    proj_data = dm.get_project_data(root)
+    ex_str = proj_data.get("excludes", "")
+    manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
 
     all_files = FileUtils.flatten_paths(req.paths, root, manual_excludes, use_git)
 
@@ -185,8 +181,17 @@ def api_categorize(
             f"AUDIT - Batch categorizing {len(req.paths)} items "
             f"to '{req.category_name}'"
         )
-        moved = FileOps.batch_categorize(req.project_path, req.paths, req.category_name)
-        return {"status": "ok", "moved_count": len(moved), "paths": moved}
+        failures: list[dict[str, str]] = []
+        moved = FileOps.batch_categorize(
+            req.project_path, req.paths, req.category_name, failures=failures
+        )
+        return {
+            "status": "ok",
+            "moved_count": len(moved),
+            "paths": moved,
+            "failed_paths": [failure["path"] for failure in failures],
+            "failures": failures,
+        }
     except HTTPException:
         raise
     except Exception as e:

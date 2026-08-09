@@ -1,985 +1,218 @@
-# FileCortex 技术指南 — 架构、参数对齐与测试策略
+# FileCortex Technical Guide
 
-> **版本**: 6.5.2 | **测试**: 776 passed | **日期**: 2026-08-08 | **Ruff**: 0 errors | **Google Style**: 全规范审计完成
+> Version: 6.5.2 | Updated: 2026-08-09 | Verification baseline: 788 passed, Ruff 0 errors
 
-本文档面向 FileCortex 开发者和维护者，详细阐述系统的核心架构、参数动态对齐机制、
-常见 BUG 模式与预防策略，以及测试架构设计。
+## 1. What the System Does
 
----
+FileCortex compiles a local workspace into reviewed, bounded AI context and provides safe file workflows around it. It does not call a hosted model itself. Its AI-facing outputs are Markdown/XML context, project blueprints, prompt templates, token estimates, and MCP tools.
 
-## 1. 系统架构
-
-### 1.1 分层模型
-
-```
-┌───────────────────────────────────────────────────────────────┐
-│  Entry Points (4)                                              │
-│  ┌─────────┐ ┌──────────────┐ ┌──────┐ ┌─────────────────┐    │
-│  │ Desktop │ │ Web (FastAPI) │ │ CLI  │ │ MCP Server      │    │
-│  │tkinter  │ │ REST + WS +  │ │fctx  │ │ FastMCP         │    │
-│  │ main()  │ │ CSP Header   │ │main()│ │ get_mcp().tool()│    │
-│  └────┬────┘ └──────┬───────┘ └──┬───┘ └───────┬─────────┘    │
-│       │              │            │              │              │
-├───────┴──────────────┴────────────┴──────────────┴────────────┤
-│  Route Layer (routers/)                                        │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐        │
-│  │project_routes│ │ fs_routes    │ │ action_routes    │        │
-│  │workspace CRUD│ │file CRUD     │ │staging/tools/gen│        │
-│  └──────┬───────┘ └──────┬───────┘ └────────┬─────────┘        │
-│         └────────────────┼─────────────────┘                  │
-│                   http_routes.py (合并层)                       │
-│                   ws_routes.py (WebSocket)                      │
-│                   schemas.py / services.py / common.py          │
-│                   common.py: ProcessManager (v6.5.0)           │
-├───────────────────────────────────────────────────────────────┤
-│  Core Kernel (file_cortex_core/)                               │
-│  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌────────────────┐      │
-│  │ config  │ │ security │ │ search  │ │ context        │      │
-│  │DataMgr  │ │PathValid │ │Strategy │ │ OOM保护 v6.5.0 │      │
-│  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
-│  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌────────────────┐      │
-│  │ file_io │ │ actions  │ │ format  │ │ duplicate      │      │
-│  │walk_filt│ │FileOps   │ │FormatU  │ │ SHA256 worker  │      │
-│  │         │ │DI v6.3.2 │ │         │ │ daemon v6.5.0  │      │
-│  └─────────┘ └──────────┘ └─────────┘ └────────────────┘      │
-│  ┌──────────────────┐ ┌────────────────────────────┐           │
-│  │ process_utils    │ │ ProgressTracker v6.5.1+    │           │
-│  │terminate/cleanup │ │ TTL + capacity eviction    │           │
-│  └──────────────────┘ └────────────────────────────┘           │
-├───────────────────────────────────────────────────────────────┤
-│  Frontend (static/)                                            │
-│  ┌────────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────┐    │
-│  │ state.js   │ │ api.js   │ │ main.js      │ │ ui.js    │    │
-│  │config+store│ │_fetch/_  │ │App init+biz  │ │renderers │    │
-│  └─────┬──────┘ └────┬─────┘ └──────┬───────┘ └────┬─────┘    │
-│  ┌─────┴──────┐ ┌────┴─────┐ ┌──────┴───────┐                │
-│  │ events.js  │ │layout.js │ │virtual-list  │  (v6.5.1+)    │
-│  │data-action  │ │panel re- │ │.js            │                │
-│  │delegation   │ │size+kbd  │ │rAF overscan  │                │
-│  └────────────┘ └──────────┘ └──────────────┘                │
-└───────────────────────────────────────────────────────────────┘
+```text
+discover -> search -> stage -> inspect -> export context -> use with an AI tool
+                              |
+                       copy / archive / classify / run approved tool
 ```
 
-### 1.2 核心设计原则
+The source filesystem remains authoritative. Configuration, staging, tags, notes, sessions, categories, and tool templates are stored in `~/.filecortex/config.json`.
 
-| 原则 | 实现 | 位置 |
-|------|------|------|
-| **单源真理 (SSOT)** | `DataManager` Pydantic 模型驱动，所有配置经由此处 | `config.py` |
-| **路径归一化** | `PathValidator.norm_path()` 确保跨平台 key 唯一性 | `security.py` |
-| **防御深度** | HTTP + WebSocket 双通道 Token + CSP Header + meta 标签注入 | `web_app.py`, `ws_routes.py` |
-| **遍历共享** | `FileUtils.walk_filtered()` 统一所有目录遍历 | `file_io.py` |
-| **原子写入** | 配置保存使用 tempfile + os.replace + Windows 锁重试 | `config.py` |
-| **事件委托** | `data-action` + `addEventListener` 全局委托，消除内联 handler | `events.js` (v6.5.1+) |
-| **主题隔离** | CSS `data-theme` 变量切换，`prefers-reduced-motion` 响应 | `style.css` (v6.5.1+) |
-| **视口渲染** | `requestAnimationFrame` + overscan 虚拟滚动，避免 DOM 堆积 | `virtual-list.js` (v6.5.1+) |
-| **原子写入** | 配置保存使用 tempfile + os.replace + Windows 锁重试 | `config.py` |
-| **策略解耦** | `PathMatcher` / `ContentMatcher` 匹配逻辑与遍历分离 | `search.py` |
-| **进程终止统一** | `process_utils.py` 统一跨平台进程终止 (Windows/POSIX) | `process_utils.py` |
-| **OOM 保护** | 上下文导出限流 500文件/50MB，防止大项目内存溢出 | `context.py` (v6.5.0) |
-| **进程容器** | `ProcessManager` 线程安全、50 容量限制 | `common.py` (v6.5.0) |
+## 2. Runtime Architecture
 
----
-
-## 2. 参数动态对齐机制
-
-### 2.1 问题背景
-
-v6.3.1 审计发现大量前后端参数不一致的 BUG — 前端发送 `token_threshold: 100000` 但后端默认为 `128000`，导致静默丢弃。根本原因：参数定义分散在多个文件中，缺乏统一的校验管道。
-
-v6.5.0 进一步移除了所有硬编码默认值，测试文件中的 `== 128000` 改用 `GlobalSettings().token_threshold` 动态获取。
-
-### 2.2 对齐清单
-
-以下关键参数必须在前后端保持一致。每次代码变更后，运行 `pytest` 会自动验证这些参数。
-
-| # | 参数 | 前端位置 | 后端模型 | API 传输 |
-|---|------|----------|----------|----------|
-| 1 | `token_threshold` | `state.js` (128000) | `GlobalSettings.token_threshold` | `POST /api/global/settings` |
-| 2 | `token_ratio` | `state.js` (4) | `GlobalSettings.token_ratio` | `POST /api/global/settings` |
-| 3 | `preview_limit_mb` | `main.js` (1.0) | `GlobalSettings.preview_limit_mb` | `POST /api/global/settings` |
-| 4 | `allowed_extensions` | `main.js` ("") | `GlobalSettings.allowed_extensions` | `POST /api/global/settings` |
-| 5 | `api_token` | `<meta name="fctx-api-token">` | `os.getenv("FCTX_API_TOKEN")` | HTTP `X-API-Token` + WS `token` |
-| 6 | `__version__` | `index.html` `{{ version }}` | `__init__.py` | Jinja2 注入 |
-| 7 | `max_search_size_mb` | `state.js` (10) | `ProjectConfig.max_search_size_mb` | `POST /api/project/settings` |
-| 8 | `wsSearch` | `state.js:config.endpoints.wsSearch` | `ws_routes.py` `/ws/search` | WebSocket URL |
-| 9 | `wsExecute` | `state.js:config.endpoints.wsExecute` | `ws_routes.py` `/ws/actions/execute` | WebSocket URL |
-| 10 | `progress` | `state.js:config.endpoints.progress` | `fs_routes.py` `/api/fs/progress` | `POST /api/fs/progress` |
-| 11 | `progressNew` | `state.js:config.endpoints.progressNew` | `fs_routes.py` `/api/fs/progress/new` | `POST /api/fs/progress/new` |
-| 12 | `copy` (batch) | `api.js:copyFile(srcs=[])` | `schemas.py:FileCopyRequest(srcs: list)` | `POST /api/fs/copy` |
-| 13 | `extract` (batch) | `api.js:extractArchive(taskId=)` | `schemas.py:FileExtractRequest(task_id)` | `POST /api/fs/extract` |
-
-### 2.3 添加新参数的规范流程
-
-添加新参数时，必须按以下顺序更新 **6 处**：
-
-```
-1. file_cortex_core/config.py        ← Pydantic 模型字段定义
-2. routers/schemas.py                ← Request Schema (前端→API)
-3. static/js/state.js                ← 前端 defaults / config.endpoints
-4. templates/index.html              ← 模板变量注入（如需要）
-5. routers/ (对应 route 文件)         ← API 处理逻辑
-6. tests/                            ← 新增参数传递链路测试
+```text
+Tkinter GUI     Web UI + REST/WS     CLI     MCP
+       \             |                |       /
+        \------------+----------------+------/
+                     |
+              file_cortex_core
+ config | security | file_io | search | context | actions
+                     |
+         local workspace + config.json + child processes
 ```
 
-### 2.4 校验测试
+### Entry Points
 
-| 测试函数 | 文件 | 验证内容 |
-|----------|------|----------|
-| `test_global_settings_roundtrip` | `test_bugfix_v632.py` | token_threshold + preview_limit_mb 双向传递 |
-| `test_global_settings_handles_allowed_extensions` | `test_comprehensive_v63.py` | allowed_extensions 字段 |
-| `test_api_token_header_forward` | `test_comprehensive_v63.py` | API Token HTTP 认证 |
-| `test_api_index_page_injects_version` | `test_comprehensive_v63.py` | 版本号模板注入 |
-| `test_ws_search_endpoint` | `test_web_api.py` | WebSocket wsSearch 端点 |
-| `test_ws_execute_endpoint` | `test_web_api.py` | WebSocket wsExecute 端点 |
+| Entry | Role |
+|---|---|
+| `file_search.py` | desktop user interface |
+| `web_app.py` | FastAPI app, CSP, CORS, HTTP auth, templates/static assets |
+| `fctx.py` | scriptable workspace operations |
+| `mcp_server.py` | tools for external AI agents |
 
-| `test_api_progress_new_and_get` | `test_web_api.py` | ProgressTracker 任务创建/轮询 |
-| `test_api_copy_task_id_updates_progress` | `test_web_api.py` | copy endpoint task_id → ProgressTracker 填充 |
-| `test_api_extract_task_id_updates_progress` | `test_web_api.py` | extract endpoint task_id → ProgressTracker 填充 |
-| `test_frontend_uses_real_progress_polling` | `test_frontend_contract.py` | main.js 真实使用 newProgressTask/getProgress |
-| `test_frontend_bulk_extract_progress_regression_contract` | `test_frontend_contract.py` | entries() + non-ZIP 警告 + 双提交守卫 + N selected |
+### Core Execution Paths
 
----
+**Workspace open**
 
-## 3. 文件操作与进度架构 (v6.5.1 — File System Completion)
-
-### 3.1 批量复制 (Batch Copy)
-
-`FileOps.copy_item(srcs: list[str], dst_dir_str, project_root, task_id=None) -> list[str]`
-
-- 遍历 `srcs`，逐项安全校验 (`PathValidator.is_safe`)、no-overwrite 检查
-- 文件用 `shutil.copy2`（保留元数据），目录用 `shutil.copytree`（递归子树）
-- 自包含/后代目录防御 (`dst_dir == src_path or src_path in dst_dir.parents`)
-- `task_id` 非 None 时通过 `ProgressTracker` 报告进度
-
-**请求模型**：`FileCopyRequest(srcs: list[str], dst_dir, project_root, task_id=None)`
-**API 端点**：`POST /api/fs/copy` → `{"status": "ok", "new_paths": [...], "skipped": 0}`
-**CLI**：`fctx copy <project> <src1> <src2> ...` (nargs='+')
-
-### 3.2 事务化提取 (Transactional Extract)
-
-`FileOps.extract_archive(zip_path_str, dst_dir_str, project_root, task_id=None) -> list[str]`
-
-三段式操作确保原子性与安全性：
-
-```
-Pass 1: 验证所有成员 (zip-slip/绝对路径/UNC/驱动器号/..)
-        对所有文件目标执行 no-overwrite + 重复目标预检
-        构建计划: (ZipInfo, final_target, temp_target)
-
-Pass 2: 写入暂存目录 (tempfile.mkdtemp(prefix=".fctx_extract_", dir=dst_dir.parent))
-        仅文件成员 → temp_target；目录成员 → mkdir
-
-Pass 3: 原子移动 (shutil.move 从 staged → final)
-        temp_dir 与 dst_dir 在同一文件系统 → os.rename 原子
-
-finally: shutil.rmtree(temp_dir, ignore_errors=True)
+```text
+input root -> validate_project -> add recent -> create ProjectConfig -> save
 ```
 
-**安全性**：`_validate_extract_member` 拒绝：绝对路径、UNC、驱动器号 (C:)、`..` 遍历、反斜杠绕过。
-**no-overwrite**：Pass 1 中对每个文件目标执行 `target.exists()` 预检，有冲突立即中止（零写入）。
-**存档来源**：存档文件可位于项目根目录之外（导入外部 bundle），安全边界仅针对目标目录。
+**Search**
 
-### 3.3 ProgressTracker 与前端轮询
-
-`ProgressTracker` 是一个模块级线程安全进度注册表（`dict[str, dict]` + `threading.Lock`）：
-
-- `new_task(total)` → 生成 UUID，创建 `{"status": "pending", "done": 0, "total": N}` 条目
-- `update(task_id, done, status, message)` → 更新进度（幂等）
-- `get(task_id)` → 返回快照或 None（404）
-
-**完整链路**：
-```
-前端 main.js
-  → api.newProgressTask(total)           /api/fs/progress/new
-  → api.copyFile(srcs, ..., taskId)      /api/fs/copy {..., task_id}
-  → api.extractArchive(zip, ..., taskId)  /api/fs/extract {..., task_id}
-  → _pollProgress(taskId, total)         /api/fs/progress {task_id} (400ms 轮询)
-  → 更新 #operationProgressBar (done/total + message)
+```text
+SearchQuery -> PathMatcher / ContentMatcher -> walk_filtered
+  -> gitignore/manual excludes -> bounded content futures -> result metadata
 ```
 
-**测试覆盖**：
-- `test_api_copy_task_id_updates_progress`：copy endpoint → ProgressTracker.done==1, status="done"
-- `test_api_extract_task_id_updates_progress`：extract endpoint → ProgressTracker.done==2
-- `test_frontend_uses_real_progress_polling`：main.js 引用 `api.newProgressTask`/`getProgress`/`_pollProgress`
+**Context export**
 
-| 维度 | 检查标准 | 发现 | 修复 |
-|------|----------|------|------|
-| **命名规范** | 类名 CapWords/函数 snake_case/常量 UPPER_CASE/遮蔽内置 | 1 处 | `format`→`fmt` in `mcp_server.py` |
-| **Import 规范** | 3层分组/字母序/绝对引用/无通配符 | 5 文件 | 分组+顺序修正 |
-| **类型注解** | 公共函数完整参数+返回值注解 | 8 处 | `-> None`, `Generator[...]`, `Callable[...]` |
-| **异常处理** | 日志含栈轨迹/无 bare except/raise 正确 | 23 处 | `logger.exception()` |
-| **__main__ 规范** | 只调用 `main()`，不内联代码 | 2 处 | `file_search.py` + `build_exe.py` |
-| **线程安全** | daemon 属性构造器传参 | 2 类 | `SearchWorker` + `DuplicateWorker` |
-| **代码格式** | 行长 100/尾随空格/空白 | 26 处 | JS 文件尾随空格清理 |
-
-**核心修改**:
-
-```python
-# ❌ 旧: 异常日志丢失栈轨迹
-logger.error(f"Failed to save configuration: {e}")
-
-# ✅ 新: logger.exception 自动捕获栈轨迹
-logger.exception("Failed to save configuration")
-
-# ❌ 旧: __main__ 内联代码
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = FileCortexApp(root)
-    root.mainloop()
-
-# ✅ 新: main() 函数封装
-def main() -> None:
-    root = tk.Tk()
-    app = FileCortexApp(root)
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
+```text
+staged paths -> containment check -> flatten directories -> binary filter
+  -> read bounded text -> optional NoiseReducer -> Markdown or XML -> token estimate
 ```
 
-### 3.2 上下文导出 OOM 保护 (v6.5.0)
+**File operation**
 
-大规模项目（万级文件）导出上下文时可能耗尽内存。v6.5.0 在 `ContextFormatter` 中增加了两层保护：
-
-```python
-# file_cortex_core/context.py
-MAX_EXPORT_FILES: Final = 500          # 单次导出的硬上限
-MAX_TOTAL_CONTENT_BYTES: Final = 50 * 1024 * 1024  # 50 MB
-
-# 第一层: 文件数量截断
-if len(all_files) > max_files:
-    all_files = all_files[:max_files]
-
-# 第二层: 内容大小截断
-for ...:
-    total_bytes += len(content.encode("utf-8", errors="replace"))
-    if total_bytes >= MAX_TOTAL_CONTENT_BYTES:
-        # 截断标记插入
-        break
+```text
+request -> registered root -> real-path containment -> core FileOps
+  -> progress/result -> UI/CLI/MCP response
 ```
 
-可用参数 `max_files` 同时暴露给 `to_xml()` 和 `to_markdown()` 方法，调用方可根据场景调整。
+## 3. Security Model
 
-### 3.3 ProcessManager 封装 (v6.5.0)
+### 3.1 Workspace Containment
 
-`routers/common.py` 中的 `ProcessManager` 类对之前杂乱的 `ACTIVE_PROCESSES` 全局字典进行了封装：
+`PathValidator.validate_project()` rejects missing, file, system, sensitive, and Windows UNC roots. `PathValidator.is_safe(target, root)` resolves paths before containment comparison, so an in-project symlink cannot authorize its external target.
 
-```python
-class ProcessManager:
-    """Thread-safe container for tracking active subprocesses."""
+Every path is checked twice where it matters:
 
-    def __init__(self, max_processes: int = 50):
-        self._processes: dict[int, subprocess.Popen] = {}
-        self._lock = threading.Lock()
-        self._max = max_processes
+1. The adapter checks the request path against a registered project root.
+2. Core operations validate generated or resolved targets such as rename results, archive output, category destinations, copy destinations, and ZIP members.
 
-    def register(self, pid: int, proc: subprocess.Popen) -> bool:
-        with self._lock:
-            if len(self._processes) >= self._max:
-                return False
-            self._processes[pid] = proc
-            return True
+Never replace this with `startswith()`, normalized-string comparison, or a frontend-only check.
 
-    def unregister(self, pid: int) -> None: ...
-    def get(self, pid: int) -> subprocess.Popen | None: ...
-    def clear(self) -> None: ...
-    @property
-    def pids(self) -> list[int]: ...   # 返回快照副本
-    @property
-    def active_count(self) -> int: ...
+### 3.2 Web Trust Boundary
 
-# 旧 API 别名保持向后兼容
-ACTIVE_PROCESSES: Final = process_manager._processes  # 只读引用
-PROCESS_LOCK: Final = process_manager._lock            # 只读引用
+- The default listener is `127.0.0.1:8000`.
+- Default CORS allows the standard loopback origins. Same-origin requests are permitted for a custom Web port.
+- Binding outside loopback requires `FCTX_API_TOKEN`.
+- When configured, HTTP uses `X-API-Token`; WebSocket uses the `token` query parameter; both use constant-time comparison.
+- `FCTX_PROD=1` hides unexpected exception details only.
+
+This is a local application security model, not a multi-user authorization system. A network deployment requires a token, explicit origins, TLS/reverse-proxy policy, and an operational threat-model review.
+
+### 3.3 File and Archive Safety
+
+- Single item names reject separators and `.`/`..`.
+- Batch rename validates each regex-generated name and resolved destination.
+- Archive output cannot overwrite an existing file or overlap its selected source.
+- ZIP extraction rejects absolute, UNC, drive, and traversal names; duplicate or existing targets; excessive member count, member size, total uncompressed bytes, and compression ratio.
+- Copy rolls back completed targets on a later failure. Extraction stages files and compensates committed files/directories on commit failure.
+
+## 4. Configuration Consistency
+
+`AppConfig`, `ProjectConfig`, and `GlobalSettings` are Pydantic models. Ranges are enforced for preview size, token budget, token ratio, and project search size.
+
+### 4.1 Persistent Update Flow
+
+```text
+route/schema validation
+  -> DataManager update method
+  -> base/local/disk three-way merge under owner-aware lock
+  -> AppConfig validation
+  -> temporary JSON write
+  -> os.replace
 ```
 
-### 3.4 CLI 搜索与导出 (v6.5.0)
+The merge preserves independent edits from GUI, Web, CLI, and MCP processes. For a conflicting scalar update, the local writer wins. Staging/recent/pinned lists are unioned. This is adequate for local cooperating processes, not for collaborative multi-host editing.
 
-`fctx.py` 新增两个子命令：
+### 4.2 Snapshot Rule
 
-```bash
-# 搜索文件
-python fctx.py search <project_path> <query> \
-    --mode smart|exact|regex|content \
-    --exclude "*.log" \
-    --case-sensitive \
-    --inverse \
-    --max-results 100
+`get_project_data()` returns a `model_dump()` snapshot. Mutating it does not persist. Use `get_project_data_obj()` only for a live model or, preferably, an explicit `update_*` operation followed by save.
 
-# 导出上下文
-python fctx.py export <project_path> \
-    --format markdown|xml \
-    --output context.md \
-    --max-files 200
+## 5. Parameter Alignment
+
+The model is the backend source of truth; frontend defaults are only initial display values. A parameter change is complete only after its model, schema, route, frontend, tests, and documentation agree.
+
+| Parameter | Backend authority | Web path | Default / constraint |
+|---|---|---|---|
+| `token_threshold` | `GlobalSettings` | `/api/global/settings` | 128000, 1..10000000 |
+| `token_ratio` | `GlobalSettings` | `/api/global/settings` | 4.0, >0..100 |
+| `preview_limit_mb` | `GlobalSettings` | `/api/global/settings` | 1.0, >0..100 |
+| `max_search_size_mb` | `ProjectConfig` | `/api/project/settings` and WS search | 10, 1..1024 |
+| `enable_noise_reducer` | `GlobalSettings` | default for `/api/generate` | false |
+| `apply_noise_reducer` | `GenerateRequest` | `/api/generate` | null means use global setting |
+| `FCTX_API_TOKEN` | environment | HTTP header / WS query | unset only for loopback mode |
+| `FCTX_ALLOWED_ORIGINS` | environment | CORS middleware | loopback origins by default |
+| `__version__` | `file_cortex_core.__version__` | Jinja template | 6.5.2 |
+
+The key validation chain is:
+
+```text
+form/state.js -> api.js -> routers/schemas.py -> route -> config/core -> tests
 ```
 
-### 3.5 线程安全改进 (v6.5.0)
+Avoid these historical failure modes:
 
-`SearchWorker` 和 `DuplicateWorker` 继承自 `threading.Thread`，以前使用已弃用的 `self.daemon = True` 属性赋值。v6.5.0 改为构造器参数传递：
+- JavaScript `value || default` treating `0` as absent.
+- Pydantic fields without range constraints.
+- `setattr()` bypassing model validation.
+- UI success messages after a backend whitelist silently drops fields.
+- one UI save split into multiple independent persistence requests.
 
-```python
-# ❌ 旧 (属性赋值)
-super().__init__()
-self.daemon = True
+## 6. Search and Streaming
 
-# ✅ 新 (构造器参数, Python 3.9+ 推荐)
-super().__init__(daemon=True)
+`PathMatcher` applies explicit positive/negative tags consistently in smart, exact, regex, and content flows. Smart mode derives path keywords from the query; other modes preserve their query semantics and apply only explicit tags.
+
+Content search shares a thread pool but limits in-flight futures. Once the threshold is reached, the iterator waits for a completion before submitting another read. Cancellation avoids waiting for the remaining futures.
+
+WebSocket search and tool execution use bounded async queues. Producer threads block while a slow client consumes data, instead of allocating an unbounded result list. Disconnect and error paths set stop signals and terminate registered tool processes.
+
+## 7. Context Formats and Limits
+
+Markdown uses a prompt prefix followed by fenced file blocks. XML is a valid single-root document:
+
+```xml
+<filecortex>
+  <instruction><![CDATA[optional prompt]]></instruction>
+  <blueprint><![CDATA[optional ASCII tree]]></blueprint>
+  <context>
+    <file path="relative/path.py" size="1.2KB"><![CDATA[source]]></file>
+  </context>
+</filecortex>
 ```
 
----
+CDATA terminators are split safely; XML path attributes are escaped. File count is capped at 500, total content at 50 MiB, and each read is capped at 1 MiB or remaining export budget. Output includes file-level and export-level truncation indicators rather than silently claiming completeness.
 
-## 4. 常见 BUG 模式与预防
+Token estimates are heuristic, not model-tokenizer exact. Future context-compiler work should add model-specific tokenization and an export manifest.
 
-### 4.1 参数不一致
+## 8. UI State Rules
 
-**模式**: 前/后端默认值不同，设置被静默丢弃。
+- Preview requests carry a generation id. A late response cannot overwrite a newer file selection.
+- Large/binary previews are view-only; saving must use a full, verified read path in a future editor enhancement.
+- Search WebSockets have a generation id; stale messages cannot alter a newer search result set.
+- Staging is the data model; GUI filtering is only a view. Never write a filtered view back as the full staging list.
+- Progress polling allows one in-flight request per task and checks task ownership before updating shared UI.
 
-**根因**: 参数定义分散，缺少单一校验源。
+## 9. Testing Strategy
 
-**预防**:
-- 所有参数必须在 `GlobalSettings` / `ProjectConfig` Pydantic 模型中有单一默认值
-- 测试文件中的默认值校验应使用 `GlobalSettings()` 动态获取而非硬编码数字；文档中的默认值仅描述当前模型默认，不作为第二来源
-- 新增参数必须同步更新「参数对齐清单」并添加测试
+The suite has 788 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
 
-### 4.2 NoneType 崩溃
+Important regression families:
 
-**模式**: `self.current_proj_config["groups"]` 当 `current_proj_config` 为 None 时崩溃。
+| Area | Representative coverage |
+|---|---|
+| containment | external context paths, symlink paths, rename traversal, archive targets |
+| persistence | snapshot isolation, independent instance merge, schema ranges |
+| file operations | copy rollback, ZIP slip, ZIP resource limits, conflict behavior |
+| context | CDATA, XML parsing, truncation, noise reducer |
+| search | four modes, tags, cancellation, shared-pool recovery |
+| frontend | preview/search race guards, staging sync, progress contract |
+| packaging | entry modules, runtime assets, versions, docs test-count consistency |
 
-**根因**: 方法在项目未加载时被调用（如 UI 初始化渲染）。
+Run on Windows with a writable temporary directory when needed:
 
-**预防**:
-- 依赖项目数据的方法首行添加 `if not self.current_proj_config: return`
-- 在 `__init__` 中将可变属性显式初始化为安全默认值
-
-### 4.3 分支逻辑错误
-
-**模式**: `if/else` 链中最后一个 `else` 覆盖了前面的 `if` 分支。
-
-**根因**: 使用 `if/if/else` 而非 `if/elif/else`。
-
-**预防**:
-- 使用 `if/elif/else` 互斥链
-- 在最后用 `if not args.command:` 独立检查无命令状态
-
-### 4.4 弃用 API 使用
-
-**模式**: 新代码使用 `dm.data["projects"]`（dict API）而非 `dm.config.projects`（Pydantic model）。
-
-**预防**:
-- `dm.data[...]` 只应出现在 `DataManager` 自身实现中
-- 外部代码一律使用 `dm.config.xxx` 模型属性
-
-### 4.5 异常日志丢失栈轨迹
-
-**模式**: `logger.error(f"Failed: {e}")` 只记录了异常信息，丢失栈轨迹。
-
-**预防**:
-- 在 except 块中统一使用 `logger.exception("...")`（自动包含异常名称、消息、栈轨迹）
-- 如需 `logger.warning`，添加 `exc_info=True` 参数
-
-### 4.6 WebSocket 消息解析
-
-**模式**: `JSON.parse(event.data)` 无异常保护，恶意/损坏数据导致静默断开。
-
-**预防**:
-- 所有 `onmessage` 中 `JSON.parse()` 必须包装在 try/catch 中
-- 解析失败应记录日志并跳过该消息（而非断开连接）
-
-### 4.7 安全闸门分散 (v6.5.2)
-
-**模式**: 桌面端各文件操作 (save/stage/favorite/tool/open/rename) 各自决定是否校验路径，导致 save/execute/open 等入口绕过沙盒。
-
-**根因**: 缺少统一的入口校验辅助，每个 handler 自行判断，易遗漏。
-
-**预防**:
-- 所有文件操作的入口统一调用单一闸门辅助（桌面端 `_is_within_project(p)`）
-- 项目加载入口必须经 `PathValidator.validate_project()`，与 CLI/MCP/Web 一致
-- 新增文件操作 handler 时，第一行即校验，再执行业务逻辑
-
-### 4.8 异步轮询泄漏 (v6.5.2)
-
-**模式**: `setInterval` 轮询进度，当 owning 操作失败时 `Promise.all` 立即 reject，但 interval 永不清除（服务端可能永不返回终态）。
-
-**预防**:
-- 轮询函数返回 `{ promise, cancel }` 而非裸 Promise
-- 调用方在 `catch`/`finally` 中 `cancel()`
-- 增加最大迭代次数安全上限（maxAttempts），保证即使调用方遗忘 cancel 也能终止
-
-### 4.9 弱子串遍历校验 (v6.5.2)
-
-**模式**: `if ".." in rel_dir` 子串匹配会误拒合法目录名（如 `v2..0`、`my..dir`），又不能精确拦截 `a/../b`。
-
-**预防**:
-- 遍历检测必须基于路径**段**：`any(seg == ".." for seg in path.replace("\\","/").split("/"))`
-- 不要用子串匹配做安全校验
-
-### 4.10 Tk 跨线程访问 (v6.5.2)
-
-**模式**: 后台线程调用 `tk.StringVar.get()` 或迭代主线程正在增删的 `list`，导致 Tcl 状态损坏或 `RuntimeError: list changed size during iteration`。
-
-**预防**:
-- Tk **非线程安全**：后台线程禁止读取 `tk.Variable`
-- 在主线程快照所有 Tk 变量值与 `list(x)` 副本，传入工作线程
-- 结果通过 `root.after(0, callback)` 回传主线程
-
----
-
-## 5. 测试架构
-
-### 5.1 测试分层
-
-```
-tests/                              776 项测试 (v6.5.1 + 当前稳定化/copy-extract/批量copy+事务extract+progress 回归)
-├── test_v8_comprehensive.py        90 tests  ← v6.5.0 新增 (DI/OOM/CLI/ProcessManager)
-├── test_security_fixes_v650.py     38 tests  ← v6.5.0 安全修复回归
-├── test_coverage_fill.py           20 tests  ← v6.5.0 新增 (process_utils/ProcessManager)
-├── test_frontend_contract.py       32 tests  ← v6.5.0 前端契约 (含 v6.5.1 SRI/copy-extract 扩展)
-├── test_packaging.py               15 tests  ← v6.5.1 新增 (BUG-D1/D2/Doc5 回归)
-├── test_security_v9.py             17 tests  ← v6.5.1 新增 (P0/P1 安全回归)
-├── test_bugfix_v7.py               90 tests  ← v6.4.0 BUG修复/前端/WebSocket 回归
-├── test_bugfix_v633.py             22 tests  ← v6.3.3 BUG修复 + 边界覆盖
-├── test_bugfix_v632.py             54 tests  ← v6.3.2 BUG修复 + 边界覆盖
-├── test_comprehensive_v63.py       73 tests  ← v6.3.1 CLI/MCP/Web/安全/前端契约
-├── test_comprehensive.py           46 tests  ← 核心功能 + 高级边界
-├── test_web_api.py                 55 tests  ← v6.5.0 Web API 合并 + archive/WS 回归
-├── test_search_engine.py           22 tests  ← 搜索引擎矩阵 + search pool 恢复回归
-├── test_cli_persistence_v10.py     11 tests  ← CLI stage/categorize 持久化回归
-├── test_security_resilience.py     23 tests  ← 路径验证器全矩阵 (15 场景)
-├── test_fileops_advanced.py         9 tests  ← 文件操作完整覆盖
-├── test_dm_config.py                7 tests  ← DataManager 持久化/并发/弃用API迁移
-├── test_core_integration.py        11 tests  ← 集成测试
-├── test_context_formatter.py        6 tests  ← XML/MD 导出
-├── test_mcp_server.py               3 tests  ← MCP 协议
-├── test_utils_format.py             8 tests  ← 格式化/Token估算
-├── test_scenarios.py                2 tests  ← 端到端场景
-├── test_ai_enhanced.py              7 tests  ← AI 上下文/Blueprint
-├── test_additional_coverage.py     27 tests  ← 边缘覆盖
-│
-└── conftest.py                              ← 共享 fixture + DataManager.reset()
+```powershell
+$env:TEMP = "E:\VScode\file_search\.pytest_tmp"
+$env:TMP = $env:TEMP
+pytest -q
+ruff check .
+python -m build --no-isolation
 ```
 
-> **当前稳定化变更**: 在既有 v6.5.1 测试基础上，新增 CLI 持久化、archive traversal、WebSocket fallback、search pool 恢复、run legacy config 与 copy/extract 回归覆盖；并新增批量 copy、事务 extract + progress 追踪覆盖；后续安全/健壮性加固与回归测试将总数提升至 776。
-
-### 5.2 测试隔离
-
-所有测试共享统一的隔离策略：
-
-```python
-@pytest.fixture(autouse=True)
-def _reset_singleton():
-    """每个测试前后调用 DataManager.reset() 确保单例隔离"""
-    DataManager.reset()
-    FileUtils.clear_cache()
-    yield
-    # ... 清理活跃进程 + DataManager.reset()
-```
-
-### 5.3 关键 Fixture
-
-| Fixture | 用途 |
-|---------|------|
-| `mock_project` | 创建含 10+ 种文件类型的临时项目 |
-| `noisy_project` | GBK 编码 + minified JS + 正常文件 |
-| `stress_project` | 100+ 文件的多目录项目 |
-| `clean_config` | 隔离的 DataManager（patch config 路径） |
-| `api_client` | FastAPI TestClient（隔离 config） |
-| `project_client` | 已注册项目的 api_client |
-| `mock_popen` | 模拟 subprocess.Popen 用于 ActionBridge 测试 |
-| `system_dir` | 平台相关的系统目录，用于安全沙盒阻断测试 |
-
----
-
-## 6. DataManager 依赖注入
-
-### 6.1 使用场景
-
-```python
-from file_cortex_core import DataManager
-
-# 1. 单例访问（向后兼容，生产环境）
-dm = DataManager()
-
-# 2. 创建独立实例（测试隔离）
-dm = DataManager.create()
-
-# 3. 上下文管理器（临时替换全局单例）
-with DataManager.activate(custom_dm):
-    service.do_work()  # 内部调用 DataManager() 获得 custom_dm
-
-# 4. 重置（测试 teardown）
-DataManager.reset()
-```
-
-### 6.2 最佳实践
-
-- **路由层**: 使用 `Depends(get_dm)` 作为 FastAPI 依赖
-- **核心模块**: 接受 `dm: DataManager | None = None` 参数，默认为 `DataManager()`
-- **测试**: `clean_config` fixture 自动提供隔离实例
-
----
-
-## 7. walk_filtered 遍历
-
-`FileUtils.walk_filtered()` 统一了项目中所有 `os.walk` 调用：
-
-```python
-for full_path, rel_path in FileUtils.walk_filtered(
-    root, excludes, git_spec,
-    include_dirs=False,
-    stop_event=cancel_event,
-):
-    # full_path: pathlib.Path 绝对路径
-    # rel_path: pathlib.Path 相对路径（相对于 root）
-```
-
-调用点: `search_generator()`, `get_project_items()`, `DuplicateWorker.run()`
-
----
-
-## 8. 版本历史
-
-| 版本 | 日期 | 关键变更 |
-|------|------|----------|
-| **6.5.2** | **2026-08-08** | **全仓深度 code review 后安全与健壮性收口: 桌面端统一安全沙盒闸门 `_is_within_project` (覆盖 save/stage/favorite/tool/open/rename)、Tk 线程安全快照、`validate_project` 接入; 前端资源泄漏清除 (_pollProgress cancel+maxAttempts、工具 WS 可取消、socket 身份守卫、Confirm 重置、XSS 残留转义); 内核边界 (分类段校验/进程泄漏/WS stop_event/MCP 告警/类型注解/弃用API); CI ruff 唯一门禁; +3 回归测试; 文档全量同步; 776 passed** |
-| **6.5.1+** | **2026-07-25** | **前端架构升级: CSP event-driven 事件委托/暗亮双主题/三栏可拖拽布局/虚拟滚动/SVG 文件图标/骨架屏/操作摘要栏; MCP 兼容修复; 桌面持久化修复; 弃用 API 清理; ProgressTracker TTL; BatchRename count; DOMPurify fail-closed; CSP Header; 依赖源统一; 文档全量同步; 776 passed** |
-| **6.5.1** | **2026-06-15** | **P0/P1 部署加固: 打包修复/MCP 依赖/路径遍历修补/token 泄露修复/mermaid SRI; 13 项安全加固; 当前稳定化/copy-extract/批量copy+事务extract+progress 回归后 764 tests** |
-| **6.5.0** | **2026-06-07** | **安全加固(11项BUG修复), 前端优化(9项), 测试整合(21→629), 符号链接防护, DOMPurify XSS, 三栏布局修复, 动态参数对齐, 629 passed** |
-| **6.5.0-rc1** | **2026-05-29** | **Google Style 全审计, 23 处日志规范化, 118 新测试, CLI search/export, OOM 保护, ProcessManager, 前端 8 项修复, 629 tests** |
-| **6.4.0** | **2026-05-24** | **process_utils提取, 14类型标注, 3处XSS修复, api.js集中化, 前端可折叠面板, SRI哈希, tag管理, file创建, actionModal, 479 tests** |
-| 6.3.3 | 2026-05-16 | 8 BUG修复, Google Style整肃, 24新测试, 372 tests |
-| 6.3.2 | 2026-05-14 | 8 BUG修复, DataManager DI, 路由拆分, walk_filtered, 348 tests |
-| 6.3.1 | 2026-05-10 | 全量审计, 10 BUG修复, 前后端一致性, 294 tests |
-| 6.3.0 | 2026-04-22 | 内核解耦, WebSocket Auth, Blueprint XML |
-
----
-
-## 9. 完整工作原理
-
-### 9.1 请求生命周期 (Web API)
-
-```
-浏览器请求
-    ↓
-FastAPI Middleware (web_app.py:verify_api_token)
-    ├── Token 校验: X-API-Token header → os.getenv("FCTX_API_TOKEN")
-    ├── CORS 校验: Origin → _is_wildcard_origin(ALLOWED_ORIGINS)
-    └── 放行或 401/403
-    ↓
-路由层 (routers/)
-    ├── project_routes.py → 工作区注册/配置/收藏
-    ├── fs_routes.py → 文件 CRUD/预览/归档
-    └── action_routes.py → 暂存/导出/工具/设置
-    ↓
-服务层 (routers/services.py)
-    ├── get_dm() → DataManager 单例
-    ├── is_path_safe() → PathValidator 沙盒
-    └── get_valid_project_root() → 项目根解析
-    ↓
-内核层 (file_cortex_core/)
-    ├── DataManager: Pydantic V2 强类型配置, 原子 os.replace 持久化
-    ├── FileUtils: walk_filtered 统一遍历, read_text_smart 编码探测
-    ├── SearchWorker: 策略化匹配引擎 (daemon=True)
-    ├── ContextFormatter: LLM 上下文 XML/Markdown 导出 (OOM 保护)
-    ├── ActionBridge: 外部工具执行桥接 (DI 支持)
-    └── process_utils: 跨平台进程终止 (Windows/POSIX)
-```
-
-### 9.2 搜索引擎管线
-
-```
-用户输入 (query string)
-    ↓
-SearchQuery (Pydantic model) → 参数校验与归一化
-    ↓
-PathMatcher 初始化
-    ├── 解析 positive/negative tags
-    ├── 编译 regex patterns (以 / 包裹)
-    └── 分词 keywords → plain_pos + regex_pos
-    ↓
-walk_filtered() 生成器 → yield (full_path, rel_path)
-    ├── os.walk + dirs[:] 剪枝
-    ├── should_ignore() 过滤
-    │   ├── manual_excludes (fnmatch)
-    │   └── git_spec (pathspec.PathSpec)
-    └── stop_event 检查 (取消支持)
-    ↓
-匹配判断 (4模式):
-    smart: all plain keywords in path AND all regex match AND no neg keywords
-    exact: query substring in path (case-sensitive optional)
-    regex: compiled regex.search(path)
-    content: ThreadPoolExecutor 并发读取 + ContentMatcher.match_file
-    ↓
-结果队列 → UI 批次渲染 (100条/tick)
-```
-
-### 9.3 安全沙盒机制
-
-```
-PathValidator.is_safe(target, root)
-    ↓
-平台检测 (ntpath.splitdrive / UNC 前缀)
-    ├── Windows: ntpath.normpath → lower → 前缀比较
-    │   └── UNC 拦截: "\\\\" 或 "//" 开头 → False
-    └── POSIX: os.path.abspath → 前缀比较
-    ↓
-PathValidator.norm_path(p)
-    ├── os.path.abspath → / 替换
-    ├── Windows: lower() + 长路径前缀 "\\\\?\\" 移除
-    └── 尾部 / 移除 (除非驱动器根)
-    ↓
-PathValidator.validate_project(path)
-    ├── UNC 拦截
-    ├── 存在性 + 目录检查
-    ├── 敏感目录拦截 (.git, .env, __pycache__, node_modules...)
-    └── 系统目录拦截 (Windows SYSTEMROOT, POSIX /etc /usr...)
-```
-
-### 9.4 上下文生成管线
-
-```
-用户选择文件路径列表
-    ↓
-ContextFormatter.to_xml(paths, root_dir, ...)
-    ↓
-flatten_paths() → 展开目录 → 过滤 → 去重
-    ↓
-blueprint (可选) → FileUtils.generate_ascii_tree(max_depth=5)
-    ↓
-OOM 保护:
-    ├── 文件数量 > MAX_EXPORT_FILES (500) → 截断
-    └── 累计内容 > MAX_TOTAL_CONTENT_BYTES (50MB) → 截断
-    ↓
-逐文件处理:
-    ├── is_binary() → 跳过
-    ├── read_text_smart() → charset_normalizer 编码探测 + lru_cache
-    ├── NoiseReducer.clean() → 超长行/Base64块 去噪 (可选)
-    ├── CDATA 转义: "]]>" → "]]]]><![CDATA[>"
-    └── 格式化: <file path="..." size="...KB">...</file>
-    ↓
-XML 输出: <instruction> + <blueprint> + <context> + 文件列表 + </context>
-```
-
-### 9.5 进程终止管线
-
-```
-工具执行超时 / WebSocket 断开 / 测试清理
-    ↓
-process_utils.terminate_process(proc.pid)
-    ↓
-平台检测:
-    ├── Windows: subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)])
-    │   └── /T → 终止整个进程树
-    └── POSIX: os.killpg(pid, SIGTERM)
-        ├── ProcessLookupError 兜底 → direct os.kill(pid, SIGTERM)
-    ↓
-返回 None (fire-and-forget, 记录 warning 日志)
-    ↓
-
-调用点:
-- `action_routes.py` → `terminate_process(process)`
-- `ws_routes.py` → `terminate_process(proc)`
-- `common.py` → `cleanup_processes(staging_processes)` on shutdown
-
-### 9.6 参数动态对齐机制
-
-前后端关键参数通过统一校验管道保持一致：
-
-```
-参数定义 (单一来源):
-  Pydantic Model (GlobalSettings / ProjectConfig)
-      ↓
-  model_dump() → 前端 defaults (state.js)
-      ↓
-  /api/global/settings → 动态获取后端默认值
-      ↓
-  HTTP Request → Pydantic Model → model_validate()
-      ↓
-  model_dump_json() → os.replace() 原子持久化
-```
-
-### 9.7 数据持久化原子性
-
-```
-DataManager.save()
-    ↓
-config.model_dump_json(indent=4)
-    ↓
-tempfile.NamedTemporaryFile (同目录)
-    ↓
-f.write(data_json)
-    ↓
-os.replace(temp, config) ← 原子替换 (Windows: MAX_SAVE_RETRIES 次重试 + sleep)
-    ↓
-异常清理: os.unlink(temp)
-```
-
-### 9.8 关键编码探测 (二级缓存)
-
-```
-read_text_smart(file_path, max_bytes)
-    ↓
-stat: (mtime, size) → 缓存 key
-    ↓
-charset_normalizer.from_bytes(header[:65536])
-    ↓
-decode(encoding, errors="ignore")
-    ↓
-fallback: decode("utf-8", errors="ignore") → 返回空字符串兜底
-```
-
----
-
-## 10. 前端架构 (v6.5.1+)
-
-### 10.1 模块分层
-
-```
-static/js/
-├── state.js            # 配置中心 + 全局状态 + 工具函数
-├── api.js              # API 封装 (_fetch/_post/_postJson 集中化)
-├── main.js             # 流程控制(business logic) + App 初始化
-├── ui.js               # UI 渲染(renderTree/renderStaging/renderFavorites/...)
-├── events.js           # data-action 事件委托(所有交互入口)
-├── layout.js           # 三栏拖拽调整 + 键盘辅助 + localStorage 持久化
-└── virtual-list.js     # 虚拟滚动列表(requestAnimationFrame + overscan)
-```
-
-### 10.2 事件委托架构
-
-所有用户交互通过 `[data-action]` 属性统一路由，无内联 `onclick="/onchange="`:
-
-```
-DOM ready
-    ↓
-App.init() → bindStaticEvents(App)
-    ↓
-document.addEventListener('click', ...)  ← 全局委托
-    ├── target.closest('[data-action]')   ← 查找最近的 action 元素
-    ├── 解析 data-action / data-section / data-context-action / data-separator
-    └── 路由到 App[action](...)           ← 动态分派
-    ↓
-document.addEventListener('change', ...)  ← 仅 data-action 元素
-document.addEventListener('keydown', ...)  ← Enter/Space 激活 role=button/menuitem
-```
-
-**CSP 兼容**: 无内联事件处理器，Token 通过 `<meta name="fctx-api-token">` 注入，Mermaid 延迟初始化。
-
-### 10.3 API 请求集中化
-
-```
-前端 API 调用 (12处 fetch → 2个辅助方法)
-    ↓
-api._post(url, data)
-    ├── JSON.stringify() 序列化 → Content-Type: application/json
-    └── _fetch() → fetch() → resp.json()
-    ↓
-api._postJson(url, json)
-    ├── 调用 _post() → 返回解析后的 JSON body
-```
-
-所有端点 URL 来自 `state.js:config.endpoints` 单一来源。API Token 由 `getInjectedApiToken()` 从 meta 标签读取。
-
-### 10.4 主题系统
-
-```
-theme = localStorage.theme || state.globalSettings.theme
-    ↓
-App.applyTheme(theme)
-    ├── document.documentElement.dataset.theme = 'light' | 'dark'
-    ├── localStorage.setItem('theme', activeTheme)
-    ├── Mermaid 同步 theme 设置
-    └── 服务端留存(api.saveGlobalSettings)
-    ↓
-CSS :root 变量随 html[data-theme="light"] 切换
-    ├── 深色: --bg-darkest=#020617, --text-main=#f1f5f9, --accent=#38bdf8
-    └── 亮色: --bg-darkest=#eef4fb, --text-main=#0f172a, --accent=#0284c7
-```
-
-减动效: `@media (prefers-reduced-motion: reduce)` 全局覆盖 `animation-duration: 0.01ms`。
-
-### 10.5 虚拟滚动
-
-```
-WebSocket 搜索结果流
-    ↓
-App.startSearch() → ui.clearVirtualSearchResults()
-    ↓
-每条结果: App.state.searchResults.push(data) + ui.renderVirtualSearchResults(all)
-    ↓
-createVirtualList(container, createSearchResultItem)
-    ├── 监听 scrollHost.scroll
-    ├── requestAnimationFrame 合并渲染
-    ├── overscan=6: 仅渲染 [scrollTop-6*76, scrollBottom+6*76] 行
-    └── translateY(offset) 定位视口
-    ↓
-createSearchResultItem(data) → DOM fragment(仅可视行)
-```
-
-### 10.6 可拖拽布局
-
-```
-pointerdown on .panel-resizer
-    ↓
-setPointerCapture + body.is-resizing 全局光标
-    ↓
-pointermove → clamp(percent, min, max)
-    ├── 左栏: (clientX - bounds.left) / bounds.width * 100
-    └── 右栏: (bounds.right - clientX) / bounds.width * 100
-    ↓
-CSS --panel-left-width / --panel-right-width 属性 + localStorage 持久化
-    ↓
-键盘调整: ArrowLeft/ArrowRight + Shift 加速, 步长 1%/3%
-```
-
-### 10.7 XSS 防御数据流
-
-```
-用户输入 (搜索框/标签名/文件名)
-    ↓
-后端返回 (JSON 或 HTML 片段)
-    ↓
-前端渲染:
-    ├── Markdown 内容 → DOMPurify.sanitize(marked.parse(...))
-    ├── DOMPurify 缺失 → fail-closed innerText (不降级到手写过滤)
-    ├── HTML 文本 → escapeHtml(str) → textContent 赋值
-    └── CDN 资源 → SRI integrity 哈希
-    ↓
-浏览器渲染 (安全)
-```
-
-### 10.8 WebSocket 健壮性
-
-与 v6.5.0 保持一致: 所有 `onmessage` 中 `JSON.parse` 有 try/catch 保护; `search_task` finally 取消。
-
-
----
-
-## 11. v6.5.1 安全机制与参数对齐强化
-
-### 11.1 API Token 防泄露机制 (BUG-W1)
-
-v6.5.1 引入 `_is_local_request` 守卫，按请求来源决定是否将 token 注入 HTML 模板：
-
-```
-GET /
-  ↓
-_is_local_request(request)
-  ├── client=None (TestClient CI) → True → 注入 token
-  ├── client.host in (127.0.0.1, ::1, localhost) → True → 注入 token
-   └── 其他 (网络) → False → 空字符串 → `<meta name="fctx-api-token" content="">`
-```
-
-同时，`verify_api_token` 中间件将 token 比较从 `!=` 改为 `hmac.compare_digest`，消除时序侧信道（BUG-W10）。WebSocket 鉴权 `verify_ws_token` 同理。
-
-```
-HTTP: hmac.compare_digest(X-API-Token, API_TOKEN)
-WS:   hmac.compare_digest(token, expected_token)
-```
-
-### 11.2 API 端点路径安全（BUG-W2）
-
-`api_categorize` 在 v6.5.0 中仅校验 `project_path` 是否已注册，未逐项校验 `paths` 数组。v6.5.1 增加与 `api_execute_tool`/`api_delete` 一致的 `is_path_safe` 循环：
-
-```
-POST /api/actions/categorize
-  ↓
-get_valid_project_root(req.project_path) → 403 if not registered
-  ↓
-for p in req.paths:
-    is_path_safe(p, project_root) → 403 if outside boundary (NEW)
-  ↓
-FileOps.batch_categorize(...)
-```
-
-### 11.3 输入大小限制（BUG-W7/W9）
-
-所有 Pydantic 请求模型的 `list[str]` 字段增设 `Field(..., max_length=1000)`；`dict[str, Any]` 字段增设 `field_validator` 100KB 序列化上限：
-
-| 字段 | 旧 | 新 | 影响端点 |
-|------|-----|-----|----------|
-| `GenerateRequest.files` | `list[str]` | `list[str] = Field(..., max_length=1000)` | `/api/generate` |
-| `FileDeleteRequest.paths` | `list[str]` | 同上 | `/api/fs/delete` |
-| `FileArchiveRequest.paths` | `list[str]` | 同上 | `/api/fs/archive` |
-| `CategorizeRequest.paths` | `list[str]` | 同上 | `/api/actions/categorize` |
-| `ToolExecuteRequest.paths` | `list[str]` | 同上 | `/api/actions/execute` |
-| 所有 `dict[str, Any]` 字段 | 无限制 | `field_validator` ≤100KB JSON | `/api/project/session`, `/api/project/settings`, `/api/project/tools`, `/api/project/categories` |
-
-### 11.4 进程生命周期安全（BUG-W5/W6）
-
-**ProcessManager PID 复用防御**（`routers/common.py`）：
-
-```
-register(pid, proc)
-  ↓
-with _lock:
-    检查 existing.poll() is None → 活跃则返回 False (NEW)
-    否则允许覆盖
-```
-
-**终止进程所有权验证**（`routers/action_routes.py`）：
-
-```
-POST /api/actions/terminate
-  ↓
-proc = process_manager.get(pid)
-  ↓
-proc.pid != req.pid → "PID mismatch" (NEW — 防止 PID 复用)
-  ↓
-proc.poll() is not None → unregister (NEW — 优雅退出)
-  ↓
-proc.terminate() → wait(5s) → kill() → unregister (NEW — 用 Popen 对象，不用裸 PID)
-```
-
-### 11.5 WebSocket 资源清理（BUG-W4）
-
-`websocket_search` 在 v6.5.0 中仅异常路径取消 `search_task`。v6.5.1 统一用 `finally`：
-
-```
-try:
-    while True: ... break on DONE
-except WebSocketDisconnect: stop_event.set()
-except Exception: logger.exception(...)
-finally:
-    search_task.cancel()           # ← NEW: 所有路径统一取消
-    await search_task              # ← NEW: 确保线程回收
-```
-
-### 11.6 核心层健壮性增强（BUG-C1-C6）
-
-| BUG | 模块 | 修改 | 效果 |
-|-----|------|------|------|
-| C1 | `context.py` | `to_xml` `except: pass` → `logger.exception` | 与 `to_markdown` 一致 |
-| C2 | `actions.py` | `archive_selection` 目录分支 arcname → 逐文件决策 | 防止 `relative_to` ValueError |
-| C3 | `security.py` | `_strip_win_long_prefix` → UNC 检查前剥离 `\\?\` | Windows 长路径项目可注册 |
-| C4 | `actions.py` | `batch_rename` 增加 `count` 参数 | 用户可控替换数量 |
-| C5 | `search.py` | `ThreadPoolExecutor.submit` `RuntimeError` 捕获 → pool 重建后重试一次 | 去除私有 `_shutdown` 依赖并防止 atexit 后提交崩溃 |
-| C6 | `search.py` | `SearchWorker.run` try/except → `("ERROR", msg)` 入队 | UI 不再永远等待 |
-
-### 11.7 参数动态对齐 — v6.5.1 新增
-
-| 参数 | 前端 | 后端 | 默认 | v6.5.1 变更 |
-|------|------|------|------|-------------|
-| `api_token` | `<meta name="fctx-api-token">` | `web_app._is_local_request` 守卫 | (环境) | 网络模式不注入 HTML |
-| `token_compare` | N/A | `hmac.compare_digest` | — | 常量时间比较 |
-| `max_list_length` | N/A | `Field(..., max_length=1000)` | 1000 | 新增 |
-| `max_dict_bytes` | N/A | `field_validator` | 100KB | 新增 |
-| `mermaid_sri` | CDN | `integrity="sha384-..."` | — | 新增 |
-| `mcp_install` | README | `[project.optional-dependencies].mcp` | `mcp>=1.0.0` | 新增 |
-
-### 11.8 添加新参数规范流程（v6.5.1 增强）
-
-原 v6.4.0 定义的 6 处同步流程，在 v6.5.1 增加**第 7 步**：
-
-```
-1. file_cortex_core/config.py        ← Pydantic 模型字段
-2. routers/schemas.py                ← Request Schema (含 Field 约束)
-3. static/js/state.js                ← 前端 defaults
-4. templates/index.html              ← Jinja2 注入 (仅本地)
-5. routers/ (对应 route)             ← API 处理逻辑
-6. tests/                            ← 参数传递链路测试
-7. TECHNICAL_GUIDE.md                ← 本文档 2.2 对齐清单 (v6.5.1 新增)
-```
-
----
-
-*本文档随 FileCortex v6.5.1 更新 — 完整工作原理、安全机制、参数对齐规范。当添加新参数时，必须按 11.8 节 7 步流程同步所有层。*
+## 10. Known Limits and Next Engineering Work
+
+- JSON configuration is local-process coordination, not a multi-user database.
+- Route handlers still contain application orchestration that should move to services.
+- Frontend source contracts do not replace Playwright E2E coverage.
+- Tool output and search are bounded but can still consume I/O on very large local workspaces.
+- Token counts are heuristic and context selection is deterministic/manual, not semantic ranking.
+
+See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases and [ROADMAP.md](ROADMAP.md) for the prioritized feature list.

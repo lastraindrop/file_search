@@ -126,8 +126,8 @@ class TestGenerateAccessControl:
         )
         assert res.status_code == 200
 
-    def test_generate_without_project_path_allowed(self, api_client):
-        """No project_path (None) should return 200."""
+    def test_generate_without_project_path_rejected(self, api_client):
+        """Context generation must always be scoped to a registered project."""
         res = api_client.post(
             "/api/generate",
             json={
@@ -135,7 +135,20 @@ class TestGenerateAccessControl:
                 "project_path": None,
             },
         )
-        assert res.status_code == 200
+        assert res.status_code == 403
+
+    def test_generate_rejects_project_external_file(
+        self, project_client, mock_project, tmp_path
+    ):
+        """A registered root must not authorize unrelated context files."""
+        secret = tmp_path / "secret.txt"
+        secret.write_text("do-not-export", encoding="utf-8")
+        res = project_client.post(
+            "/api/generate",
+            json={"files": [str(secret)], "project_path": str(mock_project)},
+        )
+        assert res.status_code == 403
+        assert "do-not-export" not in res.text
 
 
 # ---------------------------------------------------------------------------

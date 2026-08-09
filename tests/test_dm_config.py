@@ -7,6 +7,7 @@ import threading
 import pytest
 
 from file_cortex_core import DataManager, PathValidator
+from file_cortex_core.config import _merge_config_values
 
 # -----------------------------------------------------------------------------
 # 1. Singleton & Initialization
@@ -65,6 +66,32 @@ def test_dm_save_concurrency_stress(clean_config, mock_project):
     # Reload and ensure not corrupted
     dm.load()
     assert len(dm.config.projects) >= 1
+
+
+def test_dm_save_merges_independent_stale_instances(clean_config, mock_project, tmp_path):
+    """Independent processes must not overwrite each other's unrelated edits."""
+    dm_one = DataManager.create()
+    dm_two = DataManager.create()
+    first_project = str(mock_project)
+    second_project = str(tmp_path / "second_project")
+
+    dm_one.update_project_settings(first_project, {"excludes": "first-only"})
+    dm_two.update_project_settings(second_project, {"excludes": "second-only"})
+
+    DataManager.reset()
+    merged = DataManager()
+    assert merged.get_project_data(first_project)["excludes"] == "first-only"
+    assert merged.get_project_data(second_project)["excludes"] == "second-only"
+
+
+def test_three_way_merge_preserves_concurrent_dict_add_after_local_delete():
+    """A local dict deletion must not become an invalid None value on merge."""
+    merged = _merge_config_values(
+        {"tools": {"old": "command"}},
+        {"tools": {}},
+        {"tools": {"old": "command", "new": "other-command"}},
+    )
+    assert merged == {"tools": {"new": "other-command"}}
 
 # -----------------------------------------------------------------------------
 # 3. Project Ops (Groups, Favorites, categories)

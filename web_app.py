@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import pathlib
+import sysconfig
 from collections.abc import Awaitable, Callable
 
 import uvicorn
@@ -23,8 +25,18 @@ from routers.ws_routes import router as ws_router
 API_TOKEN = os.getenv("FCTX_API_TOKEN", "")
 
 _BASE_DIR = pathlib.Path(__file__).parent.resolve()
-_STATIC_DIR = _BASE_DIR / "static"
-_TEMPLATES_DIR = _BASE_DIR / "templates"
+
+
+def _resource_dir(name: str) -> pathlib.Path:
+    """Finds source-tree resources or resources installed with the wheel."""
+    source_dir = _BASE_DIR / name
+    if source_dir.is_dir():
+        return source_dir
+    return pathlib.Path(sysconfig.get_path("data")) / name
+
+
+_STATIC_DIR = _resource_dir("static")
+_TEMPLATES_DIR = _resource_dir("templates")
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 ACTIVE_PROCESSES = route_common.ACTIVE_PROCESSES
 
@@ -32,10 +44,10 @@ ACTIVE_PROCESSES = route_common.ACTIVE_PROCESSES
 def _parse_allowed_origins(raw_value: str | None) -> list[str]:
     """Parses allowed origins from environment configuration."""
     if not raw_value:
-        return ["*"]
+        return ["http://127.0.0.1:8000", "http://localhost:8000", "http://[::1]:8000"]
 
     origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
-    return origins or ["*"]
+    return origins or ["http://127.0.0.1:8000", "http://localhost:8000", "http://[::1]:8000"]
 
 
 def _is_wildcard_origin(origins: list[str]) -> bool:
@@ -43,7 +55,7 @@ def _is_wildcard_origin(origins: list[str]) -> bool:
     return origins == ["*"] or "*" in origins
 
 
-ALLOWED_ORIGINS = _parse_allowed_origins(os.getenv("FCTX_ALLOWED_ORIGINS", "*"))
+ALLOWED_ORIGINS = _parse_allowed_origins(os.getenv("FCTX_ALLOWED_ORIGINS"))
 
 
 def _is_local_request(request: Request) -> bool:
@@ -62,24 +74,27 @@ async def verify_api_token(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     """Verifies API token for protected endpoints."""
-    if not API_TOKEN:
-        return await call_next(request)
-
     if request.url.path.startswith("/api/"):
-        token = request.headers.get("X-API-Token", "")
-        import hmac
-        if not hmac.compare_digest(token, API_TOKEN):
-            return JSONResponse(
-                status_code=401,
-                content={"status": "error", "detail": "Invalid or missing API token"},
-            )
-
-        origin = request.headers.get("origin", "*")
-        if not _is_wildcard_origin(ALLOWED_ORIGINS) and origin not in ALLOWED_ORIGINS:
+        origin = request.headers.get("origin")
+        same_origin = origin == str(request.base_url).rstrip("/")
+        if (
+            origin
+            and not same_origin
+            and not _is_wildcard_origin(ALLOWED_ORIGINS)
+            and origin not in ALLOWED_ORIGINS
+        ):
             return JSONResponse(
                 status_code=403,
                 content={"status": "error", "detail": "Origin not allowed"},
             )
+        if API_TOKEN:
+            token = request.headers.get("X-API-Token", "")
+            import hmac
+            if not hmac.compare_digest(token, API_TOKEN):
+                return JSONResponse(
+                    status_code=401,
+                    content={"status": "error", "detail": "Invalid or missing API token"},
+                )
 
     return await call_next(request)
 
@@ -176,6 +191,13 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000, help="Port number")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     args = parser.parse_args()
+
+    try:
+        is_loopback = ipaddress.ip_address(args.host).is_loopback
+    except ValueError:
+        is_loopback = args.host == "localhost"
+    if not is_loopback and not API_TOKEN:
+        parser.error("FCTX_API_TOKEN is required when binding outside localhost")
 
     uvicorn.run(
         "web_app:app",

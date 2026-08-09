@@ -30,6 +30,7 @@ DEFAULT_MAX_SIZE_MB: Final = 5
 # pool at runtime if it gets shut down out from under us (see
 # ``_submit_content_task`` / ``_reinit_shared_pool``).
 SHARED_SEARCH_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+_SEARCH_POOL_LOCK = threading.Lock()
 atexit.register(
     SHARED_SEARCH_POOL.shutdown, wait=False,
     **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
@@ -46,17 +47,18 @@ def _reinit_shared_pool() -> ThreadPoolExecutor:
     ``ThreadPoolExecutor`` is no longer usable).
     """
     global SHARED_SEARCH_POOL
-    try:
-        SHARED_SEARCH_POOL.shutdown(wait=False)
-    except Exception:
-        logger.exception("Failed to shut down stale search pool during reinit.")
-    new_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
-    SHARED_SEARCH_POOL = new_pool
-    atexit.register(
-        new_pool.shutdown, wait=False,
-        **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
-    )
-    return new_pool
+    with _SEARCH_POOL_LOCK:
+        try:
+            SHARED_SEARCH_POOL.shutdown(wait=False)
+        except Exception:
+            logger.exception("Failed to shut down stale search pool during reinit.")
+        new_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+        SHARED_SEARCH_POOL = new_pool
+        atexit.register(
+            new_pool.shutdown, wait=False,
+            **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
+        )
+        return new_pool
 
 
 def _submit_content_task(func: Any, *args: Any) -> Future | None:
@@ -110,7 +112,11 @@ class PathMatcher:
         # Pre-process keywords
         processed_text = query.text.strip() if query.case_sensitive else query.text.lower().strip()
         self.all_pos = query.positive_tags.copy()
-        if processed_text and processed_text not in (".", ".."):
+        if (
+            query.mode == "smart"
+            and processed_text
+            and processed_text not in (".", "..")
+        ):
             for kw in processed_text.split():
                 if kw not in self.all_pos:
                     self.all_pos.append(kw)
@@ -149,30 +155,29 @@ class PathMatcher:
                 target_path = target_path.lower()
 
             found = False
+            tags_match = self.matches_tags(target_path)
             if self.query.mode == "smart":
-                has_plain = all(k in target_path for k in self.plain_pos)
-                has_regex = all(r.search(target_path) for r in self.regex_pos)
-                has_neg = any(nk in target_path for nk in self.neg_keywords)
-                found = has_plain and has_regex and not has_neg
+                found = tags_match
             elif self.query.mode == "exact":
                 text = self.query.text
                 target_text = text if self.query.case_sensitive else text.lower()
-                found = (target_text in target_path) if target_text else True
-                if found:
-                    has_regex = all(r.search(target_path) for r in self.regex_pos)
-                    has_neg = any(nk in target_path for nk in self.neg_keywords)
-                    found = found and has_regex and not has_neg
+                found = ((target_text in target_path) if target_text else True) and tags_match
             elif self.query.mode == "regex":
                 if self.main_re:
-                    found = self.main_re.search(target_path) is not None
+                    found = self.main_re.search(target_path) is not None and tags_match
                 else:
-                    # Fallback to tag matching if regex is invalid or empty
-                    has_plain = all(k in target_path for k in self.plain_pos)
-                    has_regex = all(r.search(target_path) for r in self.regex_pos)
-                    has_neg = any(nk in target_path for nk in self.neg_keywords)
-                    found = has_plain and has_regex and not has_neg
+                    found = False
+            elif self.query.mode == "content":
+                found = tags_match
 
         return found != self.query.is_inverse
+
+    def matches_tags(self, target_path: str) -> bool:
+        """Applies positive and negative path tags consistently across modes."""
+        has_plain = all(keyword in target_path for keyword in self.plain_pos)
+        has_regex = all(regex.search(target_path) for regex in self.regex_pos)
+        has_negative = any(keyword in target_path for keyword in self.neg_keywords)
+        return has_plain and has_regex and not has_negative
 
 
 class ContentMatcher:
@@ -212,7 +217,13 @@ class ContentMatcher:
                     snippet = line.strip()
                     break
 
-            return (found != self.query.is_inverse), snippet
+            path_value = str(path).replace("\\", "/")
+            if not self.query.case_sensitive:
+                path_value = path_value.lower()
+            return (
+                (found and self.path_matcher.matches_tags(path_value)) != self.query.is_inverse,
+                snippet,
+            )
         except Exception:
             logger.exception(f"Content search error in {path}")
             return False, ""
@@ -325,11 +336,9 @@ def search_generator(
                 if len(content_futures) >= DEFAULT_BATCH_SIZE:
                     done_batch = [f for f in content_futures if f.done()]
                     if not done_batch and content_futures:
-                        try:
-                            next(as_completed(content_futures, timeout=0.01))
-                            done_batch = [f for f in content_futures if f.done()]
-                        except (StopIteration, TimeoutError):
-                            pass
+                        # Backpressure: do not submit an unbounded number of
+                        # disk reads when the executor cannot keep up.
+                        done_batch = [next(as_completed(content_futures))]
 
                     for f in done_batch:
                         is_match, snippet = f.result()
@@ -345,6 +354,9 @@ def search_generator(
                                 break
                 if count >= query.max_results:
                     break
+
+        if stop_event and stop_event.is_set():
+            return
 
         # Final cleanup of remaining content futures
         for f in as_completed(content_futures):

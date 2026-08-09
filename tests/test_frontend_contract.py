@@ -423,6 +423,15 @@ class TestFrontendBugFixes:
         js = api_client.get("/static/js/main.js").text
         assert "leftList.innerHTML = ''" in js
 
+    def test_preview_and_search_race_guards_present(self, api_client):
+        """Late preview/search responses must not mutate newer UI state."""
+        state_js = api_client.get("/static/js/state.js").text
+        main_js = api_client.get("/static/js/main.js").text
+        assert "previewRequestId" in state_js
+        assert "App.state.currentFile !== path" in main_js
+        assert "searchGeneration" in state_js
+        assert "App.state.socket !== sock" in main_js
+
     def test_create_key_value_row_sanitized(self, api_client):
         """FrontFix-7: _createKeyValueRow should sanitize key for DOM id."""
         js = api_client.get("/static/js/main.js").text
