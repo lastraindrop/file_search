@@ -308,10 +308,11 @@ class TestCLIEdgeCases:
         with patch("file_cortex_core.config._CONFIG_FILE", config_path):
             DataManager.reset()
             captured = StringIO()
-            with patch("sys.stdout", captured):
+            with patch("sys.stdout", captured), pytest.raises(SystemExit) as exc_info:
                 sys.argv = ["fctx", "open", str(tmp_path / "nope")]
                 from fctx import main
                 main()
+            assert exc_info.value.code == 1
             assert "ERROR" in captured.getvalue()
             DataManager.reset()
 
@@ -342,10 +343,11 @@ class TestCLIEdgeCases:
         with patch("file_cortex_core.config._CONFIG_FILE", config_path):
             DataManager.reset()
             captured = StringIO()
-            with patch("sys.stdout", captured):
+            with patch("sys.stdout", captured), pytest.raises(SystemExit) as exc_info:
                 sys.argv = ["fctx", "stage", str(tmp_path), "somefile"]
                 from fctx import main
                 main()
+            assert exc_info.value.code == 1
             assert "ERROR" in captured.getvalue()
             DataManager.reset()
 
@@ -975,7 +977,9 @@ class TestCLIExportCommand:
             captured_export = StringIO()
             with patch("sys.stdout", captured_export):
                 sys.argv = ["fctx", "export", str(proj)]
-                main()
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                assert exc_info.value.code == 1
 
             assert "empty" in captured_export.getvalue().lower()
             DataManager.reset()

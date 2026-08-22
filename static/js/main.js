@@ -317,10 +317,17 @@ const App = {
     },
 
     saveGlobalSettings: async () => {
+        // parseFloat('') -> NaN -> JSON null on the wire; guard every numeric
+        // input so an empty field falls back to the documented default instead
+        // of being sent as null (which the backend treats as "unchanged").
+        const rawLimit = parseFloat(document.getElementById('set-preview-limit').value);
         const body = {
-            preview_limit_mb: parseFloat(document.getElementById('set-preview-limit').value),
+            preview_limit_mb: Number.isFinite(rawLimit) ? rawLimit : 1,
             token_threshold: parseInt(document.getElementById('set-token-threshold').value || App.config.defaults.tokenThreshold, 10),
-            token_ratio: parseFloat(document.getElementById('set-token-ratio').value || App.config.defaults.tokenRatio),
+            token_ratio: (() => {
+                const raw = parseFloat(document.getElementById('set-token-ratio').value);
+                return Number.isFinite(raw) ? raw : App.config.defaults.tokenRatio;
+            })(),
             allowed_extensions: document.getElementById('set-allowed-exts').value,
             enable_noise_reducer: document.getElementById('set-noise-reducer').checked
         };

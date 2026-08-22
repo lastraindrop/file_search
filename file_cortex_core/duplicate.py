@@ -41,7 +41,7 @@ class DuplicateWorker(threading.Thread):
         super().__init__(daemon=True)
         self.root_dir = pathlib.Path(root_dir)
         self.excludes = [
-            e.lower().strip() for e in manual_excludes.split() if e.strip()
+            e.strip() for e in manual_excludes.split() if e.strip()
         ]
         self.git_spec = (
             FileUtils.get_gitignore_spec(self.root_dir) if use_gitignore else None

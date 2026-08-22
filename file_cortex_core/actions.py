@@ -247,8 +247,14 @@ class FileOps:
         for old_p, new_p in new_names.items():
             status = "ok"
             norm_new = norm_path_str(new_p)
+            old_p_obj = pathlib.Path(old_p)
 
-            if new_p.exists() or norm_new in target_norm_set:
+            # A case-only rename on a case-insensitive filesystem resolves to
+            # the same file as its source and must not count as a conflict.
+            same_file_as_source = os.path.normcase(str(new_p)) == os.path.normcase(
+                str(old_p_obj)
+            )
+            if (new_p.exists() and not same_file_as_source) or norm_new in target_norm_set:
                 status = "conflict"
 
             if status == "conflict":
@@ -323,7 +329,11 @@ class FileOps:
         if not old_path.exists():
             raise FileNotFoundError("Target path does not exist.")
         new_path = old_path.parent / new_name
-        if new_path.exists():
+        # On case-insensitive filesystems (Windows/macOS) a pure case change
+        # must not be treated as a collision with the source itself.
+        if new_path.exists() and os.path.normcase(str(new_path)) != os.path.normcase(
+            str(old_path)
+        ):
             raise FileExistsError("A file with new name already exists.")
         old_path.rename(new_path)
         return str(new_path)
@@ -489,7 +499,7 @@ class FileOps:
                     if not p.exists():
                         continue
                     arcname = (
-                        p.relative_to(root_dir_p)
+                        p.relative_to(root_dir_p).as_posix()
                         if root_dir_p and (root_dir_p == p or root_dir_p in p.parents)
                         else p.name
                     )
@@ -502,9 +512,9 @@ class FileOps:
                                 if root_dir_p and (
                                     root_dir_p == full_f or root_dir_p in full_f.parents
                                 ):
-                                    arc = full_f.relative_to(root_dir_p)
+                                    arc = full_f.relative_to(root_dir_p).as_posix()
                                 else:
-                                    arc = full_f.relative_to(p.parent)
+                                    arc = full_f.relative_to(p.parent).as_posix()
                                 zipf.write(full_f, arc)
             os.replace(temp_name, output_path)
         except Exception:

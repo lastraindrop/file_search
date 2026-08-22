@@ -75,6 +75,11 @@ async def verify_api_token(
 ) -> Response:
     """Verifies API token for protected endpoints."""
     if request.url.path.startswith("/api/"):
+        # CORS preflights (OPTIONS) carry no auth headers; they must pass
+        # through so the CORSMiddleware (registered inside this middleware)
+        # can answer them for allowed origins.
+        if request.method == "OPTIONS":
+            return await call_next(request)
         origin = request.headers.get("origin")
         same_origin = origin == str(request.base_url).rstrip("/")
         if (

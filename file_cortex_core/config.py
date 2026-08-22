@@ -33,6 +33,44 @@ CONFIG_LOCK_STALE_AFTER: Final = 60.0
 _MISSING: Final = object()
 
 
+def _is_process_alive(pid: int) -> bool:
+    """Checks whether a process ID is currently alive.
+
+    POSIX uses ``os.kill(pid, 0)`` (signal 0 probes existence). Windows cannot
+    use that call: signal 0 is ``CTRL_C_EVENT``, which ``GenerateConsoleCtrlEvent``
+    delivers to the process group that shares the probing process's console —
+    the caller itself receives a Ctrl+C. The Win32 process-query API is used
+    instead.
+
+    Args:
+        pid: The process ID to probe.
+
+    Returns:
+        True if the process exists and is still running.
+    """
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    import ctypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 @contextlib.contextmanager
 def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
     """Serializes read-merge-write config updates across local processes."""
@@ -49,11 +87,7 @@ def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
             try:
                 lock_owner = lock_file.read_text(encoding="ascii").strip()
                 owner_pid = int(lock_owner.split(":", maxsplit=1)[0])
-                try:
-                    os.kill(owner_pid, 0)
-                    owner_is_alive = True
-                except OSError:
-                    owner_is_alive = False
+                owner_is_alive = _is_process_alive(owner_pid)
                 if (
                     not owner_is_alive
                     and time.time() - lock_file.stat().st_mtime > CONFIG_LOCK_STALE_AFTER
@@ -412,51 +446,62 @@ class DataManager:
                 logger.exception("Failed to load or validate configuration")
 
     def save(self) -> None:
-        """Atomically persists the current configuration to disk."""
-        with self._lock:
-            config_file = _get_config_file()
-            temp_path: str | None = None
-            try:
-                config_file.parent.mkdir(parents=True, exist_ok=True)
-                with _config_file_lock(config_file):
-                    disk_data: dict[str, Any] = self._base_config_data
-                    if config_file.exists():
-                        with open(config_file, encoding="utf-8") as f:
-                            disk_data = AppConfig.model_validate(json.load(f)).model_dump()
+            """Atomically persists the current configuration to disk."""
+            with self._lock:
+                config_file = _get_config_file()
+                temp_path: str | None = None
+                try:
+                    config_file.parent.mkdir(parents=True, exist_ok=True)
+                    with _config_file_lock(config_file):
+                        disk_data: dict[str, Any] = self._base_config_data
+                        if config_file.exists():
+                            try:
+                                with open(config_file, encoding="utf-8") as f:
+                                    disk_data = AppConfig.model_validate(
+                                        json.load(f)
+                                    ).model_dump()
+                            except Exception:
+                                # A corrupt or out-of-range on-disk config must not
+                                # brick every later save: treat it as "no external
+                                # edits" and rewrite the file from local state.
+                                logger.exception(
+                                    "Disk configuration is invalid; rewriting it "
+                                    "with the current in-memory state."
+                                )
 
-                    merged_data = _merge_config_values(
-                        self._base_config_data, self.config.model_dump(), disk_data
-                    )
-                    self.config = AppConfig.model_validate(merged_data)
-                    data_json = self.config.model_dump_json(indent=4)
+                        merged_data = _merge_config_values(
+                            self._base_config_data, self.config.model_dump(), disk_data
+                        )
+                        self.config = AppConfig.model_validate(merged_data)
+                        data_json = self.config.model_dump_json(indent=4)
 
-                    with tempfile.NamedTemporaryFile(
-                        "w",
-                        encoding="utf-8",
-                        suffix=".json.tmp",
-                        dir=str(config_file.parent),
-                        delete=False,
-                    ) as f:
-                        temp_path = f.name
-                        f.write(data_json)
+                        with tempfile.NamedTemporaryFile(
+                            "w",
+                            encoding="utf-8",
+                            suffix=".json.tmp",
+                            dir=str(config_file.parent),
+                            delete=False,
+                        ) as f:
+                            temp_path = f.name
+                            f.write(data_json)
 
-                    for attempt in range(MAX_SAVE_RETRIES):
-                        try:
-                            os.replace(temp_path, config_file)
-                            temp_path = None
-                            break
-                        except PermissionError:
-                            if attempt == MAX_SAVE_RETRIES - 1:
-                                raise
-                            time.sleep(0.05 * (attempt + 1))
-                    self._base_config_data = self.config.model_dump()
+                        for attempt in range(MAX_SAVE_RETRIES):
+                            try:
+                                os.replace(temp_path, config_file)
+                                temp_path = None
+                                break
+                            except PermissionError:
+                                if attempt == MAX_SAVE_RETRIES - 1:
+                                    raise
+                                time.sleep(0.05 * (attempt + 1))
+                        self._base_config_data = self.config.model_dump()
 
-            except Exception:
-                if temp_path and os.path.exists(temp_path):
-                    with contextlib.suppress(Exception):
-                        os.unlink(temp_path)
-                logger.exception("Failed to save configuration")
-                raise
+                except Exception:
+                    if temp_path and os.path.exists(temp_path):
+                        with contextlib.suppress(Exception):
+                            os.unlink(temp_path)
+                    logger.exception("Failed to save configuration")
+                    raise
 
     def add_to_recent(self, path: str) -> None:
         """Adds a project path to the recent list, maintaining a cap.

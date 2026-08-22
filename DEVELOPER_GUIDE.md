@@ -1,6 +1,6 @@
 # FileCortex Developer Guide
 
-> Version: 6.5.2 | Updated: 2026-08-09 | Verification baseline: 788 passed, Ruff 0 errors
+> Version: 6.5.3 | Updated: 2026-08-23 | Verification baseline: 800 passed, Ruff 0 errors
 
 ## Project Model
 

@@ -5,6 +5,7 @@ A Model Context Protocol server providing file search and context
 generation capabilities for AI assistants.
 """
 
+import asyncio
 import pathlib
 from collections.abc import Callable
 
@@ -136,23 +137,32 @@ async def search_files(
     if not root:
         return f"Error: Project path '{project_path}' is not registered or authorized."
 
-    results = []
+    # Align with the project's configured content-search size limit instead
+    # of the module default, matching the Web/WS behavior.
+    proj_data = get_dm().get_project_data(root)
+    max_size = proj_data.get("max_search_size_mb", 10)
 
-    gen = search_generator(
-        root,
-        query,
-        mode,
-        manual_excludes=excludes,
-        use_gitignore=True,
-        stop_event=None,
-    )
+    def run_search() -> list[str]:
+        results = []
+        gen = search_generator(
+            root,
+            query,
+            mode,
+            manual_excludes=excludes,
+            use_gitignore=True,
+            stop_event=None,
+            max_size_mb=max_size,
+        )
+        for res in gen:
+            results.append(f"{res['path']} ({res['match_type']})")
+            if len(results) > 50:
+                break
+        return results
 
-    for res in gen:
-        results.append(f"{res['path']} ({res['match_type']})")
-        if len(results) > 50:
-            break
-
-    return "\n".join(results) if results else "No matches found."
+    # Run the disk scan off the event loop so the MCP transport (stdio
+    # heartbeats, cancellation, other tools) stays responsive.
+    lines = await asyncio.to_thread(run_search)
+    return "\n".join(lines) if lines else "No matches found."
 
 
 @get_mcp().tool()

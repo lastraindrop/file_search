@@ -10,6 +10,27 @@ from typing import Any
 from ..format_utils import FormatUtils
 
 
+def _profile_value(prof: Any, key: str, default: str = "") -> str:
+    """Reads a profile field from either a dict or a Pydantic model.
+
+    ``ProjectConfig.collection_profiles`` stores ``CollectionProfile`` models;
+    some callers pass ``model_dump()`` dicts instead. ``dict.get`` is not
+    available on models, so read through this attribute-or-key helper.
+
+    Args:
+        prof: The profile (dict or model).
+        key: The field name.
+        default: Fallback value.
+
+    Returns:
+        The field value as a string.
+    """
+    if isinstance(prof, dict):
+        return prof.get(key, default)
+    value = getattr(prof, key, default)
+    return value if isinstance(value, str) else default
+
+
 class PathCollectionDialog(tk.Toplevel):
     """Dialog window for collecting and formatting file paths."""
 
@@ -137,9 +158,12 @@ class PathCollectionDialog(tk.Toplevel):
         p_name = self.preset_combo.get()
         prof = self.profiles.get(p_name)
         if prof:
-            self.file_prefix_var.set(prof.get("prefix", ""))
-            self.dir_suffix_var.set(prof.get("suffix", ""))
-            self.sep_var.set(prof.get("sep", "\\n"))
+            # Profiles may arrive either as plain dicts (model_dump) or as
+            # Pydantic models (ProjectConfig.collection_profiles); read
+            # through a common attribute-or-key helper.
+            self.file_prefix_var.set(_profile_value(prof, "prefix"))
+            self.dir_suffix_var.set(_profile_value(prof, "suffix"))
+            self.sep_var.set(_profile_value(prof, "sep", "\\n"))
 
     def _do_copy_and_close(self) -> None:
         """Formats paths and copies to clipboard, then closes."""

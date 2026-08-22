@@ -38,49 +38,63 @@ def _resolve_project(data_mgr: DataManager, project: str) -> str | None:
     return proj_root
 
 
-def cmd_open(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'open' subcommand."""
+def cmd_open(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'open' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     try:
         validated = PathValidator.validate_project(args.path)
         abs_path = str(validated)
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
-        return
+        return False
     except NotADirectoryError as e:
         print(f"ERROR: {e}")
-        return
+        return False
     except PermissionError as e:
         print(f"ERROR: {e}")
-        return
+        return False
 
     data_mgr.add_to_recent(abs_path)
     data_mgr.get_project_data_obj(abs_path)
     data_mgr.save()
     print(f"PROJECT REGISTERED: {abs_path}")
+    return True
 
 
-def cmd_projects(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'projects' subcommand."""
+def cmd_projects(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'projects' subcommand.
+
+    Returns:
+        True (informational command; empty list is not an error).
+    """
     projects = data_mgr.config.projects
     if not projects:
         print("No registered projects.")
-        return
+        return True
     for p in projects:
         name = pathlib.Path(p).name
         print(f"  {name}  →  {p}")
+    return True
 
 
-def cmd_stage(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'stage' subcommand."""
+def cmd_stage(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'stage' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     file_path_str = PathValidator.norm_path(args.path)
     if not PathValidator.is_safe(file_path_str, proj_root):
         logger.error(f"Security: CLI block unsafe path: {args.path}")
         print(f"ERROR: Path '{args.path}' is outside project root or unsafe.")
-        return
+        return False
 
     # CRITICAL: use get_project_data_obj() (live ProjectConfig), NOT
     # get_project_data() which returns a disconnected model_dump() snapshot.
@@ -92,23 +106,34 @@ def cmd_stage(args: argparse.Namespace, data_mgr: DataManager) -> None:
         print(f"Staged: {file_path_str}")
     else:
         print(f"Already staged: {file_path_str}")
+    return True
 
 
-def cmd_search(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'search' subcommand."""
+def cmd_search(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'search' subcommand.
+
+    Returns:
+        True on success (including no matches), False on failure.
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
+
+    # Align with the project's configured content-search size limit instead
+    # of the module default (5MB), matching the Web/WS behavior.
+    proj_data = data_mgr.get_project_data(proj_root)
+    max_size = proj_data.get("max_search_size_mb", 10)
 
     results = list(search_generator(
         pathlib.Path(proj_root),
         args.query,
         args.mode,
         args.excludes or "",
+        max_size_mb=max_size,
     ))
     if not results:
         print("No matches found.")
-        return
+        return True
 
     for r in results[:args.limit]:
         rel = pathlib.Path(r["path"])
@@ -122,20 +147,25 @@ def cmd_search(args: argparse.Namespace, data_mgr: DataManager) -> None:
     if total > args.limit:
         print(f"\n  ... and {total - args.limit} more (use --limit to show more)")
     print(f"\n  Total: {total} matches")
+    return True
 
 
-def cmd_export(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'export' subcommand."""
+def cmd_export(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'export' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     proj_data = data_mgr.get_project_data(proj_root)
     paths = proj_data.get("staging_list", [])
 
     if not paths:
         print("Staging list is empty. Use 'fctx stage' to add files first.")
-        return
+        return False
 
     fmt = args.format
     use_noise = args.noise_reducer
@@ -164,13 +194,18 @@ def cmd_export(args: argparse.Namespace, data_mgr: DataManager) -> None:
         print(f"  Format: {fmt}, ~{FormatUtils.format_number(tokens)} tokens")
     else:
         sys.stdout.write(content)
+    return True
 
 
-def cmd_categorize(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'categorize' subcommand."""
+def cmd_categorize(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'categorize' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     # CRITICAL: use get_project_data_obj() (live ProjectConfig), NOT
     # get_project_data() which returns a disconnected model_dump() snapshot.
@@ -180,27 +215,33 @@ def cmd_categorize(args: argparse.Namespace, data_mgr: DataManager) -> None:
     paths = list(proj.staging_list)
     if not paths:
         print("Staging list is empty.")
-        return
+        return False
     try:
         moved = FileOps.batch_categorize(proj_root, paths, args.category)
         print(f"Moved {len(moved)} files to {args.category}")
         proj.staging_list = [path for path in paths if pathlib.Path(path).exists()]
         data_mgr.save()
+        return True
     except Exception as e:
         print(f"ERROR: {e}")
+        return False
 
 
-def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'run' subcommand."""
+def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'run' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     proj_data = data_mgr.get_project_data(proj_root)
     template = proj_data.get("custom_tools", {}).get(args.tool)
     if not template:
         print(f"Tool '{args.tool}' not found.")
-        return
+        return False
 
     for p in proj_data["staging_list"]:
         if not PathValidator.is_safe(p, proj_root):
@@ -213,13 +254,18 @@ def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> None:
             print(f"ERROR: {res['error']}")
         else:
             print(f"EXIT CODE: {res['exit_code']}")
+    return True
 
 
-def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'copy' subcommand (batch copy, one or more sources)."""
+def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'copy' subcommand (batch copy, one or more sources).
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     # Validate every source path before touching the filesystem so a
     # single unsafe entry aborts the whole batch (matches core semantics).
@@ -229,7 +275,7 @@ def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> None:
         if not PathValidator.is_safe(src_str, proj_root):
             logger.error(f"Security: CLI block unsafe src: {src}")
             print(f"ERROR: Source '{src}' is outside project root or unsafe.")
-            return
+            return False
         normalized_srcs.append(src_str)
 
     dst_str = PathValidator.norm_path(args.dst_dir)
@@ -239,7 +285,7 @@ def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> None:
             f"ERROR: Destination '{args.dst_dir}' is outside project root "
             f"or unsafe."
         )
-        return
+        return False
 
     try:
         result = FileOps.copy_item(
@@ -249,16 +295,21 @@ def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> None:
         )
     except (FileNotFoundError, FileExistsError, PermissionError, ValueError) as e:
         print(f"ERROR: {e}")
-        return
+        return False
     for p in result:
         print(f"Copied: {p}")
+    return True
 
 
-def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> None:
-    """Handles the 'extract' subcommand."""
+def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> bool:
+    """Handles the 'extract' subcommand.
+
+    Returns:
+        True on success, False on failure (main() exits with code 1).
+    """
     proj_root = _resolve_project(data_mgr, args.project)
     if not proj_root:
-        return
+        return False
 
     dst_str = PathValidator.norm_path(args.dst_dir)
     if not PathValidator.is_safe(dst_str, proj_root):
@@ -267,7 +318,7 @@ def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> None:
             f"ERROR: Destination '{args.dst_dir}' is outside project root "
             f"or unsafe."
         )
-        return
+        return False
 
     # The archive may live outside the project workspace; only the
     # extraction destination must be safe (validated above and again inside
@@ -276,8 +327,9 @@ def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> None:
         extracted = FileOps.extract_archive(args.zip_path, dst_str, proj_root)
     except (FileNotFoundError, PermissionError, ValueError) as e:
         print(f"ERROR: {e}")
-        return
+        return False
     print(f"Extracted {len(extracted)} entries to: {dst_str}")
+    return True
 
 
 def main() -> None:
@@ -379,7 +431,9 @@ def main() -> None:
 
     handler = handlers.get(args.command)
     if handler:
-        handler(args, data_mgr)
+        ok = handler(args, data_mgr)
+        if ok is False:
+            sys.exit(1)
     else:
         parser.print_help()
 

@@ -63,6 +63,8 @@ class TestFctxElseBranch:
             DataManager.reset()
             dm = DataManager()
             dm.add_to_recent(str(mock_project))
+            dm.get_project_data_obj(str(mock_project))
+            dm.save()
             test_file = mock_project / "test_stage.txt"
             test_file.write_text("stage test", encoding="utf-8")
 
@@ -71,6 +73,7 @@ class TestFctxElseBranch:
         captured = capsys.readouterr()
         lines = [line for line in captured.out.strip().splitlines() if line.strip()]
         assert not any("usage" in line.lower() for line in lines)
+        assert any("Staged" in line for line in lines)
 
 
 class TestHttpRoutesConfigAPI:

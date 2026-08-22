@@ -279,7 +279,10 @@ def search_generator(
     )
 
     root_path = pathlib.Path(root_dir)
-    excludes = [e.lower().strip() for e in query.manual_excludes.split() if e.strip()]
+    # Patterns are matched with fnmatch, which is already case-insensitive on
+    # Windows; on POSIX lowercasing them would break patterns that include
+    # uppercase characters (e.g. ".DS_Store").
+    excludes = [e.strip() for e in query.manual_excludes.split() if e.strip()]
     git_spec = FileUtils.get_gitignore_spec(root_path) if query.use_gitignore else None
 
     path_matcher = PathMatcher(query)

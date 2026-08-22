@@ -493,7 +493,7 @@ class FileUtils:
         """
         root_dir = pathlib.Path(root_dir)
         lines = [f"Project: {root_dir.name}"]
-        excludes = [e.lower().strip() for e in excludes_str.split() if e.strip()]
+        excludes = [e.strip() for e in excludes_str.split() if e.strip()]
         git_spec = FileUtils.get_gitignore_spec(root_dir) if use_gitignore else None
 
         def _build_tree(path: pathlib.Path, prefix: str = "", depth: int = 0) -> None:

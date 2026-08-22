@@ -97,7 +97,7 @@ def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str,
     use_git = True
     proj_data = dm.get_project_data(root)
     ex_str = proj_data.get("excludes", "")
-    manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+    manual_excludes = [e.strip() for e in ex_str.split() if e.strip()]
 
     all_files = FileUtils.flatten_paths(req.paths, root, manual_excludes, use_git)
 
@@ -129,6 +129,10 @@ def update_global_settings(
     data = req.model_dump(exclude_unset=True)
     if "settings" in data and isinstance(data["settings"], dict):
         data.update(data.pop("settings"))
+    # Explicit nulls on optional fields mean "leave unchanged" (the frontend
+    # serializes empty inputs as null); dropping them keeps GlobalSettings
+    # validation strict for real values instead of failing with a 500.
+    data = {k: v for k, v in data.items() if v is not None}
 
     dm.update_global_settings(data)
     return {"status": "ok"}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import os
 import pathlib
@@ -11,7 +12,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
-from file_cortex_core import ActionBridge, DataManager, FormatUtils, logger, search_generator
+from file_cortex_core import (
+    ActionBridge,
+    DataManager,
+    FormatUtils,
+    PathValidator,
+    logger,
+    search_generator,
+)
 from routers.common import register_process, unregister_process
 from routers.services import (
     get_dm,
@@ -76,7 +84,10 @@ async def websocket_search(
             try:
                 future.result(timeout=0.1)
                 return True
-            except TimeoutError:
+            except (TimeoutError, concurrent.futures.TimeoutError):
+                # NOTE: on Python 3.10 concurrent.futures.TimeoutError is NOT
+                # the builtin TimeoutError (unified in 3.11); catch both so
+                # backpressure still works on the 3.10 support tier.
                 future.cancel()
         return False
 
@@ -100,8 +111,11 @@ async def websocket_search(
                 if stop_event.is_set():
                     break
                 if not enqueue({
+                    # Normalize like every other path the frontend receives
+                    # (tree nodes, staging_list) so search-result staging does
+                    # not create duplicate entries differing only by separator.
+                    "path": PathValidator.norm_path(res_dict["path"]),
                     "name": os.path.basename(res_dict["path"]),
-                    "path": res_dict["path"],
                     "type": res_dict["match_type"],
                     "size": res_dict["size"],
                     "size_fmt": FormatUtils.format_size(res_dict["size"]),
@@ -189,7 +203,9 @@ async def websocket_action_stream(
             try:
                 future.result(timeout=0.1)
                 return True
-            except TimeoutError:
+            except (TimeoutError, concurrent.futures.TimeoutError):
+                # Python 3.10 compatibility: concurrent.futures.TimeoutError
+                # is a distinct type there (unified with TimeoutError in 3.11).
                 future.cancel()
         return False
 

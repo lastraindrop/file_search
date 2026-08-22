@@ -1,6 +1,18 @@
 # FileCortex Roadmap
 
-> Current version: 6.5.2 | Updated: 2026-08-09 | Current verification: 788 passed, Ruff 0 errors
+> Current version: 6.5.3 | Updated: 2026-08-23 | Current verification: 800 passed, Ruff 0 errors
+
+## Delivered in 6.5.3
+
+- [x] Windows config-lock liveness probe replaced with a console-safe Win32 API check (previously sent Ctrl+C to itself).
+- [x] Corrupt/out-of-range disk config no longer bricks saves; the file is rewritten from in-memory state.
+- [x] Desktop path-collection dialog presets work with Pydantic profile models.
+- [x] Case-only renames work on case-insensitive filesystems; ZIP archive members use forward-slash names.
+- [x] Global-settings API tolerates null fields; the Web UI guards NaN inputs.
+- [x] WebSocket backpressure handles Python 3.10's `concurrent.futures.TimeoutError`; CORS preflight passes through token auth.
+- [x] Tree view honors directory-only gitignore rules; exclude patterns are case-faithful on POSIX.
+- [x] CLI exits non-zero on failures; CLI/MCP search honors the project's content-size limit; MCP search runs off the event loop.
+- [x] Desktop tool execution moved to a background thread (UI no longer freezes).
 
 ## Delivered in 6.5.2
 
@@ -26,7 +38,7 @@
 
 - [x] wheel/sdist include `templates`, `static`, and `file_cortex_core.gui`.
 - [x] Added regression coverage for external-path rejection, rename traversal, configuration merging, copy rollback, ZIP limits, XML parsing, tag consistency, and frontend race guards.
-- [x] Current baseline: 788 passed, Ruff 0 errors, wheel/sdist build verified.
+- [x] Current baseline: 800 passed, Ruff 0 errors, wheel/sdist build verified.
 
 ## Next: Phase 1 Usability
 
@@ -64,6 +76,7 @@
 
 | Version | Date | Release snapshot |
 |---|---|---|
+| 6.5.3 | 2026-08-23 | Review-driven bugfix round: Windows lock probe, corrupt-config recovery, case-only rename, gitignore/tree parity, CLI exit codes, WS 3.10 compat; 800 passed. |
 | 6.5.2 | 2026-08-09 | P0/P1/P2 security, correctness, packaging, and consistency remediation; 786 passed. |
 | 6.5.1+ | 2026-07-25 | Frontend event delegation, themes, virtual search results, layout controls, and stabilization. |
 | 6.5.1 | 2026-06-15 | Deployment hardening, MCP packaging, path validation, and process handling. |

@@ -26,12 +26,25 @@ from file_cortex_core import DataManager, PathValidator
 # Helpers
 # ----------------------------------------------------------------------------
 
-def _run_cli(argv):
-    """Invoke ``fctx.main`` with a synthetic argv (matches existing CLI tests)."""
+def _run_cli(argv, expect_failure=False):
+    """Invoke ``fctx.main`` with a synthetic argv (matches existing CLI tests).
+
+    Args:
+        argv: The synthetic command line.
+        expect_failure: When True, the command must exit non-zero (SystemExit
+            code 1), which is asserted and swallowed.
+    """
+    import pytest
+
     from fctx import main as cli_main
 
     with patch("sys.argv", argv):
-        cli_main()
+        if expect_failure:
+            with pytest.raises(SystemExit) as exc_info:
+                cli_main()
+            assert exc_info.value.code == 1
+        else:
+            cli_main()
 
 
 def _register_project(dm, project_path):
@@ -145,17 +158,21 @@ class TestCLIStagePersists:
         assert live.staging_list.count(norm_expected) == 1
 
     def test_stage_unsafe_path_not_persisted(self, clean_config, mock_project, tmp_path, capsys):
-        """A path outside the project root is rejected and never persisted."""
+        """A path outside the project root is rejected, never persisted, exit 1."""
+        import pytest
+
         dm = clean_config
         _register_project(dm, mock_project)
         outside = tmp_path / "outside_proj" / "evil.py"
         outside.parent.mkdir(parents=True)
         outside.write_text("bad", encoding="utf-8")
 
-        _run_cli(["fctx", "stage", str(mock_project), str(outside)])
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli(["fctx", "stage", str(mock_project), str(outside)])
 
         out = capsys.readouterr().out
         assert "ERROR" in out or "unsafe" in out.lower()
+        assert exc_info.value.code == 1
         assert dm.get_project_data_obj(str(mock_project)).staging_list == []
 
 
@@ -216,7 +233,10 @@ class TestCLICategorizeClearsStaging:
         _register_project(dm, mock_project)
         assert dm.get_project_data_obj(str(mock_project)).staging_list == []
 
-        _run_cli(["fctx", "categorize", str(mock_project), "Scripts"])
+        _run_cli(
+            ["fctx", "categorize", str(mock_project), "Scripts"],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "Staging list is empty." in out
@@ -232,7 +252,10 @@ class TestCLICategorizeClearsStaging:
         dm.batch_stage(str(mock_project), [str(target)])
         before = list(dm.get_project_data_obj(str(mock_project)).staging_list)
 
-        _run_cli(["fctx", "categorize", str(mock_project), "NoSuchCategory"])
+        _run_cli(
+            ["fctx", "categorize", str(mock_project), "NoSuchCategory"],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "ERROR" in out
@@ -290,7 +313,7 @@ class TestCLIRunLegacyConfigFallback:
 
         monkeypatch.setattr(DataManager, "get_project_data", _legacy_project_data)
 
-        _run_cli(["fctx", "run", str(mock_project), "Summary"])
+        _run_cli(["fctx", "run", str(mock_project), "Summary"], expect_failure=True)
 
         assert "Tool 'Summary' not found." in capsys.readouterr().out
 
@@ -323,7 +346,10 @@ class TestCLICopy:
         outside = tmp_path / "outside.txt"
         outside.write_text("secret", encoding="utf-8")
 
-        _run_cli(["fctx", "copy", str(mock_project), str(outside), str(mock_project / "src")])
+        _run_cli(
+            ["fctx", "copy", str(mock_project), str(outside), str(mock_project / "src")],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "ERROR" in out
@@ -341,7 +367,7 @@ class TestCLICopy:
         _run_cli([
             "fctx", "copy", str(mock_project),
             str(mock_project / "README.md"), str(outside_dir),
-        ])
+        ], expect_failure=True)
 
         out = capsys.readouterr().out
         assert "ERROR" in out
@@ -352,7 +378,10 @@ class TestCLICopy:
         _register_project(dm, mock_project)
         missing = mock_project / "missing.txt"
 
-        _run_cli(["fctx", "copy", str(mock_project), str(missing), str(mock_project / "src")])
+        _run_cli(
+            ["fctx", "copy", str(mock_project), str(missing), str(mock_project / "src")],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "ERROR" in out
@@ -434,7 +463,10 @@ class TestCLIExtract:
         outside = tmp_path / "escape"
         outside.mkdir()
 
-        _run_cli(["fctx", "extract", str(mock_project), str(archive), str(outside)])
+        _run_cli(
+            ["fctx", "extract", str(mock_project), str(archive), str(outside)],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "ERROR" in out
@@ -445,7 +477,10 @@ class TestCLIExtract:
         _register_project(dm, mock_project)
         missing = mock_project / "missing.zip"
 
-        _run_cli(["fctx", "extract", str(mock_project), str(missing), str(mock_project / "out")])
+        _run_cli(
+            ["fctx", "extract", str(mock_project), str(missing), str(mock_project / "out")],
+            expect_failure=True,
+        )
 
         out = capsys.readouterr().out
         assert "ERROR" in out

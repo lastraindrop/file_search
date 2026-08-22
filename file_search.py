@@ -887,7 +887,12 @@ class FileCortexApp:
     def execute_tool_on_paths(
         self, tool_name: str, paths: list[pathlib.Path]
     ) -> None:
-        """Executes a configured custom tool on the provided paths."""
+        """Executes a configured custom tool on the provided paths.
+
+        Runs in a background thread so a slow tool (up to FCTX_EXEC_TIMEOUT,
+        default 300s per file) does not freeze the Tk main thread; results
+        are rendered back on the main thread via ``root.after``.
+        """
         if not self.current_dir or not paths:
             return
 
@@ -897,39 +902,61 @@ class FileCortexApp:
         if not template:
             return
 
+        # H3: never hand an out-of-workspace path to an external tool
+        # (tool templates may run with shell=True).
+        safe_paths = [p for p in paths if self._is_within_project(p)]
+        if not safe_paths:
+            logger.warning("Tool exec skipped: no paths inside the project root.")
+            return
+
         self.tools_scroll.config(state=tk.NORMAL)
         self.tools_scroll.insert(tk.END, f"\n> 执行: {tool_name}\n", "cyan")
-        for path_obj in paths:
-            # H3: never hand an out-of-workspace path to an external tool
-            # (tool templates may run with shell=True).
-            if not self._is_within_project(path_obj):
-                logger.warning(f"Tool exec Skip: path outside project root: {path_obj}")
-                continue
-            file_name = path_obj.name
-            res = ActionBridge.execute_tool(
-                template, str(path_obj), str(self.current_dir)
-            )
-            if "error" in res:
-                self.tools_scroll.insert(
-                    tk.END,
-                    f"FAIL: {file_name} - {res['error']}\n",
-                    "red",
-                )
-            else:
-                tag = "green" if res["exit_code"] == 0 else "red"
-                self.tools_scroll.insert(
-                    tk.END,
-                    f"DONE: {file_name} (Exit: {res['exit_code']})\n",
-                    tag,
-                )
-                if res["stdout"]:
-                    out_text = res["stdout"][:200]
-                    self.tools_scroll.insert(
-                        tk.END, f"  - {out_text.strip()}\n", "yellow"
-                    )
-
         self.tools_scroll.config(state=tk.DISABLED)
         self.tools_scroll.see(tk.END)
+
+        root_str = str(self.current_dir)
+
+        def run_in_background() -> None:
+            results: list[tuple[str, dict]] = []
+            for path_obj in safe_paths:
+                res = ActionBridge.execute_tool(template, str(path_obj), root_str)
+                results.append((path_obj.name, res))
+            try:
+                self.root.after(0, lambda: self._render_tool_results(results))
+            except Exception:
+                logger.exception("Failed to schedule tool result rendering")
+
+        threading.Thread(target=run_in_background, daemon=True).start()
+
+    def _render_tool_results(self, results: list[tuple[str, dict]]) -> None:
+        """Renders tool execution results on the Tk main thread."""
+        try:
+            self.tools_scroll.config(state=tk.NORMAL)
+            for file_name, res in results:
+                if "error" in res:
+                    self.tools_scroll.insert(
+                        tk.END,
+                        f"FAIL: {file_name} - {res['error']}\n",
+                        "red",
+                    )
+                else:
+                    tag = "green" if res["exit_code"] == 0 else "red"
+                    self.tools_scroll.insert(
+                        tk.END,
+                        f"DONE: {file_name} (Exit: {res['exit_code']})\n",
+                        tag,
+                    )
+                    if res["stdout"]:
+                        out_text = res["stdout"][:200]
+                        self.tools_scroll.insert(
+                            tk.END, f"  - {out_text.strip()}\n", "yellow"
+                        )
+            self.tools_scroll.config(state=tk.DISABLED)
+            self.tools_scroll.see(tk.END)
+        except Exception:
+            logger.exception(
+                "Failed to render tool results (window may have been closed)"
+            )
 
     def ctx_execute_custom_tool(self, tool_name: str) -> None:
         """Executes a custom tool for the current context-menu selection."""
@@ -975,7 +1002,7 @@ class FileCortexApp:
         def run_calc() -> None:
             try:
                 manual_excludes = [
-                    e.lower().strip() for e in ex_str.split() if e.strip()
+                    e.strip() for e in ex_str.split() if e.strip()
                 ]
 
                 all_files = FileUtils.flatten_paths(
@@ -1334,7 +1361,7 @@ class FileCortexApp:
         """
         try:
             ex = [
-                e.lower().strip() for e in self.exclude_var.get().split() if e.strip()
+                e.strip() for e in self.exclude_var.get().split() if e.strip()
             ]
             git_spec = (
                 FileUtils.get_gitignore_spec(self.current_dir)
@@ -1546,7 +1573,7 @@ class FileCortexApp:
 
         ex_str = self.exclude_var.get()
         use_git = self.use_gitignore_var.get()
-        manual_excludes = [e.lower().strip() for e in ex_str.split() if e.strip()]
+        manual_excludes = [e.strip() for e in ex_str.split() if e.strip()]
 
         fmt = self.export_format_var.get()
         if fmt == "xml":

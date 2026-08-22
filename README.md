@@ -1,6 +1,6 @@
-# FileCortex v6.5.2 (工作区编排助手)
+# FileCortex v6.5.3 (工作区编排助手)
 
-> **版本**: 6.5.2 | **日期**: 2026-08-09 | **测试**: 788 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.5.3 | **日期**: 2026-08-23 | **测试**: 800 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -76,6 +76,7 @@ python file_search.py
 python web_app.py
 # 浏览器访问 http://127.0.0.1:8000
 ```
+> **部署约束**: 进度追踪（copy/extract 任务）为进程内实现，Web 服务必须以**单进程**运行（默认即是），请勿使用 `uvicorn --workers N` 多进程部署，否则轮询任务的进度端点可能返回 404。
 
 ### CLI 工具
 ```bash
@@ -119,8 +120,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **788 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
-- **测试结果**: 788 passed, 0 failed
+- **800 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
+- **测试结果**: 800 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -190,7 +191,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.2 |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.3 |
 
 ---
 

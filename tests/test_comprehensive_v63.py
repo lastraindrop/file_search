@@ -33,13 +33,18 @@ class TestCLI:
             cli_main()
 
     def test_cli_open_nonexistent_path(self, capsys):
-        """CLI open command with nonexistent path."""
+        """CLI open command with nonexistent path exits non-zero."""
+        import pytest
+
         from fctx import main as cli_main
 
-        with patch("sys.argv", ["fctx", "open", "/nonexistent/path/12345"]):
+        with patch("sys.argv", ["fctx", "open", "/nonexistent/path/12345"]), pytest.raises(
+            SystemExit
+        ) as exc_info:
             cli_main()
         captured = capsys.readouterr()
         assert "ERROR" in captured.out or "does not exist" in captured.out
+        assert exc_info.value.code == 1
 
     def test_cli_projects_list(self, mock_project, capsys):
         """CLI projects list command."""
@@ -63,13 +68,18 @@ class TestCLI:
         assert "usage" in captured.out.lower() or "open" in captured.out.lower()
 
     def test_cli_open_system_dir_blocked(self, capsys, system_dir):
-        """CLI blocks system directory registration."""
+        """CLI blocks system directory registration and exits non-zero."""
+        import pytest
+
         from fctx import main as cli_main
 
-        with patch("sys.argv", ["fctx", "open", system_dir]):
+        with patch("sys.argv", ["fctx", "open", system_dir]), pytest.raises(
+            SystemExit
+        ) as exc_info:
             cli_main()
         captured = capsys.readouterr()
         assert "ERROR" in captured.out or "unsafe" in captured.out.lower()
+        assert exc_info.value.code == 1
 
 
 # ============================================================================

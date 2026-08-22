@@ -1,6 +1,6 @@
 # FileCortex Current Engineering Plan
 
-> Version: 6.5.2 | Updated: 2026-08-09 | Verification baseline: 788 passed, Ruff 0 errors, wheel/sdist built
+> Version: 6.5.3 | Updated: 2026-08-23 | Verification baseline: 800 passed, Ruff 0 errors, wheel/sdist built
 
 ## Purpose
 
@@ -15,6 +15,8 @@ The P0/P1/P2 remediation tranche is complete.
 - P0: Web trust boundary, project containment, destructive file operations, preview safety, packaging resources, and staging data loss.
 - P1: cross-process configuration merge, batch copy/extract recovery, ZIP resource limits, structured categorization failures, and bounded WebSocket transport.
 - P2: XML validity, context truncation visibility, search backpressure and tag behavior, frontend request generations, progress polling, and UI consistency.
+
+The v6.5.3 review-driven round is complete as well: Windows lock liveness probe, corrupt-config recovery, desktop preset Pydantic compatibility, case-only rename, case-faithful excludes, gitignore directory rules in the tree view, null-tolerant settings API, CLI exit codes, per-entry-point search-size alignment, WebSocket 3.10 backpressure compatibility, CORS preflight, and threaded desktop/MCP tool execution. See TECHNICAL_GUIDE §9.1 for the full fix archive. Baseline: 800 passed, Ruff 0 errors.
 
 The next work is deliberate product improvement, not another broad stabilization rewrite.
 

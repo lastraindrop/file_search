@@ -99,7 +99,15 @@ def get_children(path_str: str, dm: DataManager | None = None) -> list[dict[str,
                     else:
                         continue
 
-                if FileUtils.should_ignore(entry.name, rel, excludes, git_spec):
+                try:
+                    entry_is_dir = entry.is_dir()
+                except OSError:
+                    entry_is_dir = False
+                # Pass the directory flag so directory-only gitignore rules
+                # (e.g. "build/") hide directories exactly like walk_filtered.
+                if FileUtils.should_ignore(
+                    entry.name, rel, excludes, git_spec, entry_is_dir
+                ):
                     continue
                 children.append(get_node_info(pathlib.Path(entry.path), project_root))
     except (PermissionError, OSError):
