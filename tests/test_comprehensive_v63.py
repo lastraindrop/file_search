@@ -59,11 +59,14 @@ class TestCLI:
         assert mock_project.name in captured.out
 
     def test_cli_no_command_shows_help(self, capsys):
-        """CLI with no command prints help."""
+        """CLI with no command prints help and exits non-zero."""
+        import pytest
+
         from fctx import main as cli_main
 
-        with patch("sys.argv", ["fctx"]):
+        with patch("sys.argv", ["fctx"]), pytest.raises(SystemExit) as exc:
             cli_main()
+        assert exc.value.code == 2
         captured = capsys.readouterr()
         assert "usage" in captured.out.lower() or "open" in captured.out.lower()
 

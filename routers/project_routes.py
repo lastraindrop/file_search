@@ -99,6 +99,12 @@ def get_recent_projects_legacy(dm: DataManager = _dm_dep) -> list[dict[str, str]
 @project_router.post("/api/project/note")
 def api_add_note(req: NoteRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Adds a note to a file."""
+    # Registration gate: without this, is_path_safe() alone proves only
+    # containment, and DataManager.add_note() would silently register an
+    # arbitrary directory (e.g. the system root) as a project root,
+    # bypassing validate_project() blocklists for all later endpoints.
+    if not get_valid_project_root(req.project_path, dm):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     dm.add_note(req.project_path, req.file_path, req.note)
@@ -108,6 +114,9 @@ def api_add_note(req: NoteRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
 @project_router.post("/api/project/tag")
 def api_manage_tag(req: TagRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
     """Manages tags on a file."""
+    # Same registration gate as /api/project/note (see comment there).
+    if not get_valid_project_root(req.project_path, dm):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not is_path_safe(req.file_path, req.project_path):
         raise HTTPException(status_code=403, detail="Path unsafe")
     if req.action == "add":

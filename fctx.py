@@ -435,7 +435,10 @@ def main() -> None:
         if ok is False:
             sys.exit(1)
     else:
+        # No subcommand given (or an invalid one): print help and exit
+        # non-zero so shell pipelines / CI can detect the miss.
         parser.print_help()
+        sys.exit(2)
 
 
 if __name__ == "__main__":

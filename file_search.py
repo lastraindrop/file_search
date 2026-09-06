@@ -81,6 +81,9 @@ class FileCortexApp:
         self.negative_tags: list[str] = []
         self.current_preview_path: pathlib.Path | None = None
         self.is_editing = False
+        # Snapshot of the last loaded (or saved) preview content; used by
+        # the unsaved-edit guard in on_tree_select_preview.
+        self._last_loaded_preview: str | None = None
         self.active_tree = None  # set on context-menu open; guarded elsewhere
         # L1: dead `results_count` state removed (was written, never read).
 
@@ -1296,6 +1299,18 @@ class FileCortexApp:
         if not full_path or not full_path.exists():
             return
 
+        # Unsaved-edit guard: switching the preview target while editing
+        # would silently discard the user's in-progress changes (the Web UI
+        # shows a discard confirmation for the same situation).
+        if self.is_editing and full_path != self.current_preview_path:
+            dirty = self.preview_text.get("1.0", tk.END).rstrip("\n")
+            saved = self._last_loaded_preview or ""
+            if dirty != saved.rstrip("\n") and not messagebox.askyesno(
+                "未保存的修改",
+                "当前文件有未保存的修改。\n切换预览将丢弃这些修改，是否继续？",
+            ):
+                return
+
         self.current_preview_path = full_path
         self.is_editing = False
         self.btn_edit_save.config(text="✏️ 开启编辑")
@@ -1307,17 +1322,23 @@ class FileCortexApp:
             if FileUtils.is_binary(full_path):
                 self.preview_text.insert(tk.END, "--- 二进制文件 ---")
                 self.btn_edit_save.config(state=tk.DISABLED)
+                self._last_loaded_preview = None
             else:
                 try:
                     limit = get_preview_limit(self.data_mgr)
                     content = FileUtils.read_text_smart(full_path, max_bytes=limit)
                     self.preview_text.insert(tk.END, content)
+                    self._last_loaded_preview = content
                     self.btn_edit_save.config(state=tk.NORMAL)
                 except Exception as e:
-                    self.preview_text.insert(tk.END, f"--- Error reading file: {e} ---")
+                    self.preview_text.insert(
+                        tk.END, f"--- Error reading file: {e} ---"
+                    )
+                    self._last_loaded_preview = None
                     self.btn_edit_save.config(state=tk.DISABLED)
         else:
             self.preview_text.insert(tk.END, f"目录: {full_path}")
+            self._last_loaded_preview = None
             self.btn_edit_save.config(state=tk.DISABLED)
         self.preview_text.config(state=tk.DISABLED)
         self.preview_text.see("1.0")
@@ -1669,6 +1690,7 @@ class FileCortexApp:
                     return
                 FileOps.save_content(str(self.current_preview_path), content)
                 self.is_editing = False
+                self._last_loaded_preview = content
                 self.preview_text.config(state=tk.DISABLED)
                 self.btn_edit_save.config(text="✏️ 开启编辑")
                 self.preview_frame.config(text="📄 内容预览 (只读)")

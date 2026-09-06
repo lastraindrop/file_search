@@ -63,8 +63,13 @@ class PathValidator:
             )
 
             if is_windows_target or is_windows_root:
-                # Disallow UNC paths as they can lead to credential leaking
-                if target_raw.startswith(UNC_PREFIXES):
+                # Disallow UNC paths as they can lead to credential leaking.
+                # `\\?\UNC\server\share` becomes `UNC\server\share` after
+                # the long-prefix strip above; treat that form as UNC too.
+                if (
+                    target_raw.startswith(UNC_PREFIXES)
+                    or target_raw.lower().startswith("unc\\")
+                ):
                     return False
 
                 # Normalize using ntpath for deterministic Windows logic
@@ -172,12 +177,29 @@ class PathValidator:
         # BUG-C3 fix: strip long-path prefix BEFORE UNC check.
         normalized_str = _strip_win_long_prefix(normalized_str)
 
-        if sys.platform == "win32" and normalized_str.startswith("\\\\"):
+        if sys.platform == "win32" and (
+            normalized_str.startswith("\\\\")
+            # `\\?\UNC\server\share` becomes `UNC\server\share` after the
+            # long-prefix strip; it is still a network path and must be
+            # blocked before any exists()/resolve() call can trigger SMB.
+            or normalized_str.lower().startswith("unc\\")
+        ):
             raise PermissionError(
                 "UNC/Network paths are blocked to prevent potential SMB credential leaks."
             )
 
-        p = pathlib.Path(path_str).resolve()
+        p = pathlib.Path(normalized_str).resolve()
+
+        # Defense in depth: a symlink chain or SUBST/mounted drive may
+        # resolve to a network share even when the literal input looked
+        # local. Any resolved UNC drive must be rejected here.
+        if sys.platform == "win32":
+            resolved_drive = ntpath.splitdrive(str(p))[0]
+            if resolved_drive.startswith("\\\\"):
+                raise PermissionError(
+                    "Path resolves to a UNC/Network location, which is blocked "
+                    "to prevent SMB credential leaks."
+                )
 
         if not p.exists():
             raise FileNotFoundError(f"Project path does not exist: {path_str}")

@@ -317,10 +317,12 @@ class TestCLIEdgeCases:
             DataManager.reset()
 
     def test_cli_no_command_shows_help(self, tmp_path):
-        """CLI with no command shows help text."""
+        """CLI with no command shows help text and exits non-zero."""
         from io import StringIO
         import sys
         from unittest.mock import patch
+
+        import pytest
 
         config_path = tmp_path / "cli_config2.json"
         with patch("file_cortex_core.config._CONFIG_FILE", config_path):
@@ -329,7 +331,9 @@ class TestCLIEdgeCases:
             with patch("sys.stdout", captured):
                 sys.argv = ["fctx"]
                 from fctx import main
-                main()
+                with pytest.raises(SystemExit) as exc:
+                    main()
+            assert exc.value.code == 2
             assert "FileCortex" in captured.getvalue() or "usage" in captured.getvalue().lower()
             DataManager.reset()
 
@@ -1102,14 +1106,18 @@ class TestCLISubcommandHandlerPattern:
             DataManager.reset()
 
     def test_cli_invalid_subcommand(self):
-        """fctx with unknown subcommand shows help."""
+        """fctx with unknown subcommand shows help and exits non-zero."""
         from io import StringIO
         import sys
         from unittest.mock import patch
+
+        import pytest
 
         captured = StringIO()
         with patch("sys.stdout", captured):
             sys.argv = ["fctx"]
             from fctx import main
-            main()
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 2
         assert "usage" in captured.getvalue().lower() or "FileCortex" in captured.getvalue()

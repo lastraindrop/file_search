@@ -211,9 +211,11 @@ class FileUtils:
             True if should be ignored.
         """
         for pattern in manual_excludes:
-            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(
-                str(rel_path), pattern
-            ):
+            # Manual patterns follow gitignore-style "/" separators (e.g.
+            # "docs/*"), but str(rel_path) yields "\" on Windows. Normalize
+            # so sub-path patterns work identically on every platform.
+            rel_posix = str(rel_path).replace("\\", "/")
+            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(rel_posix, pattern):
                 return True
         if git_spec:
             path_str = str(rel_path).replace(os.sep, "/")
@@ -389,6 +391,11 @@ class FileUtils:
             if not file_path.exists() or not file_path.is_file():
                 return ""
 
+            # Guard against negative limits: f.read(-1) would slurp the
+            # entire file, the exact opposite of the caller's intent.
+            if max_bytes is not None and max_bytes <= 0:
+                return ""
+
             st = file_path.stat()
             # If max_bytes is set and file is huge, read_text_smart must still be efficient
             encoding = FileUtils._detect_encoding(
@@ -465,12 +472,20 @@ class FileUtils:
                 "ext": p.suffix.lower(),
             }
         except Exception:
+            # Fallback shape must carry the full contract of the success
+            # branch: downstream consumers (e.g. ws_routes search frames)
+            # index keys like "path"/"type" directly.
+            fallback_name = pathlib.Path(path_obj).name
             return {
-                "size": 0,
-                "mtime": 0,
-                "ext": "",
+                "name": fallback_name,
+                "path": str(path_obj),
                 "abs_path": str(path_obj),
-                "name": pathlib.Path(path_obj).name,
+                "type": "file",
+                "size": 0,
+                "size_fmt": FormatUtils.format_size(0),
+                "mtime": 0,
+                "mtime_fmt": FormatUtils.format_datetime(0),
+                "ext": pathlib.Path(path_obj).suffix.lower(),
             }
 
     @staticmethod

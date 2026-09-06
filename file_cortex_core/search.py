@@ -12,7 +12,13 @@ import re
 import sys
 import threading
 from collections.abc import Generator
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    CancelledError,
+    Future,
+    ThreadPoolExecutor,
+    wait,
+)
 from typing import Any, Final
 
 from pydantic import BaseModel, Field
@@ -95,8 +101,9 @@ class SearchQuery(BaseModel):
     use_gitignore: bool = True
     is_inverse: bool = False
     case_sensitive: bool = False
-    max_results: int = MAX_SEARCH_RESULTS
-    max_size_mb: int = DEFAULT_MAX_SIZE_MB
+    max_results: int = Field(default=MAX_SEARCH_RESULTS, ge=1, le=MAX_SEARCH_RESULTS)
+    # 0 is a legitimate "read nothing" limit used to skip large-file reads.
+    max_size_mb: int = Field(default=DEFAULT_MAX_SIZE_MB, ge=0, le=4096)
     positive_tags: list[str] = Field(default_factory=list)
     negative_tags: list[str] = Field(default_factory=list)
 
@@ -338,13 +345,34 @@ def search_generator(
 
                 if len(content_futures) >= DEFAULT_BATCH_SIZE:
                     done_batch = [f for f in content_futures if f.done()]
-                    if not done_batch and content_futures:
+                    while not done_batch and content_futures:
                         # Backpressure: do not submit an unbounded number of
-                        # disk reads when the executor cannot keep up.
-                        done_batch = [next(as_completed(content_futures))]
+                        # disk reads when the executor cannot keep up. Wait
+                        # in short slices so stop_event stays responsive
+                        # (a bare next(as_completed(...)) would block
+                        # indefinitely and delay cancellation by seconds).
+                        _done, _pending = wait(
+                            content_futures,
+                            timeout=0.1,
+                            return_when=FIRST_COMPLETED,
+                        )
+                        done_batch = list(_done)
+                        if stop_event and stop_event.is_set():
+                            done_batch = []
+                            break
 
                     for f in done_batch:
-                        is_match, snippet = f.result()
+                        try:
+                            is_match, snippet = f.result()
+                        except (CancelledError, Exception):
+                            # Includes CancelledError (BaseException on
+                            # Python 3.8+): the shared pool can be
+                            # reinitialized by a concurrent search, which
+                            # cancels in-flight tasks. Without this handler
+                            # the exception would kill the generator and
+                            # leave the UI waiting for DONE forever.
+                            content_futures.pop(f, None)
+                            continue
                         info = content_futures.pop(f)
                         if is_match:
                             count += 1
@@ -361,22 +389,46 @@ def search_generator(
         if stop_event and stop_event.is_set():
             return
 
-        # Final cleanup of remaining content futures
-        for f in as_completed(content_futures):
+        # Final drain of remaining content futures.
+        #
+        # NOTE: neither as_completed() nor wait() reports futures in the
+        # CANCELLED state (as opposed to CANCELLED_AND_NOTIFIED) — a future
+        # cancelled by a concurrent pool reinit BEFORE the wait starts would
+        # block as_completed() forever. Harvest done() futures explicitly
+        # first, then bounded-wait for the rest; CancelledError escaping
+        # f.result() (BaseException on 3.8+) is caught so the generator can
+        # always reach its DONE sentinel.
+        while content_futures:
             if count >= query.max_results:
                 break
-            try:
-                is_match, snippet = f.result()
-                info = content_futures.pop(f)
-                if is_match:
+            batch = [f for f in content_futures if f.done()]
+            if not batch:
+                _done, _pending = wait(
+                    content_futures,
+                    timeout=0.2,
+                    return_when=FIRST_COMPLETED,
+                )
+                batch = list(_done)
+                if not batch:
+                    if stop_event and stop_event.is_set():
+                        break
+                    continue
+            for f in batch:
+                try:
+                    is_match, snippet = f.result()
+                    info = content_futures.pop(f, None)
+                except (Exception, CancelledError):
+                    content_futures.pop(f, None)
+                    continue
+                if is_match and info is not None:
                     count += 1
                     yield {
                         "match_type": "Content Match",
                         "snippet": snippet,
                         **info,
                     }
-            except Exception:
-                pass
+                    if count >= query.max_results:
+                        break
 
     finally:
         # Cancel any pending content search tasks
@@ -445,8 +497,10 @@ class SearchWorker(threading.Thread):
                 if self.stop_event.is_set():
                     break
                 self.result_queue.put(result)
-        except Exception as e:
+        except (Exception, CancelledError) as e:
             # BUG-C6 fix: push error to queue so UI knows the worker died.
+            # CancelledError (BaseException on 3.8+) must be listed
+            # explicitly or it would escape and skip the DONE sentinel.
             logger.exception("SearchWorker thread crashed")
             self.result_queue.put(("ERROR", str(e)))
         finally:

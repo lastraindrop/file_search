@@ -18,6 +18,13 @@ export async function _fetch(url, options = {}) {
         } catch (e) {
             detail = await res.text();
         }
+        // FastAPI 422 validation errors carry an ARRAY of {loc, msg} items;
+        // stringifying objects directly would render "[object Object]".
+        if (Array.isArray(detail)) {
+            detail = detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join("; ");
+        } else if (detail && typeof detail === "object") {
+            detail = JSON.stringify(detail);
+        }
         throw new Error(detail);
     }
     return res;

@@ -83,6 +83,8 @@ export const state = {
     collectionProfiles: {},
     isSidebarExpanded: false,
     activePid: null,
+    activeToolSocket: null,
+    toolRunInFlight: false,
     actionModalHandler: null,
     globalSettings: {},
     contextPath: null
@@ -126,4 +128,24 @@ export function buildWsUrl(path, params = {}) {
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
         .join("&");
     return qs ? `${base}?${qs}` : base;
+}
+
+export async function copyToClipboard(text) {
+    // navigator.clipboard only exists in secure contexts (https or
+    // localhost). LAN deployments over plain http must fall back to the
+    // deprecated execCommand path or every "copy" action would throw.
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
 }

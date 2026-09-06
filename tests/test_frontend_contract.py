@@ -127,7 +127,9 @@ def test_bulk_copy_extract_buttons_exist(api_client):
     assert "operationProgress" in html
     assert "operationProgressBar" in html
     assert 'id="bulkActions"' in html
-    assert 'justify-content-between align-items-center" style="display:none;"' in html
+    # v6.6.0: the bulk bar is always visible (Select-All must be reachable
+    # at zero selection); the buttons are disabled via updateBulkUI instead.
+    assert 'id="bulkActionButtons"' in html
     assert "0 selected" in html
 
 

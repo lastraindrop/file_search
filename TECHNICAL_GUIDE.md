@@ -1,6 +1,6 @@
 # FileCortex Technical Guide
 
-> Version: 6.5.3 | Updated: 2026-08-23 | Verification baseline: 800 passed, Ruff 0 errors
+> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors
 
 ## 1. What the System Does
 
@@ -69,7 +69,9 @@ request -> registered root -> real-path containment -> core FileOps
 
 ### 3.1 Workspace Containment
 
-`PathValidator.validate_project()` rejects missing, file, system, sensitive, and Windows UNC roots. `PathValidator.is_safe(target, root)` resolves paths before containment comparison, so an in-project symlink cannot authorize its external target.
+`PathValidator.validate_project()` rejects missing, file, system, sensitive, and Windows UNC roots — including the long-prefix UNC spelling `\\?\UNC\server\share`, which is checked *after* the `\\?\` strip and *again* after `resolve()` in case a symlink or SUBST drive resolves to a network location. `PathValidator.is_safe(target, root)` resolves paths before containment comparison, so an in-project symlink cannot authorize its external target; it applies the same double UNC check to targets. All network-path rejections happen **before** any `resolve()`/`exists()` call, because those calls themselves trigger SMB authentication with the server user's credentials.
+
+Registration is the only path into `config.projects`. `DataManager.get_project_data_obj()` refuses empty keys, and every metadata-mutating endpoint must resolve `project_path` through `dm.resolve_project_root()` (i.e. an already-registered root) before containment checks — containment alone does not register, and nothing else may auto-register (v6.6.0).
 
 Every path is checked twice where it matters:
 
@@ -81,9 +83,11 @@ Never replace this with `startswith()`, normalized-string comparison, or a front
 ### 3.2 Web Trust Boundary
 
 - The default listener is `127.0.0.1:8000`.
-- Default CORS allows the standard loopback origins. Same-origin requests are permitted for a custom Web port.
+- Default CORS allows the standard loopback origins. Same-origin is decided by the Origin **host**: loopback hosts (`127.0.0.1`, `localhost`, `::1`) with any port, or an explicit `FCTX_ALLOWED_ORIGINS` entry. The client-controlled `Host` header is never used for this decision — a forged `Origin` + `Host` pair would otherwise pass as "same-origin".
 - Binding outside loopback requires `FCTX_API_TOKEN`.
-- When configured, HTTP uses `X-API-Token`; WebSocket uses the `token` query parameter; both use constant-time comparison.
+- When configured, HTTP uses `X-API-Token`; WebSocket uses the `token` query parameter; both are encoded to UTF-8 bytes before the constant-time comparison, so non-ASCII header values return 401 instead of raising `TypeError` inside `compare_digest(str, str)`.
+- WebSocket auth failures `accept()` the handshake first, then `close(code=4001)`. Closing before accept makes the ASGI server answer the upgrade with a bare HTTP 403 and the custom code never reaches a browser.
+- On shutdown, the FastAPI lifespan terminates any tool subprocesses still tracked by `ProcessManager`, so server exits and `--reload` restarts do not orphan detached children.
 - `FCTX_PROD=1` hides unexpected exception details only.
 
 This is a local application security model, not a multi-user authorization system. A network deployment requires a token, explicit origins, TLS/reverse-proxy policy, and an operational threat-model review.
@@ -131,7 +135,8 @@ The model is the backend source of truth; frontend defaults are only initial dis
 | `apply_noise_reducer` | `GenerateRequest` | `/api/generate` | null means use global setting |
 | `FCTX_API_TOKEN` | environment | HTTP header / WS query | unset only for loopback mode |
 | `FCTX_ALLOWED_ORIGINS` | environment | CORS middleware | loopback origins by default |
-| `__version__` | `file_cortex_core.__version__` | Jinja template | 6.5.3 |
+| `FCTX_EXEC_TIMEOUT` | environment | tool execution (HTTP, WS since 2.0 batch pending) | 300; invalid values fall back to 300 with a warning |
+| `__version__` | `file_cortex_core.__version__` | Jinja template | dynamic (no hard-coded default anywhere) |
 
 ### 5.1 Dynamic Default Alignment
 
@@ -169,17 +174,30 @@ Avoid these historical failure modes:
 - Unconditional `lower()` on exclude patterns: breaks case-faithful paths on POSIX. Case semantics are platform-defined, see §5.2.
 - Treating disk configuration as trustworthy: a corrupt or out-of-range `config.json` must be rejected and the file rewritten from in-memory state, otherwise every later save bricks permanently.
 - Reporting a case-only rename (`a.txt` -> `A.txt`) as a conflict: compare candidate paths with `os.path.normcase()` first, see §5.2.
-- CLI failure paths exiting with code 0: every `cmd_*` handler returns a boolean and `main()` calls `sys.exit(1)` on failure so scripts can detect errors programmatically.
+- CLI failure paths exiting with code 0: every `cmd_*` handler returns a boolean and `main()` calls `sys.exit(1)` on failure so scripts can detect errors programmatically. A missing/unknown subcommand prints help and exits **2**.
 - Assuming `TimeoutError` is unified across Python versions: 3.10's `concurrent.futures.TimeoutError` is a distinct type, catch both.
 - Letting a UI value `NaN` reach the backend as a setting: the API treats `null` as "no change" and the frontend guards NaN before sending.
+- Catching `CancelledError` with `except Exception`: it derives from `BaseException` since Python 3.8, so the escape kills generators/worker threads before their DONE sentinel. Always list it explicitly around `future.result()` (v6.6.0).
+- Trusting `as_completed()`/`wait()` to report cancelled futures: futures already in the `CANCELLED` state (as opposed to `CANCELLED_AND_NOTIFIED`) are silently treated as pending and block forever. Harvest `f.done()` explicitly before waiting, and prefer bounded `wait(timeout=...)` slices over bare `next(as_completed(...))` so cancellation stays responsive (v6.6.0).
+- Passing raw strings to `hmac.compare_digest`: HTTP headers are latin-1 decoded and may contain non-ASCII, which raises `TypeError` (surfaces as a 500). Encode both sides to bytes first (v6.6.0).
+- Closing a WebSocket before `accept()` when you want the client to see a custom close code: the server answers the upgrade with HTTP 403 and the code is lost. Accept, then close (v6.6.0).
+- Deriving "same-origin" from `request.base_url`: it is built from the client-controlled `Host` header. Compare origins against loopback hosts or an explicit allowlist (v6.6.0).
+- Treating path containment as authorization: `is_safe(file, project_path)` proves only geometry. Metadata-mutating endpoints must first resolve `project_path` to a registered root, or `get_project_data_obj` auto-registers arbitrary directories (v6.6.0).
+- Free-form request fields: enum-ish values get `Literal` (`export_format` — `"XML"` silently fell through to markdown), numeric fields get `ge/le` bounds (`max_size_mb=-1` previously reached `f.read(-1)` and read whole files) (v6.6.0).
+- Writing a rejected operation's side effects first: `extract_archive` used to `mkdir` the destination before validation, leaving empty dirs behind rejected archives. Validate, then mutate (v6.6.0).
+- Frontend: reading server state after scheduling a debounced write — the reload races the 500ms debounce and resurrects stale data. Await `syncStagingToBackend.flushNow()` before refreshing (v6.6.0).
+- Tk clipboard: `clipboard_append()` followed by immediate `destroy()` loses the content because Tk still owns the selection; call `update()` first (v6.6.0).
+- `navigator.clipboard` without a Secure Context check: on plain-HTTP LAN deployments it is `undefined` and every copy action throws; fall back to `execCommand('copy')` (v6.6.0).
 
 ## 6. Search and Streaming
 
 `PathMatcher` applies explicit positive/negative tags consistently in smart, exact, regex, and content flows. Smart mode derives path keywords from the query; other modes preserve their query semantics and apply only explicit tags.
 
-Content search shares a thread pool but limits in-flight futures. Once the threshold is reached, the iterator waits for a completion before submitting another read. Cancellation avoids waiting for the remaining futures.
+Content search shares a thread pool but limits in-flight futures. Once the threshold is reached the iterator waits in 0.1s `wait(FIRST_COMPLETED)` slices, checking `stop_event` between slices, so a stuck executor delays cancellation by at most one slice (previously a bare `next(as_completed(...))` could block indefinitely). Task results are harvested defensively: `CancelledError` (a `BaseException` on 3.8+) is caught explicitly wherever `future.result()` is called, and the final drain first harvests `f.done()` futures — `as_completed()`/`wait()` never report futures already in the `CANCELLED` state — then bounded-waits for the rest. Every exit path (cancel, error, completion) still delivers the worker's DONE/ERROR sentinel to the UI queue.
 
-WebSocket search and tool execution use bounded async queues. Producer threads block while a slow client consumes data, instead of allocating an unbounded result list. Disconnect and error paths set stop signals and terminate registered tool processes. Backpressure waits catch both the builtin `TimeoutError` (3.11+) and `concurrent.futures.TimeoutError` (3.10), so the 3.10 support tier behaves identically.
+Manual exclude patterns match both the file name and the rel-path in POSIX form (`str(rel_path).replace("\\", "/")`), so gitignore-style sub-path patterns like `docs/*` behave identically on Windows and POSIX. `FileUtils.get_metadata` returns the full key contract (`name/path/abs_path/type/size/size_fmt/mtime/mtime_fmt/ext`) on its failure fallback, so WS search frames built from vanished files cannot `KeyError`.
+
+WebSocket search and tool execution use bounded async queues. Producer threads block while a slow client consumes data, instead of allocating an unbounded result list. Disconnect and error paths set stop signals and terminate registered tool processes; a search thread that crashes mid-scan now enqueues an explicit `{"status": "ERROR", "msg": ...}` frame before the final DONE, so clients never mistake a crash for a clean finish. Backpressure waits catch both the builtin `TimeoutError` (3.11+) and `concurrent.futures.TimeoutError` (3.10), so the 3.10 support tier behaves identically.
 
 ## 7. Context Formats and Limits
 
@@ -209,20 +227,21 @@ Token estimates are heuristic, not model-tokenizer exact. Future context-compile
 
 ## 9. Testing Strategy
 
-The suite has 800 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
+The suite has 846 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
 
 Important regression families:
 
 | Area | Representative coverage |
 |---|---|
-| containment | external context paths, symlink paths, rename traversal, archive targets |
-| persistence | snapshot isolation, independent instance merge, schema ranges |
-| file operations | copy rollback, ZIP slip, ZIP resource limits, conflict behavior |
+| containment | external context paths, symlink paths, rename traversal, archive targets, UNC long-prefix forms |
+| persistence | snapshot isolation, independent instance merge, schema ranges, corrupt-config backup |
+| file operations | copy rollback, ZIP slip, ZIP resource limits, conflict behavior, rejected-extract dir hygiene |
 | context | CDATA, XML parsing, truncation, noise reducer |
-| search | four modes, tags, cancellation, shared-pool recovery |
-| frontend | preview/search race guards, staging sync, progress contract |
+| search | four modes, tags, cancellation, shared-pool recovery, cancelled-future drain, backpressure stop responsiveness |
+| frontend | preview/search race guards, staging sync, progress contract, clipboard fallback |
 | packaging | entry modules, runtime assets, versions, docs test-count consistency |
 | v6.5.3 fixes | Windows lock probe, preset Pydantic compat, corrupt-config recovery, case-only rename, null-setting tolerance, gitignore directory rules, case-faithful excludes, ZIP slash names, CLI exit codes, search-size alignment, WS 3.10 backpressure, threaded desktop tools |
+| v6.6.0 fixes | UNC long-prefix bypass, note/tag registration gate, MCP transport wiring, POSIX process-group detach, corrupt-config backup, search CancelledError/cancelled-future drain, backpressure stop responsiveness, sub-path excludes, metadata fallback contract, WS ERROR frame, duplicate cancel sentinel, WS 4001 delivery, origin/Host hardening, byte-wise token compare, lifespan process cleanup, extract UNC source + dir hygiene, schema Literal/bounds, CLI exit-2, literal rename replacement, timeout-env fallback |
 
 ### 9.1 v6.5.3 Fix Archive (process and results)
 
@@ -243,6 +262,24 @@ The v6.5.3 round started from a full-repo review that produced a numbered bug li
 
 Verification result: `800 passed` (788 baseline + 12 new), `ruff check .` clean, packaging count guard updated to 800.
 
+### 9.2 v6.6.0 Review-Driven Hardening Archive (process and results)
+
+The v6.6.0 round started from a four-way parallel deep review (core / web+entries / frontend+GUI / test suite) whose findings were re-verified by hand against the source before any fix. Every fix landed with an anchored regression test in `tests/test_v660_review_fixes.py` (46 tests); four pre-existing tests were updated because the fixes intentionally changed observable behavior (WS close-code delivery, CLI no-subcommand exit code, bulk bar visibility contract). Full findings, deferred items, and the batched forward plan live in `docs/CODE_REVIEW_V660.md` and `docs/IMPLEMENTATION_PLAN_V660.md`. Key mechanisms:
+
+- **UNC long-prefix bypass (P1)**: `security.py` now treats `UNC\server\share` (the `\\?\UNC\...` form after prefix stripping) as a network path in both `validate_project` and `is_safe`, and re-checks the resolved drive letter for `\\` — a symlink/SUBST chain that resolves onto a share is rejected too. All checks run before any `resolve()`/`exists()` that could touch SMB.
+- **note/tag registration bypass (P1)**: `/api/project/note` and `/api/project/tag` resolve `project_path` through `get_valid_project_root` first. Previously containment alone plus `get_project_data_obj`'s create-if-missing semantics silently registered arbitrary directories (e.g. the system root) and opened them to every other endpoint.
+- **MCP transport wiring (P1)**: `main()` forwards `transport` to `FastMCP.run()`; the legacy `--transport http` alias maps to `streamable-http`, and `sse`/`streamable-http` are accepted directly. HTTP mode is actually usable now.
+- **POSIX process-group self-kill (P1)**: `execute_tool`'s `Popen` sets `start_new_session=True` off-Windows so the timeout path's `killpg` can no longer SIGTERM the server itself.
+- **Corrupt-config backup (P1)**: `save()` copies a corrupt `config.json` to `config.json.corrupt-<timestamp>` before rewriting from in-memory state — no more unrecoverable data loss.
+- **Search future lifecycle (P2)**: `CancelledError` is caught explicitly at all three `f.result()` sites and in `SearchWorker.run`; the final drain harvests `f.done()` futures first (as_completed/wait never report the CANCELLED state) and bounded-waits in 0.2s slices with stop checks; the backpressure wait runs in 0.1s slices. A stuck or reinitialized pool can no longer hang or crash the generator before its DONE sentinel.
+- **Exclude/metadata contract (P2)**: manual sub-path patterns are matched against POSIX-separated rel paths (Windows parity); `get_metadata`'s failure fallback carries the full success-branch key contract, eliminating the `res_dict["path"]` KeyError that used to crash WS search mid-stream and get swallowed as DONE.
+- **WS protocol (P2)**: search-thread crashes enqueue an ERROR frame before DONE; auth failures accept-then-close(4001) so browsers see the real code; token comparisons encode to bytes first.
+- **Origin hardening (P2)**: same-origin is decided by the Origin host (loopback set or explicit allowlist), never the Host-derived base URL.
+- **Lifecycle & bounds (P2/P3)**: app lifespan terminates tracked subprocesses on shutdown; `FCTX_EXEC_TIMEOUT` parses once with a 300s fallback and skipped paths are reported in `/api/actions/execute` results; schemas gained `Literal`/`ge/le` bounds (`export_format`, tag length, rename count, `SearchQuery` limits); `read_text_smart` treats non-positive limits as "read nothing"; `get_project_data_obj` rejects empty keys; extract validates before `mkdir` and blocks UNC sources in core (before resolve/exists) and in the Web route; `DuplicateWorker` always delivers its DONE sentinel; the GUI duplicate finder stops its worker on ERROR and cancels its poll timer; batch-rename simple mode escapes replacement backslashes via `build_literal_substitution()`; the CLI exits 2 on missing/unknown subcommands; MCP normalizes `fmt` case and reports its 50-entry truncation; config-lock breaking re-reads the owner before unlink (TOCTOU) and treats `OpenProcess` ACCESS_DENIED as alive.
+- **Frontend/desktop races (P1/P2)**: categorize flushes debounced staging persistence before reloading the project; empty queries are rejected before bumping `searchGeneration` (no more wedged search UI); select-all merges DOM nodes with the full virtual-list result set; clipboard actions fall back to `execCommand('copy')` off Secure Contexts; tool execution has a re-entrancy guard; the desktop preview switches behind an unsaved-changes guard; the light theme's close buttons are visible again.
+
+Verification result: `846 passed` (800 baseline + 46 new), `ruff check .` clean, packaging count guard updated to 846. Deferred findings (WS tool-stream timeout, `stream_tool` grandchild processes, save-storm debouncing, desktop main-thread IO, unified route authorization dependency) are scheduled in `docs/IMPLEMENTATION_PLAN_V660.md` §4 batches 2.0/2.1.
+
 Run on Windows with a writable temporary directory when needed:
 
 ```powershell
@@ -256,11 +293,16 @@ python -m build --no-isolation
 ## 10. Known Limits and Next Engineering Work
 
 - JSON configuration is local-process coordination, not a multi-user database.
-- Route handlers still contain application orchestration that should move to services (Phase 2).
-- Frontend source contracts do not replace Playwright E2E coverage.
+- Route handlers still contain application orchestration that should move to services; the per-route registered-root + containment checks should converge into a single authorization dependency (Phase 2, batch 2.1).
+- `DataManager` still performs a full lock-read-merge-write cycle per small mutation; dirty-flag + debounced saves are scheduled (Phase 2, batch 2.0).
+- The WebSocket tool stream has no execution timeout (the HTTP path enforces `FCTX_EXEC_TIMEOUT`); parity is scheduled (Phase 2, batch 2.0).
+- `stream_tool` (shell mode) can leak shell grandchild processes holding the output pipe on some platforms; Job Object / process-group handling is scheduled (Phase 2, batch 2.0).
+- Desktop Tkinter still performs some synchronous file I/O on the UI thread (large staging exports, staging-filter traces); backgrounding is scheduled (Phase 2, batch 2.0).
+- Frontend source contracts do not replace Playwright E2E coverage (Phase 2).
 - Tool output and search are bounded but can still consume I/O on very large local workspaces.
 - Token counts are heuristic and context selection is deterministic/manual, not semantic ranking.
 - Windows config-lock probing requires the lock holder to be a local process; remote-process liveness cannot be probed with the Win32 API and is treated conservatively.
 - The Web progress tracker is process-internal; multi-worker deployments are unsupported (see README deployment note).
+- Search regex mode matches path names only; a combined regex-content semantic is a documented Phase 3 decision.
 
-See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases and [ROADMAP.md](ROADMAP.md) for the prioritized feature list.
+See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases, [ROADMAP.md](ROADMAP.md) for the prioritized feature list, [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) for the batched execution plan, and [docs/CODE_REVIEW_V660.md](docs/CODE_REVIEW_V660.md) for the complete findings ledger.

@@ -12,6 +12,7 @@ import logging
 import logging.handlers
 import os
 import pathlib
+import shutil
 import tempfile
 import threading
 import time
@@ -57,18 +58,25 @@ def _is_process_alive(pid: int) -> bool:
     import ctypes
 
     process_query_limited_information = 0x1000
+    access_denied = 5
     still_active = 259
     kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.argtypes = [
+        ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32,
+    ]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
     handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
     if not handle:
-        return False
+        # ACCESS_DENIED means the process exists but belongs to another
+        # user/elevation: treating it as dead would let us break its lock.
+        return kernel32.GetLastError() == access_denied
     try:
         exit_code = ctypes.c_ulong()
         if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
             return False
         return exit_code.value == still_active
     finally:
-        kernel32.CloseHandle(handle)
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
 
 
 @contextlib.contextmanager
@@ -80,8 +88,10 @@ def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
     while True:
         try:
             fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, owner.encode("ascii"))
-            os.close(fd)
+            try:
+                os.write(fd, owner.encode("ascii"))
+            finally:
+                os.close(fd)
             break
         except FileExistsError:
             try:
@@ -92,13 +102,29 @@ def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
                     not owner_is_alive
                     and time.time() - lock_file.stat().st_mtime > CONFIG_LOCK_STALE_AFTER
                 ):
-                    lock_file.unlink()
+                    # TOCTOU guard: another process may have broken the same
+                    # stale lock and created its OWN lock between our read
+                    # and this unlink. Re-read and only delete if the file
+                    # still names the same dead owner.
+                    if (
+                        lock_file.read_text(encoding="ascii").strip() == lock_owner
+                    ):
+                        lock_file.unlink()
                     continue
             except FileNotFoundError:
                 continue
             except (OSError, ValueError):
-                if time.time() - lock_file.stat().st_mtime > CONFIG_LOCK_STALE_AFTER:
-                    with contextlib.suppress(FileNotFoundError):
+                try:
+                    stale = (
+                        time.time() - lock_file.stat().st_mtime
+                        > CONFIG_LOCK_STALE_AFTER
+                    )
+                except OSError:
+                    # Lock file vanished between the failed read and the
+                    # stat; just retry the acquisition loop.
+                    continue
+                if stale:
+                    with contextlib.suppress(FileNotFoundError, OSError):
                         lock_file.unlink()
                     continue
             if time.monotonic() >= deadline:
@@ -107,7 +133,9 @@ def _config_file_lock(config_file: pathlib.Path) -> Generator[None, None, None]:
     try:
         yield
     finally:
-        with contextlib.suppress(FileNotFoundError):
+        # PermissionError (e.g. AV software holding the file) must not mask
+        # the original exception raised inside the with-block.
+        with contextlib.suppress(OSError, ValueError):
             if lock_file.read_text(encoding="ascii").strip() == owner:
                 lock_file.unlink()
 
@@ -464,10 +492,23 @@ class DataManager:
                                 # A corrupt or out-of-range on-disk config must not
                                 # brick every later save: treat it as "no external
                                 # edits" and rewrite the file from local state.
-                                logger.exception(
-                                    "Disk configuration is invalid; rewriting it "
-                                    "with the current in-memory state."
-                                )
+                                # Preserve the corrupt file first so the user's
+                                # data can still be recovered manually.
+                                try:
+                                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                                    backup_name = f"{config_file.name}.corrupt-{stamp}"
+                                    shutil.copy2(config_file, config_file.parent / backup_name)
+                                    logger.exception(
+                                        "Disk configuration is invalid; backed it up "
+                                        "to %s and rewriting it with the current "
+                                        "in-memory state.", backup_name,
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Disk configuration is invalid and could not "
+                                        "be backed up; rewriting it with the current "
+                                        "in-memory state."
+                                    )
 
                         merged_data = _merge_config_values(
                             self._base_config_data, self.config.model_dump(), disk_data
@@ -569,9 +610,16 @@ class DataManager:
 
         Returns:
             The ProjectConfig instance.
+
+        Raises:
+            ValueError: If the normalized path is empty.
         """
         with self._lock:
             norm_p = PathValidator.norm_path(path_str)
+            if not norm_p:
+                # Refuse to create a "" key: it would poison the projects
+                # map and later resolve_project_root() checks.
+                raise ValueError("Project path must not be empty.")
             if norm_p not in self.config.projects:
                 self.config.projects[norm_p] = ProjectConfig()
             return self.config.projects[norm_p]

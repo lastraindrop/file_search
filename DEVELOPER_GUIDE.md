@@ -1,6 +1,6 @@
 # FileCortex Developer Guide
 
-> Version: 6.5.3 | Updated: 2026-08-23 | Verification baseline: 800 passed, Ruff 0 errors
+> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors
 
 ## Project Model
 
@@ -39,6 +39,13 @@ All entry points should delegate to `file_cortex_core/`; do not create a second 
 5. Any new persistent setting must be Pydantic-validated before save.
 6. WebSocket producers must use bounded queues and stop/terminate handles.
 7. Never rely on a source-tree resource being present in a wheel; declare every runtime asset in packaging metadata.
+8. **Containment is not registration.** A path being *inside* `project_path` proves nothing until `project_path` itself resolves to a registered root (`get_valid_project_root`). Any endpoint that mutates project metadata (notes, tags, sessions, staging, settings) must run the registration gate first, otherwise `get_project_data_obj` silently auto-registers arbitrary directories — including system directories — and every other endpoint starts trusting them (v6.6.0 fix).
+9. Reject UNC in both spellings: `\\server\share` **and** the long-prefix form `\\?\UNC\server\share`, and do it *before* any `resolve()`/`exists()` call — those calls themselves trigger SMB authentication (v6.6.0 fix).
+10. `CancelledError` derives from `BaseException` on Python 3.8+. Any `except Exception` around `future.result()` is a latent crash; also note `as_completed()`/`wait()` never report futures already in the `CANCELLED` state — harvest `f.done()` explicitly before waiting (v6.6.0 fix).
+11. Never derive security decisions from the client-controlled `Host` header (`request.base_url`). Compare origins against loopback hosts or an explicit allowlist (v6.6.0 fix).
+12. WebSocket custom close codes require `accept()` first: closing before the handshake is answered with a bare HTTP 403 and the code never reaches the client (v6.6.0 fix).
+13. Enum-ish request fields get `Literal` types and numeric fields get `ge/le` bounds in `routers/schemas.py` — free strings and unbounded ints silently corrupt behavior downstream (v6.6.0 fix).
+14. Frontend: flush debounced persistence (`syncStagingToBackend.flushNow()`) *before* re-reading project state from the server, or the reload races the write and resurrects stale data (v6.6.0 fix).
 
 ## Configuration and Persistence
 
@@ -69,14 +76,16 @@ The merge preserves independent edits. Concurrent edits to the same scalar key a
 
 ## Security and Web Deployment
 
-By default the Web server binds to `127.0.0.1`. Local origins for the default port are allowlisted. Same-origin requests work on any selected `--port`.
+By default the Web server binds to `127.0.0.1`. Local origins for the default port are allowlisted. Same-origin is decided by the Origin *host*: loopback hosts (`127.0.0.1`, `localhost`, `::1`) with any port, or an explicit `FCTX_ALLOWED_ORIGINS` entry — never by comparing against the request's `Host`-derived base URL.
 
-- If `FCTX_API_TOKEN` is configured, HTTP `/api/` requests require `X-API-Token`; WebSockets require `token` in the query string. Both comparisons use `hmac.compare_digest`.
+- If `FCTX_API_TOKEN` is configured, HTTP `/api/` requests require `X-API-Token`; WebSockets require `token` in the query string. Both comparisons encode to bytes before `hmac.compare_digest` (non-ASCII header values would raise `TypeError` on the raw-string variant).
+- WebSocket auth failures `accept()` the handshake first and then `close(4001)`, so the custom code actually reaches browser clients.
 - Binding a non-loopback host requires `FCTX_API_TOKEN`.
 - `FCTX_PROD=1` hides exception details; it does not enable authentication.
 - `FCTX_ALLOWED_ORIGINS` is a comma-separated explicit CORS override. Avoid `*` outside controlled local development.
+- On shutdown the app lifespan terminates any tool subprocesses still tracked by `ProcessManager`; do not spawn long-lived children outside the registry.
 
-When adding a route, apply the registered-root check before invoking core I/O. When adding a new entry point, use the same registration and containment rules rather than duplicating string-prefix checks.
+When adding a route, apply the registered-root check **and** per-path containment before invoking core I/O — a single `verify_registered_path()` dependency is the planned convergence point (see docs/IMPLEMENTATION_PLAN_V660.md batch 2.1). When adding a new entry point, use the same registration and containment rules rather than duplicating string-prefix checks.
 
 ## Parameter Alignment
 
@@ -105,6 +114,8 @@ git diff --check
 The temporary-directory override is useful on Windows hosts where the system drive lacks free space. Do not commit `.pytest_tmp`, `build/`, `dist/`, caches, or generated egg metadata.
 
 Tests are layered by core behavior, API contracts, security, CLI persistence, MCP, file operations, and frontend source contracts. Add a behavior test near the responsible layer. Source-string frontend tests are useful regression guards but do not replace browser E2E tests for races and focus behavior.
+
+Review reports for the v6.6.0 hardening round (architecture, positioning, full bug list, and the batched forward plan with per-fix test mapping) live in [`docs/`](docs/): `ARCHITECTURE_REVIEW.md`, `POSITIONING_ANALYSIS.md`, `CODE_REVIEW_V660.md`, and `IMPLEMENTATION_PLAN_V660.md`.
 
 ## Style and Review Rules
 

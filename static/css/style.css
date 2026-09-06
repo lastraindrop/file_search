@@ -1027,7 +1027,9 @@ html[data-theme="light"] .text-muted {
 }
 
 html[data-theme="light"] .btn-close-white {
-    filter: none;
+    /* White Bootstrap close glyph is invisible on the light modal header;
+       invert instead of removing the filter entirely. */
+    filter: invert(1) grayscale(100%);
 }
 
 @media (max-width: 991px) {

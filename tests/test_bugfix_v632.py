@@ -22,11 +22,14 @@ class TestFctxElseBranch:
     """BUG-026: fctx.py else branch logic error."""
 
     def test_fctx_no_command_shows_help(self, capsys):
-        """No command should print help."""
+        """No command should print help and exit non-zero (v6.6.0)."""
+        import pytest
+
         from fctx import main as cli_main
 
-        with patch("sys.argv", ["fctx"]):
+        with patch("sys.argv", ["fctx"]), pytest.raises(SystemExit) as exc:
             cli_main()
+        assert exc.value.code == 2
         captured = capsys.readouterr()
         assert "usage" in captured.out.lower() or "open" in captured.out.lower()
 

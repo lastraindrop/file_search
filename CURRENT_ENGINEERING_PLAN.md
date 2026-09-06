@@ -1,6 +1,6 @@
 # FileCortex Current Engineering Plan
 
-> Version: 6.5.3 | Updated: 2026-08-23 | Verification baseline: 800 passed, Ruff 0 errors, wheel/sdist built
+> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors, wheel/sdist built
 
 ## Purpose
 
@@ -16,7 +16,9 @@ The P0/P1/P2 remediation tranche is complete.
 - P1: cross-process configuration merge, batch copy/extract recovery, ZIP resource limits, structured categorization failures, and bounded WebSocket transport.
 - P2: XML validity, context truncation visibility, search backpressure and tag behavior, frontend request generations, progress polling, and UI consistency.
 
-The v6.5.3 review-driven round is complete as well: Windows lock liveness probe, corrupt-config recovery, desktop preset Pydantic compatibility, case-only rename, case-faithful excludes, gitignore directory rules in the tree view, null-tolerant settings API, CLI exit codes, per-entry-point search-size alignment, WebSocket 3.10 backpressure compatibility, CORS preflight, and threaded desktop/MCP tool execution. See TECHNICAL_GUIDE §9.1 for the full fix archive. Baseline: 800 passed, Ruff 0 errors.
+The v6.5.3 review-driven round is complete as well: Windows lock liveness probe, corrupt-config recovery, desktop preset Pydantic compatibility, case-only rename, case-faithful excludes, gitignore directory rules in the tree view, null-tolerant settings API, CLI exit codes, per-entry-point search-size alignment, WebSocket 3.10 backpressure compatibility, CORS preflight, and threaded desktop/MCP tool execution. See TECHNICAL_GUIDE §9.1 for the full fix archive.
+
+The v6.6.0 full-architecture review round is complete: UNC long-prefix bypass (validate_project/is_safe), note/tag auto-registration sandbox escape, MCP transport wiring, POSIX process-group self-kill, corrupt-config backup-before-rewrite, search CancelledError/future-drain and backpressure cancellation, manual-exclude separator parity, metadata fallback contract, WS error/closing-code delivery, origin hardening against Host spoofing, extract UNC source blocking, lifespan process cleanup, and a batch of frontend/desktop race and UX fixes. Full findings and follow-ups live in `docs/` (ARCHITECTURE_REVIEW, POSITIONING_ANALYSIS, CODE_REVIEW_V660, IMPLEMENTATION_PLAN_V660). Baseline: 846 passed, Ruff 0 errors.
 
 The next work is deliberate product improvement, not another broad stabilization rewrite.
 
@@ -34,13 +36,15 @@ Desktop Tkinter / Web FastAPI + ES modules / CLI / MCP
 
 Cross-cutting invariants:
 
-1. A project must be registered through `PathValidator.validate_project()`.
-2. Any path used for a destructive or content-reading operation must pass `PathValidator.is_safe()` against its registered root.
+1. A project must be registered through `PathValidator.validate_project()`. Registration is the only path into `config.projects`; path containment never auto-registers (v6.6.0).
+2. Any path used for a destructive or content-reading operation must pass `PathValidator.is_safe()` against its registered root. UNC paths are rejected in both spellings (`\\server\share` and `\\?\UNC\server\share`) before any filesystem call that could trigger SMB (v6.6.0).
 3. User-visible mutations must either be atomic or report per-item outcomes and preserve failed staging entries.
 4. Configuration writes use an inter-process lock, three-way merge, temporary file, and `os.replace()`.
 5. The same behavior must be exposed consistently through Web, GUI, CLI, and MCP where applicable.
 
 ## Delivery Plan
+
+> The concrete execution schedule — batches 2.0 (leftover P2s), 2.1 (structural refactor with behavior-preserving guard), 2.2 (release engineering), 3.x (context compiler), 4.x (optional local index) — with per-batch locations, changes, and acceptance tests lives in [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) §4. The strategic rationale behind these phases is in [docs/POSITIONING_ANALYSIS.md](docs/POSITIONING_ANALYSIS.md) §5.
 
 ### Phase 1: Usability and Accessibility
 

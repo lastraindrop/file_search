@@ -103,12 +103,15 @@
             </div>
         </section>
 
-        <div id="bulkActions" class="p-2 border-bottom justify-content-between align-items-center" style="display:none;">
+        <!-- Always visible so the Select-All control is reachable at zero
+             selection; the bulk buttons are disabled instead (see
+             updateBulkUI in main.js). -->
+        <div id="bulkActions" class="p-2 border-bottom d-flex justify-content-between align-items-center">
             <div>
                 <input type="checkbox" id="selectAllCb" class="form-check-input me-1" data-action="toggleSelectAll">
                 <small id="selectedCount" class="fw-bold text-primary">0 selected</small>
             </div>
-            <div class="btn-group btn-group-sm">
+            <div class="btn-group btn-group-sm" id="bulkActionButtons">
                 <button class="btn btn-outline-light" type="button" data-action="bulkCopy" title="Batch Copy">Copy</button>
                 <button class="btn btn-outline-info" type="button" data-action="bulkExtract" title="Batch Extract">Extract</button>
                 <button class="btn btn-outline-secondary" type="button" data-action="bulkMove" title="Batch Move">Move</button>

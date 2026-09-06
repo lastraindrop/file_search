@@ -1,6 +1,24 @@
 # FileCortex Roadmap
 
-> Current version: 6.5.3 | Updated: 2026-08-23 | Current verification: 800 passed, Ruff 0 errors
+> Current version: 6.6.0 | Updated: 2026-09-06 | Current verification: 846 passed, Ruff 0 errors
+
+## Delivered in 6.6.0 (Review-Driven Hardening Round)
+
+- [x] `\\?\UNC\server\share` long-prefix form no longer bypasses the UNC block in `validate_project`/`is_safe` (SMB credential-leak vector).
+- [x] `/api/project/note` and `/api/project/tag` now require a registered project root; they previously auto-registered arbitrary directories (including system dirs) via `get_project_data_obj`, bypassing `validate_project` blocklists.
+- [x] MCP `--transport` is actually forwarded to `FastMCP.run()`; `http` alias maps to `streamable-http`, and the SDK literals `sse`/`streamable-http` are accepted.
+- [x] `execute_tool` detaches from the server process group on POSIX (`start_new_session`), so timeout killpg can no longer SIGTERM the server itself.
+- [x] A corrupt on-disk config is backed up as `config.json.corrupt-<timestamp>` before being rewritten from in-memory state.
+- [x] Search: `CancelledError` (BaseException) can no longer kill the generator/worker before the DONE sentinel; final drain handles the `CANCELLED` state that `as_completed`/`wait` never report; backpressure waits in 0.1s slices and honors `stop_event`.
+- [x] Manual exclude sub-path patterns (`docs/*`) now match on Windows (separator normalization in `should_ignore`).
+- [x] `get_metadata` fallback dict carries the full success-branch contract (`path`/`type`/`size_fmt`/`mtime_fmt`), fixing WS search frames built on vanished files.
+- [x] WS search crashes now deliver an ERROR frame instead of a bare DONE; WS auth failures accept-then-close so code 4001 actually reaches browsers.
+- [x] Extract: UNC archive sources rejected in core and Web route before any SMB touch; destination dirs are no longer created for rejected archives.
+- [x] Web auth hardening: origin check no longer trusts the client-controlled Host header; token comparisons encode before `compare_digest`; non-ASCII tokens 401 instead of 500.
+- [x] App lifespan terminates tracked subprocesses on shutdown; `FCTX_EXEC_TIMEOUT` parse failures fall back to 300s; skipped paths in `/api/actions/execute` are reported instead of silently dropped.
+- [x] Frontend: categorize→reload staging race fixed (flush-before-reload); empty-query search no longer wedges the UI; select-all counts virtual-list items; clipboard has a non-secure-context fallback; 422 errors render readable messages; bulk bar always visible with disabled buttons.
+- [x] Desktop: unsaved-edit guard before preview switches; duplicate finder stops its worker on ERROR and cancels its poll timer; batch rename simple mode escapes replacement backslashes.
+- [x] CLI exits 2 when no/unknown subcommand; MCP search reports its 50-entry truncation; DuplicateWorker cancellation still emits DONE; schemas gained `Literal`/bound constraints; `get_project_data_obj` rejects empty keys.
 
 ## Delivered in 6.5.3
 
@@ -76,6 +94,7 @@
 
 | Version | Date | Release snapshot |
 |---|---|---|
+| 6.6.0 | 2026-09-06 | Review-driven hardening: UNC bypass, note/tag registration bypass, MCP transport, POSIX process groups, search CancelledError/cancelled-future drain, origin/lock/auth polish; 846 passed. |
 | 6.5.3 | 2026-08-23 | Review-driven bugfix round: Windows lock probe, corrupt-config recovery, case-only rename, gitignore/tree parity, CLI exit codes, WS 3.10 compat; 800 passed. |
 | 6.5.2 | 2026-08-09 | P0/P1/P2 security, correctness, packaging, and consistency remediation; 786 passed. |
 | 6.5.1+ | 2026-07-25 | Frontend event delegation, themes, virtual search results, layout controls, and stabilization. |

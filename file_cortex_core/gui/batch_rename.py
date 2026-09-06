@@ -13,6 +13,23 @@ from tkinter import (
 from ..actions import FileOps
 
 
+def build_literal_substitution(pattern: str, replacement: str) -> tuple[str, str]:
+    r"""Builds a fully literal (pattern, replacement) pair for re.sub.
+
+    In "simple" mode BOTH sides must be escaped: an unescaped replacement
+    such as "photo\new" raises re.error (bad escape) or silently injects
+    \n / \t control characters into filenames.
+
+    Args:
+        pattern: The literal text to search for.
+        replacement: The literal text to substitute.
+
+    Returns:
+        A (escaped_pattern, escaped_replacement) tuple.
+    """
+    return re.escape(pattern), replacement.replace("\\", "\\\\")
+
+
 class BatchRenameWindow(tk.Toplevel):
     """GUI window for bulk renaming files using regex or simple replacement."""
 
@@ -140,14 +157,17 @@ class BatchRenameWindow(tk.Toplevel):
 
         try:
             final_pattern = pattern
+            final_replacement = replacement
             if mode == "simple":
-                final_pattern = re.escape(pattern)
+                final_pattern, final_replacement = build_literal_substitution(
+                    pattern, replacement
+                )
 
             results = FileOps.batch_rename(
                 str(self.project_root),
                 [str(p) for p in self.selected_paths],
                 final_pattern,
-                replacement,
+                final_replacement,
                 dry_run=True,
                 count=1,
             )
@@ -188,14 +208,17 @@ class BatchRenameWindow(tk.Toplevel):
 
         try:
             final_pattern = pattern
+            final_replacement = replacement
             if mode == "simple":
-                final_pattern = re.escape(pattern)
+                final_pattern, final_replacement = build_literal_substitution(
+                    pattern, replacement
+                )
 
             FileOps.batch_rename(
                 str(self.project_root),
                 [str(p) for p in self.selected_paths],
                 final_pattern,
-                replacement,
+                final_replacement,
                 dry_run=False,
                 count=1,
             )

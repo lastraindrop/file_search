@@ -39,7 +39,11 @@ def verify_ws_token(token: str | None) -> bool:
     if not token:
         return False
     import hmac
-    return hmac.compare_digest(token, expected_token)
+    # Encode before comparing: non-ASCII tokens would raise TypeError
+    # inside compare_digest(str, str).
+    return hmac.compare_digest(
+        token.encode("utf-8"), expected_token.encode("utf-8")
+    )
 
 
 @router.websocket("/ws/search")
@@ -56,6 +60,10 @@ async def websocket_search(
 ) -> None:
     """Streams search results over WebSocket."""
     if not verify_ws_token(token):
+        # Accept the handshake first: calling close() before accept() makes
+        # Starlette reject the upgrade with a bare HTTP 403 and the custom
+        # code 4001 never reaches the client.
+        await websocket.accept()
         await websocket.close(code=4001)
         return
 
@@ -125,6 +133,12 @@ async def websocket_search(
                     "snippet": res_dict.get("snippet", ""),
                 }):
                     break
+        except Exception as e:
+            # A mid-scan crash must not be mistaken for a normal completion:
+            # the finally clause below always enqueues DONE, so report the
+            # failure explicitly (mirrors run_stream's error handling).
+            logger.exception("Background search thread failed")
+            enqueue({"status": "ERROR", "msg": str(e)})
         finally:
             enqueue("DONE")
 
@@ -166,6 +180,9 @@ async def websocket_action_stream(
 ) -> None:
     """Streams tool execution output over WebSocket."""
     if not verify_ws_token(token):
+        # Accept before close so the 4001 code actually reaches the client
+        # (same rationale as the /ws/search handler).
+        await websocket.accept()
         await websocket.close(code=4001)
         return
 

@@ -26,16 +26,21 @@ def test_xml_export_with_blueprint(mock_project):
     assert "<context>" in xml_without
 
 def test_websocket_auth_failure(project_client, mock_project, monkeypatch):
-    """Verify that WebSocket connection closes before accept with invalid token."""
+    """Verify that WebSocket auth failure delivers close code 4001 to the client.
+
+    The server accepts the handshake first and then closes with 4001:
+    closing before accept() makes the ASGI server answer the upgrade with a
+    bare HTTP 403, and the custom code never reaches a real browser client.
+    """
     # Set a required token
     monkeypatch.setenv("FCTX_API_TOKEN", "secret_pass")
 
-    # Try to connect without token or with wrong token
-    # FastAPI/TestClient WebSocket auth is usually checked via query params in our implementation
-
     ws_url = f"/ws/search?path={str(mock_project)}&query=main&token=wrong"
-    with pytest.raises(WebSocketDisconnect) as exc_info, project_client.websocket_connect(ws_url):
-        pass
+    with pytest.raises(WebSocketDisconnect) as exc_info, project_client.websocket_connect(
+        ws_url
+    ) as ws:
+        # First (and only) server event is the 4001 close frame.
+        ws.receive_json()
     assert exc_info.value.code == 4001
 
 def test_websocket_auth_success(project_client, mock_project, monkeypatch):

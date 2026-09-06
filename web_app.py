@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import ipaddress
 import os
 import pathlib
 import sysconfig
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -81,7 +85,22 @@ async def verify_api_token(
         if request.method == "OPTIONS":
             return await call_next(request)
         origin = request.headers.get("origin")
-        same_origin = origin == str(request.base_url).rstrip("/")
+        # Do NOT derive the expected origin from the client-controlled Host
+        # header (`request.base_url`): a forged Origin+Host pair would pass
+        # as "same-origin". Instead, treat a request as same-origin only
+        # when the Origin host is one of the loopback hosts (the default
+        # deployment) or matches an explicitly configured origin.
+        same_origin = False
+        if origin:
+            try:
+                parsed = urlparse(origin)
+                origin_host = (parsed.hostname or "").lower()
+                same_origin = (
+                    origin_host in ("127.0.0.1", "localhost", "::1")
+                    or origin in ALLOWED_ORIGINS
+                )
+            except ValueError:
+                same_origin = False
         if (
             origin
             and not same_origin
@@ -95,7 +114,12 @@ async def verify_api_token(
         if API_TOKEN:
             token = request.headers.get("X-API-Token", "")
             import hmac
-            if not hmac.compare_digest(token, API_TOKEN):
+            # Encode before comparing: compare_digest(str, str) raises
+            # TypeError on non-ASCII header values (HTTP headers are
+            # latin-1 decoded), which would surface as a 500.
+            if not hmac.compare_digest(
+                token.encode("utf-8"), API_TOKEN.encode("utf-8")
+            ):
                 return JSONResponse(
                     status_code=401,
                     content={"status": "error", "detail": "Invalid or missing API token"},
@@ -129,9 +153,36 @@ async def apply_csp_header(
     return response
 
 
+def _shutdown_tracked_processes() -> None:
+    """Terminates any tool subprocesses still tracked by ProcessManager.
+
+    Runs on application shutdown so a server exit (or --reload restart)
+    does not orphan detached child processes on the machine.
+    """
+    from file_cortex_core.process_utils import terminate_process
+
+    for pid in route_common.process_manager.pids:
+        proc = route_common.process_manager.get(pid)
+        if proc is not None and proc.poll() is not None:
+            route_common.process_manager.unregister(pid)
+            continue
+        logger.info(f"Shutting down tracked process on exit: PID {pid}")
+        with contextlib.suppress(Exception):
+            terminate_process(pid)
+        route_common.process_manager.unregister(pid)
+
+
 def create_app() -> FastAPI:
     """Creates and configures the FastAPI application."""
-    app = FastAPI(title=f"FileCortex v{__version__} API")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        """Application lifespan: cleans up tracked subprocesses on exit."""
+        yield
+        await asyncio.to_thread(_shutdown_tracked_processes)
+
+    app = FastAPI(
+        title=f"FileCortex v{__version__} API", lifespan=lifespan
+    )
 
     app.add_middleware(
         CORSMiddleware,

@@ -153,10 +153,17 @@ async def search_files(
             stop_event=None,
             max_size_mb=max_size,
         )
+        truncated = False
         for res in gen:
             results.append(f"{res['path']} ({res['match_type']})")
-            if len(results) > 50:
+            if len(results) >= 50:
+                truncated = True
                 break
+        if truncated:
+            results.append(
+                "(result list truncated at 50 entries; refine the query "
+                "or use exact/regex mode to narrow the search)"
+            )
         return results
 
     # Run the disk scan off the event loop so the MCP transport (stdio
@@ -196,7 +203,8 @@ async def get_file_context(
             f"and were skipped.\n\n"
         )
 
-    if fmt == "xml":
+    fmt_norm = fmt.strip().lower()
+    if fmt_norm == "xml":
         return prefix + ContextFormatter.to_xml(safe_paths, root_dir=root)
     return prefix + ContextFormatter.to_markdown(safe_paths, root_dir=root)
 
@@ -351,17 +359,33 @@ def main() -> None:
     import sys
 
     parser = argparse.ArgumentParser(description="FileCortex MCP Server")
-    parser.add_argument("--transport", default="stdio", choices=["stdio", "http"],
-                       help="Transport type (default: stdio)")
+    parser.add_argument(
+        "--transport",
+        default="stdio",
+        choices=["stdio", "sse", "streamable-http", "http"],
+        help=(
+            "Transport type (default: stdio). 'sse' and 'streamable-http' "
+            "are the MCP SDK names for network transports; 'http' is "
+            "accepted as a legacy alias for 'streamable-http'."
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transport")
     parser.add_argument("--port", type=int, default=3000, help="Port for HTTP transport")
     args = parser.parse_args()
+
+    # Map the legacy alias onto the SDK literal before calling run().
+    transport = "streamable-http" if args.transport == "http" else args.transport
 
     mcp_server = get_mcp()
 
     if _MCP_SDK_AVAILABLE:
         try:
-            mcp_server.run(host=args.host, port=args.port)
+            if transport == "stdio":
+                mcp_server.run()
+            else:
+                mcp_server.run(
+                    transport=transport, host=args.host, port=args.port
+                )
             return
         except Exception as e:
             print(f"MCP SDK run failed: {e}", file=sys.stderr)

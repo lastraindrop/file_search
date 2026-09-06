@@ -1,6 +1,6 @@
 """FileCortex Core - AI-powered workspace orchestration and file management."""
 
-__version__ = "6.5.3"
+__version__ = "6.6.0"
 
 from .actions import ActionBridge, FileOps, ProgressTracker
 from .config import DataManager, GlobalSettings, ProjectConfig, get_app_dir, logger

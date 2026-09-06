@@ -808,6 +808,20 @@ class FileOps:
         # generated bundle). The security boundary for extraction is the
         # *destination*: only where members are written matters, enforced by
         # the per-member validation below plus the dst-within-root check.
+
+        # UNC/network archive sources trigger SMB authentication attempts
+        # with the process user's credentials. This MUST run before any
+        # resolve()/exists() call, which would itself touch the network.
+        zip_raw = str(zip_path_str)
+        if (
+            zip_raw.startswith("\\\\")
+            or zip_raw.startswith("//")
+            or zip_raw.lower().replace("/", "\\").startswith(r"\\?\unc")
+        ):
+            raise PermissionError(
+                "UNC/network archive paths are blocked."
+            )
+
         zip_path = pathlib.Path(zip_path_str).resolve()
         root = pathlib.Path(project_root).resolve()
         dst_dir = pathlib.Path(dst_dir_str).resolve()
@@ -821,6 +835,8 @@ class FileOps:
         if not zipfile.is_zipfile(zip_path):
             raise ValueError(f"Not a ZIP archive: {zip_path}")
 
+        # Create the destination only after the cheap validations pass so a
+        # rejected archive does not leave an empty directory behind.
         dst_dir.mkdir(parents=True, exist_ok=True)
 
         extracted: list[str] = []
@@ -1061,6 +1077,9 @@ class ActionBridge:
                 stderr=subprocess.PIPE,
                 text=True,
                 shell=is_shell,
+                # Detach from our process group on POSIX so the timeout
+                # path's killpg() cannot SIGTERM the server itself.
+                start_new_session=(os.name != "nt"),
                 cwd=(
                     project_root
                     if os.path.exists(project_root) and os.path.isdir(project_root)

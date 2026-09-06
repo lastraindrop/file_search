@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Duplicate finder window for FileCortex GUI."""
 
+import contextlib
 import pathlib
 import queue
 import threading
@@ -47,6 +48,7 @@ class DuplicateFinderWindow(tk.Toplevel):
         self.stop_event = threading.Event()
         self.result_queue: queue.Queue[dict] = queue.Queue()
         self.duplicate_groups: dict[str, list[str]] = {}
+        self.after_id: str | None = None
 
         self._init_ui()
         self.start_scan()
@@ -136,6 +138,9 @@ class DuplicateFinderWindow(tk.Toplevel):
                             self.btn_delete.config(state=tk.NORMAL)
                             self.btn_smart.config(state=tk.NORMAL)
                         elif res[0] == "ERROR":
+                            # Stop the worker before tearing down: without
+                            # this it keeps SHA256-hashing the whole tree.
+                            self.stop_event.set()
                             messagebox.showerror("错误", f"扫描失败: {res[1]}")
                             self.destroy()
                         return
@@ -174,7 +179,14 @@ class DuplicateFinderWindow(tk.Toplevel):
         except Exception:
             logger.exception("Poll results loop failure")
 
-        self.after(200, self.poll_results)
+        if self.winfo_exists():
+            # Keep the after id so on_close can cancel the pending timer
+            # (a stale timer fires on a destroyed widget and raises TclError).
+            self.after_id = self.after(200, self._poll_results_scheduled)
+
+    def _poll_results_scheduled(self) -> None:
+        """Entry point for the scheduled poll (guarded after-cancel)."""
+        self.poll_results()
 
     def smart_select(self, mode: str = "oldest") -> None:
         """Automatically selects redundant files based on time.
@@ -268,4 +280,9 @@ class DuplicateFinderWindow(tk.Toplevel):
     def on_close(self) -> None:
         """Handles window close event."""
         self.stop_event.set()
+        # Cancel the pending poll timer (see poll_results).
+        if getattr(self, "after_id", None):
+            with contextlib.suppress(Exception):
+                self.after_cancel(self.after_id)
+            self.after_id = None
         self.destroy()

@@ -177,6 +177,9 @@ class PathCollectionDialog(tk.Toplevel):
         )
         self.clipboard_clear()
         self.clipboard_append(self.result)
+        # Process pending events so Tk takes CLIPBOARD ownership before the
+        # window dies; otherwise the clipboard content is lost on destroy.
+        self.update()
         if self.status_callback:
             self.status_callback(len(self.paths))
         self.destroy()

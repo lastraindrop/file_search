@@ -135,7 +135,11 @@ export function renderWorkspaces(data) {
     renderList(data.pinned || [], 'pinnedProjectsList');
     renderList(data.recent || [], 'recentProjectsList');
 
-    const isPinned = (data.pinned || []).some(p => p.path === state.projectPath);
+    // state.projectPath may be a raw user-typed string (mixed case, back/
+    // forward slashes) while the server returns normalized keys; compare
+    // normalized forms or the pin highlight is wrong for typed variants.
+    const norm = (p) => (p || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const isPinned = (data.pinned || []).some(p => norm(p.path) === norm(state.projectPath));
     updatePinUI(isPinned);
 }
 

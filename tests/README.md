@@ -1,8 +1,8 @@
 # FileCortex 测试说明
 
-> **测试数**: 800 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.5.3
+> **测试数**: 846 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.6.0
 
-本项目包含 **800** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
+本项目包含 **846** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
 
 ## 测试分层架构
 
@@ -29,7 +29,8 @@
 | **当前稳定化回归** | `test_cli_persistence_v10.py` | 21 | CLI stage/categorize 持久化、快照隔离、磁盘 reload、run legacy config 回归/copy/extract/批量copy CLI |
 | **文件操作 (copy/extract)** | `test_fileops_copy_extract.py` | 43 | Copy/Extract 内核安全与功能覆盖 (zip-slip/冲突/边界/no-overwrite/批量copy/事务extract/progress) |
 | **v6.5.3 修复回归** | `test_bugfix_v653.py` | 12 | Windows 锁存活探测/对话框预设/损坏配置自愈/大小写重命名/设置 null 宽容/gitignore 目录规则/大小写排除/ZIP 正斜杠 |
-| **总计** | **26 文件** | **800** | **100% 关键路径** |
+| **v6.6.0 审查加固回归** | `test_v660_review_fixes.py` | 46 | UNC 长前缀/note-tag 注册旁路/MCP transport/进程组脱离/坏配置备份/CancelledError/背压取消/子路径排除/元数据契约/WS ERROR 帧/查重哨兵/Origin 加固/Schema 边界/CLI 退出码 |
+| **总计** | **27 文件** | **846** | **100% 关键路径** |
 
 ## 参数对齐测试矩阵
 

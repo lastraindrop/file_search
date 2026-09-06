@@ -218,8 +218,23 @@ def api_execute_tool(
             raise HTTPException(status_code=404, detail="Tool template not found")
 
         results = []
+        # Parse once, defensively: a malformed FCTX_EXEC_TIMEOUT would
+        # otherwise raise ValueError per path and surface as a misleading
+        # "Execution failed to start".
+        try:
+            exec_timeout = int(os.getenv("FCTX_EXEC_TIMEOUT", "300"))
+        except ValueError:
+            logger.warning(
+                "Invalid FCTX_EXEC_TIMEOUT value; falling back to 300s."
+            )
+            exec_timeout = 300
         for p in req.paths:
             if not is_path_safe(p, project_root):
+                # Surface skipped paths instead of silently dropping them
+                # (WS/CLI/MCP report skips; HTTP previously did not).
+                results.append(
+                    {"path": p, "error": "Path outside project root; skipped"}
+                )
                 continue
 
             try:
@@ -230,7 +245,6 @@ def api_execute_tool(
                     continue
 
                 try:
-                    exec_timeout = int(os.getenv("FCTX_EXEC_TIMEOUT", "300"))
                     stdout, stderr = proc.communicate(timeout=exec_timeout)
 
                     results.append(

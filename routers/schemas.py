@@ -44,7 +44,9 @@ class GenerateRequest(BaseModel):
     files: list[str] = Field(..., max_length=1000)
     project_path: str | None = None
     template_name: str | None = None
-    export_format: str = "markdown"
+    # Literal instead of free str: "XML"/"md"/typos previously fell through
+    # to the markdown branch silently.
+    export_format: Literal["markdown", "xml"] = "markdown"
     include_blueprint: bool = True
     apply_noise_reducer: bool | None = None
 
@@ -173,7 +175,9 @@ class TagRequest(BaseModel):
 
     project_path: str
     file_path: str
-    tag: str
+    # Bound like NoteRequest.note: unbounded tags are a slow config-bloat
+    # vector.
+    tag: str = Field(..., max_length=200)
     action: Literal["add", "remove"]
 
 
@@ -294,7 +298,7 @@ class BatchRenameRequest(BaseModel):
     pattern: str
     replacement: str
     dry_run: bool = True
-    count: int = 1
+    count: int = Field(default=1, ge=1, le=100)
 
 
 class ProcessTerminateRequest(BaseModel):

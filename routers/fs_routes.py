@@ -417,6 +417,22 @@ def api_extract(req: FileExtractRequest, dm: DataManager = _dm_dep) -> dict[str,
                 status_code=403, detail=f"Access denied for destination: {req.dst_dir}"
             )
 
+        # The archive itself may live outside the project (CLI parity), but
+        # UNC/network sources must be rejected: is_zipfile()/open() on such a
+        # path triggers an SMB authentication attempt with the server user's
+        # credentials.
+        zip_raw = str(req.zip_path)
+        if (
+            zip_raw.startswith("\\\\")
+            or zip_raw.startswith("//")
+            # Covers \\?\UNC\... in any letter case and either separator.
+            or zip_raw.lower().replace("/", "\\").startswith(r"\\?\unc")
+        ):
+            logger.warning(f"Blocking UNC archive source: {req.zip_path}")
+            raise HTTPException(
+                status_code=403, detail="UNC/network archive paths are blocked."
+            )
+
         logger.info(f"AUDIT - Extracting archive: {req.zip_path} -> {req.dst_dir}")
         extracted_paths = FileOps.extract_archive(
             req.zip_path, req.dst_dir, project_root, req.task_id

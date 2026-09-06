@@ -1,4 +1,4 @@
-import { state, config, escapeHtml, getFileName, getFileExt, buildWsUrl } from './state.js';
+import { state, config, escapeHtml, getFileName, getFileExt, buildWsUrl, copyToClipboard } from './state.js';
 import { bindStaticEvents } from './events.js';
 import { initializePanelResizers } from './layout.js';
 import * as api from './api.js';
@@ -506,13 +506,19 @@ const App = {
     copyPath: async () => {
         if (!App.state.currentFile) return;
         try {
-            await navigator.clipboard.writeText(App.state.currentFile);
+            await copyToClipboard(App.state.currentFile);
             const btn = document.getElementById('btnCopyPath');
-            const originalText = btn ? btn.innerText : 'Copy Path';
-            if (btn) btn.innerText = 'Copied';
-            setTimeout(() => {
-                if (btn) btn.innerText = originalText;
-            }, 1000);
+            if (btn) {
+                // Persist the original label in a data attribute: a second
+                // click within the 1s window would otherwise capture
+                // "Copied" as the "original" and stick forever.
+                if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.innerText;
+                btn.innerText = 'Copied';
+                clearTimeout(App._copyPathTimer);
+                App._copyPathTimer = setTimeout(() => {
+                    btn.innerText = btn.dataset.origLabel;
+                }, 1000);
+            }
             ui.showToast("Path copied", 'success');
         } catch (e) { ui.showToast("Failed to copy path", 'danger'); }
     },
@@ -792,16 +798,17 @@ const App = {
 
     startSearch: () => {
         if (!App.state.projectPath) return;
-        const generation = ++App.state.searchGeneration;
-        const settings = App.getSearchUiSettings();
-        App.persistSearchUiState();
-        ui.updateWorkspaceSummary();
         const query = document.getElementById('searchInput').value;
 
         if (!query.trim()) {
             ui.showToast("Enter a search query first.", "warning");
             return;
         }
+
+        const generation = ++App.state.searchGeneration;
+        const settings = App.getSearchUiSettings();
+        App.persistSearchUiState();
+        ui.updateWorkspaceSummary();
 
         document.getElementById('btnStopSearch').style.display = 'inline-block';
 
@@ -886,9 +893,9 @@ const App = {
         }
         document.getElementById('btnStopSearch').style.display = 'none';
         const count = document.getElementById('searchOverlayCount');
-        const list = document.getElementById('searchOverlayList');
-        const existing = list.querySelectorAll('[data-path]');
-        count.innerText = `${existing.length} results (stopped)`;
+        // Count from state, not DOM: the virtual list only renders the
+        // visible slice, so querySelectorAll would undercount real results.
+        count.innerText = `${App.state.searchResults.length} results (stopped)`;
     },
 
     closeSearchOverlay: () => {
@@ -916,13 +923,24 @@ const App = {
             });
             App.state.staging = failed;
             ui.renderStaging();
-            App.syncStagingToBackend();
-            App.refreshProject();
+            // Flush the debounced staging write BEFORE reloading the
+            // project: refreshProject() re-reads staging_list from the
+            // server, and the 500ms debounce would otherwise let the old
+            // (pre-categorization) list overwrite the UI.
+            await App.syncStagingToBackend.flushNow();
+            await App.refreshProject();
         } catch (e) { ui.showToast("Error: " + e.message, 'danger'); }
     },
 
     executeToolOnStaged: async (toolName) => {
         if (App.state.staging.size === 0) return ui.showToast("Add files to staging first.", 'warning');
+        // Re-entrancy guard: a double click would otherwise start two
+        // parallel runNext chains that interleave output and overwrite each
+        // other's activeToolSocket/activePid state.
+        if (App.state.toolRunInFlight) {
+            return ui.showToast("A tool run is already in progress.", 'warning');
+        }
+        App.state.toolRunInFlight = true;
 
         const modalWrapper = document.getElementById('toolResultModal');
         const modalBody = document.getElementById('toolResultModalBody');
@@ -1031,6 +1049,7 @@ const App = {
         };
 
         await runNext(0);
+        App.state.toolRunInFlight = false;
     },
 
     terminateProcess: async () => {
@@ -1092,15 +1111,22 @@ const App = {
 
     syncStagingToBackend: (() => {
         let timer = null;
-        return () => {
+        const flush = async () => {
+            if (!App.state.projectPath) return;
+            try {
+                await api.saveProjectSettings(App.state.projectPath, { "staging_list": Array.from(App.state.staging) });
+            } catch (e) { console.warn("Staging sync failed", e); }
+        };
+        const schedule = () => {
             if (!App.state.projectPath) return;
             if (timer) clearTimeout(timer);
-            timer = setTimeout(async () => {
-                try {
-                    await api.saveProjectSettings(App.state.projectPath, { "staging_list": Array.from(App.state.staging) });
-                } catch (e) { console.warn("Staging sync failed", e); }
-            }, 500);
+            timer = setTimeout(() => { timer = null; flush(); }, 500);
         };
+        // flushNow() awaits the save itself: call it before re-reading the
+        // project from the server, otherwise the reload races the debounced
+        // write and resurrects the stale staging list in the UI.
+        schedule.flushNow = flush;
+        return schedule;
     })(),
 
     addToFavorites: async () => {
@@ -1215,7 +1241,7 @@ const App = {
                 export_format: format,
                 include_blueprint: includeBlueprint
             });
-            await navigator.clipboard.writeText(data.content);
+            await copyToClipboard(data.content);
             ui.showToast("Context copied", 'success');
         } catch (e) { ui.showToast("Failed to generate context: " + e.message, 'danger'); }
         finally {
@@ -1254,8 +1280,13 @@ const App = {
 
     toggleSelectAll: (checked) => {
         App.state.selectedFiles.clear();
-        const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
-        allItems.forEach(item => {
+        // Tree nodes exist in the DOM, but search results live in a virtual
+        // list where only the visible slice is rendered. Selecting "all"
+        // from a DOM query alone would (a) select only the rendered subset
+        // and (b) drop previously selected off-screen items. Merge both
+        // sources instead.
+        const domItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
+        domItems.forEach(item => {
             const path = item.getAttribute('data-path');
             if (path) {
                 if (checked) App.state.selectedFiles.add(path);
@@ -1263,6 +1294,12 @@ const App = {
                 if (cb) cb.checked = checked;
             }
         });
+        const searchList = document.getElementById('searchResultsList');
+        if (searchList && searchList.style.display !== 'none' && App.state.searchResults.length) {
+            App.state.searchResults.forEach(r => {
+                if (r && r.path && checked) App.state.selectedFiles.add(r.path);
+            });
+        }
         App.updateBulkUI();
     },
 
@@ -1270,21 +1307,26 @@ const App = {
         const count = App.state.selectedFiles.size;
         const countLabel = document.getElementById('selectedCount');
         if (countLabel) countLabel.innerText = `${count} selected`;
-        const bulkActions = document.getElementById('bulkActions');
-        if (bulkActions) {
-            bulkActions.style.display = count > 0 ? 'flex' : 'none';
-        }
+        // The bulk bar stays visible (Select-All must be reachable at zero
+        // selection); the destructive buttons are disabled instead.
+        const bulkButtons = document.querySelectorAll('#bulkActionButtons button');
+        bulkButtons.forEach(btn => { btn.disabled = count === 0; });
         const selectAllCb = document.getElementById('selectAllCb');
         if (selectAllCb) {
-            const allItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
-            let selectable = 0;
-            let selected = 0;
-            allItems.forEach(item => {
+            const domItems = document.querySelectorAll('.tree-node[data-path], .list-group-item[data-path]');
+            const selectablePaths = new Set();
+            domItems.forEach(item => {
                 const path = item.getAttribute('data-path');
-                if (path) {
-                    selectable++;
-                    if (App.state.selectedFiles.has(path)) selected++;
-                }
+                if (path) selectablePaths.add(path);
+            });
+            const searchList = document.getElementById('searchResultsList');
+            if (searchList && searchList.style.display !== 'none' && App.state.searchResults.length) {
+                App.state.searchResults.forEach(r => { if (r && r.path) selectablePaths.add(r.path); });
+            }
+            let selectable = selectablePaths.size;
+            let selected = 0;
+            selectablePaths.forEach(path => {
+                if (App.state.selectedFiles.has(path)) selected++;
             });
             selectAllCb.indeterminate = selectable > 0 && selected > 0 && selected < selectable;
             selectAllCb.checked = selectable > 0 && selected === selectable;
@@ -1594,7 +1636,7 @@ const App = {
                 dir_suffix: dir_suffix
             });
             if (data.result) {
-                await navigator.clipboard.writeText(data.result);
+                await copyToClipboard(data.result);
                 ui.showToast(`✅ ${paths.length} paths copied to clipboard!`, "success");
                 const modalEl = document.getElementById('pathCollectorModal');
                 const modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -1661,7 +1703,7 @@ const App = {
             }
             case 'copyPath':
                 try {
-                    await navigator.clipboard.writeText(path);
+                    await copyToClipboard(path);
                     ui.showToast("Path Copied");
                 } catch (_) { ui.showToast("Copy failed", 'danger'); }
                 break;

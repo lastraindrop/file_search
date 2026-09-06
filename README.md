@@ -1,6 +1,6 @@
-# FileCortex v6.5.3 (工作区编排助手)
+# FileCortex v6.6.0 (工作区编排助手)
 
-> **版本**: 6.5.3 | **日期**: 2026-08-23 | **测试**: 800 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.6.0 | **日期**: 2026-09-06 | **测试**: 846 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -52,6 +52,7 @@
 - [开发者指南](DEVELOPER_GUIDE.md)
 - [项目路线图](ROADMAP.md)
 - [测试说明](tests/README.md)
+- v6.6.0 审查报告：[架构审查](docs/ARCHITECTURE_REVIEW.md) | [定位与竞品分析](docs/POSITIONING_ANALYSIS.md) | [完整 Code Review](docs/CODE_REVIEW_V660.md) | [工程计划与测试台账](docs/IMPLEMENTATION_PLAN_V660.md)
 
 ---
 
@@ -93,10 +94,13 @@ python fctx.py export <project> --format markdown --output context.md
 pip install -e ".[mcp]"
 # 或: pip install mcp>=1.0.0
 
-# 2. 启动（stdio 传输，供 Claude Desktop / Cline 等 MCP 客户端调用）
+# 2. 启动（默认 stdio 传输，供 Claude Desktop / Cline 等 MCP 客户端调用）
 python mcp_server.py --transport stdio
 
-# 3. 在 Claude Desktop 配置中注册（示例）
+# 3. 网络传输（v6.6.0 起真正可用）：sse 或 streamable-http
+python mcp_server.py --transport streamable-http --host 127.0.0.1 --port 3000
+
+# 4. 在 Claude Desktop 配置中注册（示例）
 # ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)
 # 或 %APPDATA%\Claude\claude_desktop_config.json (Windows):
 {
@@ -120,8 +124,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **800 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作。
-- **测试结果**: 800 passed, 0 failed
+- **846 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作、v6.6.0 审查加固回归（UNC 长前缀、注册旁路、CancelledError、背压取消等）。
+- **测试结果**: 846 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -191,7 +195,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.5.3 |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.6.0 |
 
 ---
 

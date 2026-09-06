@@ -81,12 +81,21 @@ class DuplicateWorker(threading.Thread):
         logger.info(f"AUDIT - Starting duplicate scan in {self.root_dir}")
         size_map: dict[int, list[pathlib.Path]] = {}
 
+        def _cancelled() -> bool:
+            # Contract (matches SearchWorker): every exit path must leave a
+            # terminal sentinel in the queue, or consumers polling for DONE
+            # would wait forever after a cancellation.
+            if self.stop_event.is_set():
+                self.result_queue.put(("DONE", False))
+                return True
+            return False
+
         try:
             for full_p, _rel_p in FileUtils.walk_filtered(
                 self.root_dir, self.excludes, self.git_spec,
                 include_dirs=False, stop_event=self.stop_event,
             ):
-                if self.stop_event.is_set():
+                if _cancelled():
                     return
 
                 try:
@@ -103,12 +112,12 @@ class DuplicateWorker(threading.Thread):
             potential_groups = {s: p for s, p in size_map.items() if len(p) > 1}
 
             for size, paths in potential_groups.items():
-                if self.stop_event.is_set():
+                if _cancelled():
                     return
 
                 hash_sub_map: dict[str, list[pathlib.Path]] = {}
                 for p in paths:
-                    if self.stop_event.is_set():
+                    if _cancelled():
                         return
                     h = self._get_hash(p)
                     if h:
