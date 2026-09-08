@@ -13,6 +13,25 @@ from web_app import app
 
 
 @pytest.fixture(autouse=True)
+def _isolated_config_file(tmp_path):
+    """Defaults every test to an isolated config file.
+
+    CLI/MCP entry-point tests call ``fctx.main()`` / tool functions that
+    build a ``DataManager`` on their own; without this guard those writes
+    land in the developer's real ``~/.filecortex/config.json``. Tests that
+    manage their own config (clean_config, api_client, explicit patches)
+    nest inside and override this path for their duration.
+    """
+    import unittest.mock
+
+    with unittest.mock.patch(
+        "file_cortex_core.config._CONFIG_FILE",
+        tmp_path / "isolated_config.json",
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_singleton():
     """Ensure DataManager singleton and global process registry are reset between tests."""
     from file_cortex_core import FileUtils

@@ -53,7 +53,7 @@ def api_children(
         raise HTTPException(status_code=403, detail="Access denied")
     return {
         "status": "ok",
-        "parent": PathValidator.norm_path(p.parent) if p.parent else None,
+        "parent": PathValidator.norm_path(p.parent),
         "children": get_children(req.path, dm),
     }
 
@@ -225,7 +225,7 @@ def api_save(req: FileSaveRequest, dm: DataManager = _dm_dep) -> dict[str, str]:
             raise HTTPException(status_code=403, detail="Access denied")
 
         # BUG-W8 fix: if project_path provided, verify it matches resolved root.
-        if getattr(req, 'project_path', None):
+        if req.project_path:
             expected_root = get_valid_project_root(req.project_path, dm)
             if expected_root != root:
                 raise HTTPException(

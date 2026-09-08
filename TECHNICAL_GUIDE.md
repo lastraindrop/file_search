@@ -1,6 +1,6 @@
 # FileCortex Technical Guide
 
-> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors
+> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 864 passed, Ruff 0 errors
 
 ## 1. What the System Does
 
@@ -84,6 +84,7 @@ Never replace this with `startswith()`, normalized-string comparison, or a front
 
 - The default listener is `127.0.0.1:8000`.
 - Default CORS allows the standard loopback origins. Same-origin is decided by the Origin **host**: loopback hosts (`127.0.0.1`, `localhost`, `::1`) with any port, or an explicit `FCTX_ALLOWED_ORIGINS` entry. The client-controlled `Host` header is never used for this decision — a forged `Origin` + `Host` pair would otherwise pass as "same-origin".
+- WebSocket handshakes apply the **same origin policy** through `_ws_handshake_allowed()` (`routers/ws_routes.py`), which reuses `web_app._origin_allowed()`. The HTTP middleware never runs for WebSocket scopes and browsers exempt WS from the same-origin policy, so without this gate a cross-site page could drive both endpoints (cross-site WebSocket hijacking). Non-browser clients (CLI/MCP) send no Origin header and pass; rejected handshakes `accept()` then `close(4001)` like auth failures.
 - Binding outside loopback requires `FCTX_API_TOKEN`.
 - When configured, HTTP uses `X-API-Token`; WebSocket uses the `token` query parameter; both are encoded to UTF-8 bytes before the constant-time comparison, so non-ASCII header values return 401 instead of raising `TypeError` inside `compare_digest(str, str)`.
 - WebSocket auth failures `accept()` the handshake first, then `close(code=4001)`. Closing before accept makes the ASGI server answer the upgrade with a bare HTTP 403 and the custom code never reaches a browser.
@@ -188,6 +189,17 @@ Avoid these historical failure modes:
 - Frontend: reading server state after scheduling a debounced write — the reload races the 500ms debounce and resurrects stale data. Await `syncStagingToBackend.flushNow()` before refreshing (v6.6.0).
 - Tk clipboard: `clipboard_append()` followed by immediate `destroy()` loses the content because Tk still owns the selection; call `update()` first (v6.6.0).
 - `navigator.clipboard` without a Secure Context check: on plain-HTTP LAN deployments it is `undefined` and every copy action throws; fall back to `execCommand('copy')` (v6.6.0).
+- Delegated `click` handlers for form controls: the click phase fires before the state settles, so a `data-action` checkbox handler re-entered there runs with no argument and clobbers the pending `change` rebuild (select-all became select-none), and a SELECT handler rebuilds its options while the dropdown is open. Checkboxes and selects are `change`-driven only (v6.6.1).
+- Querying project config with the raw client path: `get_project_data()` registers unknown keys on first sight, so a subdirectory `project_path` creates a phantom project entry (persisted on the next save) and resolves tools against that entry's defaults. Always resolve through `get_valid_project_root()` first and query with the resolved root (v6.6.1).
+- Terminating a tracked PID after the process exited normally: the OS may reuse the PID, and `taskkill /T` would then kill an unrelated process tree. Clear the tracked PID on the success path; only terminate on disconnect/error while the process is still owned (v6.6.1).
+- Checking `future.cancel()` result in backpressure retries: a timed-out `run_coroutine_threadsafe(...).result()` may still complete between the timeout and the cancel; retrying then enqueues the same item twice. `cancel()` returning False means the item is already enqueued (v6.6.1).
+- Tk `bind()` **replaces** handlers: binding the same event on the same widget twice silently drops the first handler (a dedicated staging context menu became unreachable). Chain with `add="+"` consciously or partition widgets between bindings (v6.6.1).
+- Treating "no ERROR handling needed" for WebSocket tool streams: the backend reports handshake/validation failures as `{"status":"ERROR","msg":...}` frames or a bare `close(4001)`. A client promise that only resolves on `exit_code`/`DONE`/`error` hangs forever and wedges the whole feature behind an in-flight flag; handle ERROR as terminal and add an `onclose` fallback (v6.6.1).
+- Comparing `norm_path()` output with native-resolved paths via `relative_to()`: norm_path is lowercase-with-forward-slashes on Windows while resolved paths are mixed-case-backslash; the comparison never matches. Normalize both sides first (v6.6.1).
+- Anchoring CLI relative paths with `norm_path()` alone: it calls `abspath()`, which resolves against the process CWD, not the project root. Anchor explicitly to the project before normalizing (v6.6.1).
+- Redirecting CLI output on Windows: once stdout is a pipe/file it falls back to the ANSI codepage (e.g. cp936) and emoji in tool output raise `UnicodeEncodeError`. `sys.stdout.reconfigure(errors="replace")` keeps pipelines alive (v6.6.1).
+- Blocking the event loop inside `async` MCP tools: any tool doing disk I/O must wrap its body in `asyncio.to_thread`, or stdio heartbeats and other tool calls stall behind a slow scan (v6.6.1).
+- Running entry-point tests (CLI/MCP `main()`) against the developer's real `~/.filecortex/config.json`: an autouse conftest fixture isolates `_CONFIG_FILE` per test; tests managing their own config patch inside it (v6.6.1).
 
 ## 6. Search and Streaming
 
@@ -227,7 +239,7 @@ Token estimates are heuristic, not model-tokenizer exact. Future context-compile
 
 ## 9. Testing Strategy
 
-The suite has 846 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
+The suite has 864 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
 
 Important regression families:
 
@@ -242,6 +254,7 @@ Important regression families:
 | packaging | entry modules, runtime assets, versions, docs test-count consistency |
 | v6.5.3 fixes | Windows lock probe, preset Pydantic compat, corrupt-config recovery, case-only rename, null-setting tolerance, gitignore directory rules, case-faithful excludes, ZIP slash names, CLI exit codes, search-size alignment, WS 3.10 backpressure, threaded desktop tools |
 | v6.6.0 fixes | UNC long-prefix bypass, note/tag registration gate, MCP transport wiring, POSIX process-group detach, corrupt-config backup, search CancelledError/cancelled-future drain, backpressure stop responsiveness, sub-path excludes, metadata fallback contract, WS ERROR frame, duplicate cancel sentinel, WS 4001 delivery, origin/Host hardening, byte-wise token compare, lifespan process cleanup, extract UNC source + dir hygiene, schema Literal/bounds, CLI exit-2, literal rename replacement, timeout-env fallback |
+| v6.6.1 fixes | WS origin gate (CSWSH), resolved-root config lookup (no phantom registration), WS success-path PID hygiene + backpressure cancel race, frontend terminal states + change-driven controls, desktop staging-menu/poller/tool-guard/stats-cap, CLI relative paths/encoding/exit codes, MCP to_thread, CLI test config isolation |
 
 ### 9.1 v6.5.3 Fix Archive (process and results)
 
@@ -280,6 +293,22 @@ The v6.6.0 round started from a four-way parallel deep review (core / web+entrie
 
 Verification result: `846 passed` (800 baseline + 46 new), `ruff check .` clean, packaging count guard updated to 846. Deferred findings (WS tool-stream timeout, `stream_tool` grandchild processes, save-storm debouncing, desktop main-thread IO, unified route authorization dependency) are scheduled in `docs/IMPLEMENTATION_PLAN_V660.md` §4 batches 2.0/2.1.
 
+### 9.3 v6.6.1 Review-Driven Bugfix Archive (process and results)
+
+The v6.6.1 round re-ran the multi-track review (core read line-by-line; Web layer / desktop+CLI+MCP / frontend reviewed in parallel) and re-verified every finding against the source — including one live reproduction that **falsified a reported critical** (the bootstrap SRI hash was already correct; measured against the CDN before refusing the fix) and one finding declined as documented design (any-port loopback origins are an explicit, test-anchored dev workflow). 19 production fixes plus one test-isolation defect landed across the four entry points, anchored in `tests/test_v661_review_fixes.py` (18 tests; GUI-layer fixes are anchored by source contracts until the batch 2.1 GUI logic extraction). Full findings ledger: `docs/CODE_REVIEW_V661.md`. Key mechanisms:
+
+- **WS origin gate (P1)**: `_ws_handshake_allowed()` applies the HTTP middleware's `_origin_allowed()` policy to both WebSocket endpoints — the HTTP middleware never runs for WS scopes, and browsers exempt WS from same-origin, so a cross-site page could otherwise search project content or execute tools (CSWSH). No-Origin clients (CLI/MCP) pass; rejected handshakes accept-then-close(4001).
+- **Resolved-root config lookup (P2)**: both execute endpoints query `get_project_data(project_root)` instead of the raw client path — `get_project_data`'s create-if-missing semantics made a subdirectory input register a phantom project entry (persisted later) and resolve tools against defaults.
+- **WS lifecycle (P2)**: the success path clears the tracked PID (no post-exit `taskkill` of a possibly reused PID); backpressure retries treat a failed `future.cancel()` as "already enqueued" (no duplicate result frames).
+- **Frontend terminal states (P1/P2)**: the tool stream treats `{"status":"ERROR"}` as terminal and resolves on `onclose` (an auth rejection previously hung the promise and permanently wedged `toolRunInFlight`); the search WS renders a disconnected state when closed without DONE/ERROR; `openProject` gained a generation guard; `_fetch` reads the body once; `terminateProcess` surfaces backend `status:"error"`.
+- **Change-driven form controls (P1)**: delegated click handlers no longer re-enter for checkboxes/SELECTs — select-all had become select-none because the click phase clobbered the pending change rebuild.
+- **Desktop (P1/P2)**: the staging tree keeps its dedicated context menu (Tk `bind()` replaces handlers); the search poller is a single after-id chain with a DONE-sentinel TOCTOU guard; tool execution has an in-flight guard; token estimation reads a 1MB sample and extrapolates instead of slurping whole files; `show_status` cancels its previous restore timer.
+- **CLI (P2/P3)**: output reconfigured to `errors="replace"` for non-UTF-8 consoles; relative arguments anchor to the project root (`_resolve_in_project`); search results display relative paths on Windows; execution errors flip the exit code; `--limit` is clamped.
+- **MCP (P2/P3)**: `get_file_context`/`get_project_blueprint`/`get_file_stats` run their disk I/O via `asyncio.to_thread`; the `search_files` description now lists the content mode.
+- **Test isolation (P2)**: an autouse conftest fixture points `_CONFIG_FILE` at a per-test temp file — CLI/MCP entry-point tests no longer write into the developer's real `~/.filecortex/config.json` (found via `fctx projects` showing stale pytest temp dirs).
+
+Verification result: `864 passed` (846 baseline + 18 new), `ruff check .` clean, packaging count guard updated to 864. Deferred items (desktop main-thread I/O incl. the PowerShell clipboard path, desktop tool-process lifetime on window close) are folded into `docs/IMPLEMENTATION_PLAN_V660.md` §4 batch 2.0 (appendix A).
+
 Run on Windows with a writable temporary directory when needed:
 
 ```powershell
@@ -297,7 +326,7 @@ python -m build --no-isolation
 - `DataManager` still performs a full lock-read-merge-write cycle per small mutation; dirty-flag + debounced saves are scheduled (Phase 2, batch 2.0).
 - The WebSocket tool stream has no execution timeout (the HTTP path enforces `FCTX_EXEC_TIMEOUT`); parity is scheduled (Phase 2, batch 2.0).
 - `stream_tool` (shell mode) can leak shell grandchild processes holding the output pipe on some platforms; Job Object / process-group handling is scheduled (Phase 2, batch 2.0).
-- Desktop Tkinter still performs some synchronous file I/O on the UI thread (large staging exports, staging-filter traces); backgrounding is scheduled (Phase 2, batch 2.0).
+- Desktop Tkinter still performs some synchronous file I/O on the UI thread (large staging exports, staging-filter traces, the PowerShell clipboard copy); backgrounding is scheduled (Phase 2, batch 2.0), and tool subprocesses are not yet terminated on window close.
 - Frontend source contracts do not replace Playwright E2E coverage (Phase 2).
 - Tool output and search are bounded but can still consume I/O on very large local workspaces.
 - Token counts are heuristic and context selection is deterministic/manual, not semantic ranking.
@@ -305,4 +334,4 @@ python -m build --no-isolation
 - The Web progress tracker is process-internal; multi-worker deployments are unsupported (see README deployment note).
 - Search regex mode matches path names only; a combined regex-content semantic is a documented Phase 3 decision.
 
-See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases, [ROADMAP.md](ROADMAP.md) for the prioritized feature list, [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) for the batched execution plan, and [docs/CODE_REVIEW_V660.md](docs/CODE_REVIEW_V660.md) for the complete findings ledger.
+See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases, [ROADMAP.md](ROADMAP.md) for the prioritized feature list, [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) for the batched execution plan, [docs/CODE_REVIEW_V660.md](docs/CODE_REVIEW_V660.md) for the v6.6.0 findings ledger, and [docs/CODE_REVIEW_V661.md](docs/CODE_REVIEW_V661.md) for the v6.6.1 findings ledger.

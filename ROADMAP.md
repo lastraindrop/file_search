@@ -1,6 +1,19 @@
 # FileCortex Roadmap
 
-> Current version: 6.6.0 | Updated: 2026-09-06 | Current verification: 846 passed, Ruff 0 errors
+> Current version: 6.6.1 | Updated: 2026-09-09 | Current verification: 864 passed, Ruff 0 errors
+
+## Delivered in 6.6.1 (Review-Driven Bugfix Round)
+
+- [x] WebSocket handshakes now apply the HTTP origin policy (`_ws_handshake_allowed`): a cross-site page could previously drive `/ws/search` (read project content) and `/ws/actions/execute` (run tools) because the HTTP middleware never runs for WS scopes (CSWSH).
+- [x] Tool-execution endpoints (HTTP + WS) query project config by the **resolved** registered root — a subdirectory `project_path` no longer registers a phantom project entry or resolves tools against defaults.
+- [x] WS tool stream no longer taskkills a normally finished PID (dead-PID waste + PID-reuse hazard); backpressure retries no longer enqueue duplicate frames when `future.cancel()` loses the race.
+- [x] Frontend: tool stream handles `{"status":"ERROR"}` frames and resolves on socket close (auth rejection previously hung the run chain and permanently wedged tool execution); search WS renders a disconnected state instead of an eternal "Searching..." skeleton; `openProject` has a generation guard against interleaved opens; `_fetch` reads the response body once; `terminateProcess` surfaces backend `status:"error"`.
+- [x] Frontend: select-all and SELECT controls are change-driven — the delegated click handler previously turned "select all" into "select none" and rebuilt dropdown options mid-interaction.
+- [x] Desktop: the staging tree's dedicated context menu is reachable again (Tk `bind()` replace semantics had orphaned it); the search poller is a single after-id chain with a DONE-sentinel TOCTOU guard; tool execution has an in-flight guard; token estimation reads a 1MB sample instead of whole files; status-message timers no longer stack.
+- [x] CLI: relative path arguments anchor to the project root (stage/copy/extract); search results display relative paths on Windows; redirected output survives non-UTF-8 codepages (`errors="replace"`); tool execution failures flip the exit code; `--limit` is clamped.
+- [x] MCP: `get_file_context`/`get_project_blueprint`/`get_file_stats` run disk I/O via `asyncio.to_thread` (event loop no longer stalls); `search_files` documents the content mode.
+- [x] Tests: CLI/MCP entry-point tests are isolated from the real `~/.filecortex/config.json` via an autouse conftest fixture (previously wrote pytest temp dirs into the developer's real config).
+- [x] Housekeeping: dead code removed (unused API wrappers/endpoints, harmful UI stub, dead constant, unreachable branches); global-settings request fields bounded; `_make_enqueue`/`_origin_allowed` deduplicated. 18 regression tests added (`tests/test_v661_review_fixes.py`); full ledger in `docs/CODE_REVIEW_V661.md`.
 
 ## Delivered in 6.6.0 (Review-Driven Hardening Round)
 
@@ -94,6 +107,7 @@
 
 | Version | Date | Release snapshot |
 |---|---|---|
+| 6.6.1 | 2026-09-09 | Review-driven bugfix round: WS origin gate (CSWSH), resolved-root config lookup, WS PID hygiene + backpressure race, frontend terminal states + change-driven controls, desktop staging menu/poller/tool-guard/stats-cap, CLI relative paths + encoding + exit codes, MCP to_thread, CLI test isolation; 864 passed. |
 | 6.6.0 | 2026-09-06 | Review-driven hardening: UNC bypass, note/tag registration bypass, MCP transport, POSIX process groups, search CancelledError/cancelled-future drain, origin/lock/auth polish; 846 passed. |
 | 6.5.3 | 2026-08-23 | Review-driven bugfix round: Windows lock probe, corrupt-config recovery, case-only rename, gitignore/tree parity, CLI exit codes, WS 3.10 compat; 800 passed. |
 | 6.5.2 | 2026-08-09 | P0/P1/P2 security, correctness, packaging, and consistency remediation; 786 passed. |

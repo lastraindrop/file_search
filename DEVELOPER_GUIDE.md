@@ -1,6 +1,6 @@
 # FileCortex Developer Guide
 
-> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors
+> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 863 passed, Ruff 0 errors
 
 ## Project Model
 
@@ -46,6 +46,10 @@ All entry points should delegate to `file_cortex_core/`; do not create a second 
 12. WebSocket custom close codes require `accept()` first: closing before the handshake is answered with a bare HTTP 403 and the code never reaches the client (v6.6.0 fix).
 13. Enum-ish request fields get `Literal` types and numeric fields get `ge/le` bounds in `routers/schemas.py` — free strings and unbounded ints silently corrupt behavior downstream (v6.6.0 fix).
 14. Frontend: flush debounced persistence (`syncStagingToBackend.flushNow()`) *before* re-reading project state from the server, or the reload races the write and resurrects stale data (v6.6.0 fix).
+15. WebSocket handshakes must run the origin gate (`_ws_handshake_allowed`), not only the token check — the HTTP middleware never executes for WS scopes, and browsers exempt WS from the same-origin policy (v6.6.1 fix).
+16. Query project configuration with the **resolved** registered root, never the raw client path: `get_project_data()` auto-registers unknown keys, so a subdirectory input would create a phantom entry and resolve tools against defaults (v6.6.1 fix).
+17. Delegated `click` handlers must not re-enter for checkboxes or SELECTs — those are `change`-driven; the click phase runs before state settles and with no arguments (v6.6.1 fix). Tk's `bind()` **replaces** a previous handler on the same widget/event: partition widgets or chain with `add="+"` consciously (v6.6.1 fix).
+18. CLI path arguments are project-relative by contract: anchor relative paths to the resolved project root before `norm_path()` (which anchors to the CWD), and reflect execution failures in the process exit code (v6.6.1 fix).
 
 ## Configuration and Persistence
 
@@ -76,7 +80,7 @@ The merge preserves independent edits. Concurrent edits to the same scalar key a
 
 ## Security and Web Deployment
 
-By default the Web server binds to `127.0.0.1`. Local origins for the default port are allowlisted. Same-origin is decided by the Origin *host*: loopback hosts (`127.0.0.1`, `localhost`, `::1`) with any port, or an explicit `FCTX_ALLOWED_ORIGINS` entry — never by comparing against the request's `Host`-derived base URL.
+By default the Web server binds to `127.0.0.1`. Local origins for the default port are allowlisted. Same-origin is decided by the Origin *host*: loopback hosts (`127.0.0.1`, `localhost`, `::1`) with any port, or an explicit `FCTX_ALLOWED_ORIGINS` entry — never by comparing against the request's `Host`-derived base URL. WebSocket handshakes apply the same policy via `_ws_handshake_allowed()` in `routers/ws_routes.py` (v6.6.1).
 
 - If `FCTX_API_TOKEN` is configured, HTTP `/api/` requests require `X-API-Token`; WebSockets require `token` in the query string. Both comparisons encode to bytes before `hmac.compare_digest` (non-ASCII header values would raise `TypeError` on the raw-string variant).
 - WebSocket auth failures `accept()` the handshake first and then `close(4001)`, so the custom code actually reaches browser clients.
@@ -115,7 +119,7 @@ The temporary-directory override is useful on Windows hosts where the system dri
 
 Tests are layered by core behavior, API contracts, security, CLI persistence, MCP, file operations, and frontend source contracts. Add a behavior test near the responsible layer. Source-string frontend tests are useful regression guards but do not replace browser E2E tests for races and focus behavior.
 
-Review reports for the v6.6.0 hardening round (architecture, positioning, full bug list, and the batched forward plan with per-fix test mapping) live in [`docs/`](docs/): `ARCHITECTURE_REVIEW.md`, `POSITIONING_ANALYSIS.md`, `CODE_REVIEW_V660.md`, and `IMPLEMENTATION_PLAN_V660.md`.
+Review reports for the v6.6.0 hardening round (architecture, positioning, full bug list, and the batched forward plan with per-fix test mapping) live in [`docs/`](docs/): `ARCHITECTURE_REVIEW.md`, `POSITIONING_ANALYSIS.md`, `CODE_REVIEW_V660.md`, and `IMPLEMENTATION_PLAN_V660.md`. The v6.6.1 bugfix round's ledger is `docs/CODE_REVIEW_V661.md`.
 
 ## Style and Review Rules
 

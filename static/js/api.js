@@ -12,11 +12,15 @@ export async function _fetch(url, options = {}) {
     const res = await fetch(url, { ...options, headers });
     if (!res.ok) {
         let detail = "Unknown error";
+        // Read the body ONCE as text: a failed res.json() consumes the
+        // stream, and a follow-up res.text() would throw
+        // "body stream already read" and mask the real error.
+        const raw = await res.text().catch(() => "");
         try {
-            const data = await res.json();
+            const data = JSON.parse(raw);
             detail = data.detail || detail;
-        } catch (e) {
-            detail = await res.text();
+        } catch {
+            detail = raw || detail;
         }
         // FastAPI 422 validation errors carry an ARRAY of {loc, msg} items;
         // stringifying objects directly would render "[object Object]".
@@ -63,14 +67,6 @@ export async function fetchProjectConfig(path) {
 
 export async function saveProjectSettings(path, settings) {
     await _post(config.endpoints.projectSettings, { project_path: path, settings });
-}
-
-export async function saveProjectTools(path, tools) {
-    await _post(config.endpoints.projectTools, { project_path: path, tools });
-}
-
-export async function saveProjectCategories(path, categories) {
-    await _post(config.endpoints.projectCategories, { project_path: path, categories });
 }
 
 export async function fetchGlobalSettings() {
@@ -149,7 +145,7 @@ export async function categorizeFiles(projectPath, paths, categoryName) {
 }
 
 export async function terminateProcess(pid) {
-    await _post(config.endpoints.terminate, { pid });
+    return await _postJson(config.endpoints.terminate, { pid });
 }
 
 export async function togglePin(path) {

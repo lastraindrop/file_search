@@ -36,7 +36,6 @@ from file_cortex_core import (
     logger,
 )
 
-TOKEN_RATIO = 4
 SEARCH_POLL_MS = 100
 
 
@@ -288,7 +287,13 @@ class FileCortexApp:
         """
         color = "#ef4444" if is_error else "#10b981"
         self.lbl_status.config(text=message, foreground=color)
-        self.root.after(3000, lambda: self.lbl_status.config(foreground="#555"))
+        # Cancel the previous restore timer: back-to-back messages would
+        # otherwise let an old timer prematurely grey out the newest one.
+        if getattr(self, "_status_after_id", None):
+            self.root.after_cancel(self._status_after_id)
+        self._status_after_id = self.root.after(
+            3000, lambda: self.lbl_status.config(foreground="#555")
+        )
 
     def _copy_to_clipboard(self, text: str) -> None:
         """Copies text to the system clipboard.
@@ -632,9 +637,11 @@ class FileCortexApp:
         for t in [
             self.tree_search,
             self.tree_fav,
-            self.tree_staging,
             self.tree_proj,
         ]:
+            # NOTE: tree_staging is deliberately NOT rebound here: Tk's
+            # bind() replaces handlers, and the staging tab has its own
+            # dedicated menu (remove-selection / remove-filtered / clear).
             t.bind("<Button-3>", self.show_context_menu)
 
     def refresh_context_tools_menu(self) -> None:
@@ -905,6 +912,13 @@ class FileCortexApp:
         if not template:
             return
 
+        # One tool run at a time: repeated clicks would otherwise spawn
+        # parallel threads running the SAME external commands on the same
+        # files concurrently.
+        if getattr(self, "_tool_run_in_flight", False):
+            self.show_status("上一个工具执行尚未结束", is_error=True)
+            return
+
         # H3: never hand an out-of-workspace path to an external tool
         # (tool templates may run with shell=True).
         safe_paths = [p for p in paths if self._is_within_project(p)]
@@ -918,6 +932,7 @@ class FileCortexApp:
         self.tools_scroll.see(tk.END)
 
         root_str = str(self.current_dir)
+        self._tool_run_in_flight = True
 
         def run_in_background() -> None:
             results: list[tuple[str, dict]] = []
@@ -933,6 +948,7 @@ class FileCortexApp:
 
     def _render_tool_results(self, results: list[tuple[str, dict]]) -> None:
         """Renders tool execution results on the Tk main thread."""
+        self._tool_run_in_flight = False
         try:
             self.tools_scroll.config(state=tk.NORMAL)
             for file_name, res in results:
@@ -1017,12 +1033,22 @@ class FileCortexApp:
 
                 count = len(all_files)
                 total_tokens = 0
+                # Token estimation does not need whole files in memory
+                # (a staged 500MB log must not be slurped): read the first
+                # 1MB and extrapolate proportionally.
+                read_cap = 1024 * 1024
                 for f_str in all_files:
                     p = pathlib.Path(f_str)
                     if p.is_file() and not FileUtils.is_binary(p):
                         try:
-                            content = FileUtils.read_text_smart(p)
-                            total_tokens += FormatUtils.estimate_tokens(content)
+                            st_size = p.stat().st_size
+                            content = FileUtils.read_text_smart(
+                                p, max_bytes=read_cap
+                            )
+                            tokens = FormatUtils.estimate_tokens(content)
+                            if st_size > read_cap:
+                                tokens = int(tokens * st_size / read_cap)
+                            total_tokens += tokens
                         except Exception:
                             pass
 
@@ -1185,6 +1211,11 @@ class FileCortexApp:
             negative_tags=list(self.negative_tags),
         )
         self.search_thread.start()
+        # One polling chain per search: without the cancel, rapid
+        # re-triggers (mode switches, checkboxes) accumulate parallel loops
+        # that fight over the same queue and overwrite each other's status.
+        if getattr(self, "_poll_after_id", None):
+            self.root.after_cancel(self._poll_after_id)
         self.process_queue()
 
     def process_queue(self) -> None:
@@ -1197,6 +1228,7 @@ class FileCortexApp:
                     self.lbl_status.config(
                         text=f"就绪 ({len(self.tree_search.get_children())}项)"
                     )
+                    self._poll_after_id = None
                     return
                 if isinstance(res, tuple) and res[0] == "ERROR":
                     self.show_status(f"搜索错误: {res[1]}", is_error=True)
@@ -1228,10 +1260,20 @@ class FileCortexApp:
                 except Exception:
                     logger.exception("Error processing search result")
                 processed_in_this_tick += 1
-            self.root.after(SEARCH_POLL_MS, self.process_queue)
+            self._poll_after_id = self.root.after(SEARCH_POLL_MS, self.process_queue)
         except queue.Empty:
-            if self.search_thread and self.search_thread.is_alive():
-                self.root.after(SEARCH_POLL_MS, self.process_queue)
+            # TOCTOU guard: the worker may have pushed its DONE sentinel in
+            # the window between get_nowait() and is_alive(). Keep polling
+            # while the thread is alive OR the queue is non-empty.
+            if (
+                self.search_thread and self.search_thread.is_alive()
+            ) or not self.result_queue.empty():
+                self._poll_after_id = self.root.after(SEARCH_POLL_MS, self.process_queue)
+            else:
+                self.lbl_status.config(
+                    text=f"就绪 ({len(self.tree_search.get_children())}项)"
+                )
+                self._poll_after_id = None
 
     def sort_tree_column(self, tree: ttk.Treeview, col: str, reverse: bool) -> None:
         """Sorts a treeview column.

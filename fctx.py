@@ -22,6 +22,28 @@ from file_cortex_core import (
 )
 
 
+def _guard_output_encoding() -> None:
+    """Survives redirected non-UTF-8 consoles (e.g. cp936).
+
+    Unencodable tool output would otherwise raise UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream and hasattr(stream, "reconfigure"):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(errors="replace")
+
+
+def _resolve_in_project(raw: str, proj_root: str) -> str:
+    """Resolves a CLI path, anchoring relative paths to the project root.
+
+    norm_path alone would anchor them to the process CWD.
+    """
+    p = pathlib.Path(raw)
+    if not p.is_absolute():
+        p = pathlib.Path(proj_root) / p
+    return PathValidator.norm_path(p)
+
+
 def _resolve_project(data_mgr: DataManager, project: str) -> str | None:
     """Resolves and validates a project root path.
 
@@ -90,7 +112,7 @@ def cmd_stage(args: argparse.Namespace, data_mgr: DataManager) -> bool:
     if not proj_root:
         return False
 
-    file_path_str = PathValidator.norm_path(args.path)
+    file_path_str = _resolve_in_project(args.path, proj_root)
     if not PathValidator.is_safe(file_path_str, proj_root):
         logger.error(f"Security: CLI block unsafe path: {args.path}")
         print(f"ERROR: Path '{args.path}' is outside project root or unsafe.")
@@ -135,17 +157,22 @@ def cmd_search(args: argparse.Namespace, data_mgr: DataManager) -> bool:
         print("No matches found.")
         return True
 
-    for r in results[:args.limit]:
-        rel = pathlib.Path(r["path"])
+    limit = max(1, args.limit)
+    for r in results[:limit]:
+        # proj_root is normalized (forward slashes, lowercase on Windows)
+        # while result paths are native-resolved; compare normalized or
+        # relative_to() never matches on Windows.
+        norm = PathValidator.norm_path(r["path"])
+        rel = norm
         with contextlib.suppress(ValueError):
-            rel = rel.relative_to(proj_root)
+            rel = str(pathlib.PurePosixPath(norm).relative_to(proj_root))
         match_type = r.get("match_type", "Match")
         size_fmt = FormatUtils.format_size(r.get("size", 0))
         print(f"  [{match_type}] {rel}  ({size_fmt})")
 
     total = len(results)
-    if total > args.limit:
-        print(f"\n  ... and {total - args.limit} more (use --limit to show more)")
+    if total > limit:
+        print(f"\n  ... and {total - limit} more (use --limit to show more)")
     print(f"\n  Total: {total} matches")
     return True
 
@@ -243,6 +270,7 @@ def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> bool:
         print(f"Tool '{args.tool}' not found.")
         return False
 
+    ok = True
     for p in proj_data["staging_list"]:
         if not PathValidator.is_safe(p, proj_root):
             print(f"SKIPPING unsafe path: {p}")
@@ -251,10 +279,13 @@ def cmd_run(args: argparse.Namespace, data_mgr: DataManager) -> bool:
         print(f"Executing {args.tool} on {p}...")
         res = ActionBridge.execute_tool(template, p, proj_root)
         if "error" in res:
+            # Report AND reflect failure in the exit code so CI/scripts can
+            # detect a tool that never ran (or timed out).
             print(f"ERROR: {res['error']}")
+            ok = False
         else:
             print(f"EXIT CODE: {res['exit_code']}")
-    return True
+    return ok
 
 
 def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> bool:
@@ -271,14 +302,14 @@ def cmd_copy(args: argparse.Namespace, data_mgr: DataManager) -> bool:
     # single unsafe entry aborts the whole batch (matches core semantics).
     normalized_srcs: list[str] = []
     for src in args.srcs:
-        src_str = PathValidator.norm_path(src)
+        src_str = _resolve_in_project(src, proj_root)
         if not PathValidator.is_safe(src_str, proj_root):
             logger.error(f"Security: CLI block unsafe src: {src}")
             print(f"ERROR: Source '{src}' is outside project root or unsafe.")
             return False
         normalized_srcs.append(src_str)
 
-    dst_str = PathValidator.norm_path(args.dst_dir)
+    dst_str = _resolve_in_project(args.dst_dir, proj_root)
     if not PathValidator.is_safe(dst_str, proj_root):
         logger.error(f"Security: CLI block unsafe dst: {args.dst_dir}")
         print(
@@ -311,7 +342,7 @@ def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> bool:
     if not proj_root:
         return False
 
-    dst_str = PathValidator.norm_path(args.dst_dir)
+    dst_str = _resolve_in_project(args.dst_dir, proj_root)
     if not PathValidator.is_safe(dst_str, proj_root):
         logger.error(f"Security: CLI block unsafe dst: {args.dst_dir}")
         print(
@@ -334,6 +365,7 @@ def cmd_extract(args: argparse.Namespace, data_mgr: DataManager) -> bool:
 
 def main() -> None:
     """Entry point for the FileCortex CLI."""
+    _guard_output_encoding()
     parser = argparse.ArgumentParser(
         description="FileCortex CLI: Workspace Orchestrator"
     )

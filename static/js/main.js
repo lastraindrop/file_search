@@ -223,18 +223,23 @@ const App = {
     openProject: async (path = null) => {
         const p = path || document.getElementById('projectPath').value.trim();
         if (!p) return;
+        // Generation guard: interleaved opens must not graft project A's
+        // config onto project B's tree.
+        const requestSeq = ++App.state.openProjectSeq;
 
         App.state.selectedFiles.clear();
         App.updateBulkUI();
 
         try {
             const data = await api.openProject(p);
+            if (requestSeq !== App.state.openProjectSeq) return;
             App.state.projectPath = p;
             const pathInput = document.getElementById('projectPath');
             if (pathInput) pathInput.value = p;
             localStorage.setItem(App.config.storageKeys.lastProjectPath, p);
 
             App.state.projConfig = await api.fetchProjectConfig(p);
+            if (requestSeq !== App.state.openProjectSeq) return;
             App.state.collectionProfiles = App.state.projConfig.collection_profiles || {};
 
             // Restore UI Settings from Config
@@ -555,7 +560,7 @@ const App = {
             bodyHtml: `
                 <label class="form-label small text-muted">Archive name</label>
                 <input type="text" id="archiveNameInput" class="form-control bg-dark text-white border-secondary"
-                    value="${App.config.defaults.archiveName}">
+                    value="${App.escapeHtml(App.config.defaults.archiveName)}">
             `,
             onConfirm: async () => {
                 const name = document.getElementById('archiveNameInput').value.trim();
@@ -842,6 +847,7 @@ const App = {
         const sock = new WebSocket(wsUrl);
         App.state.socket = sock;
         let resultCount = 0;
+        let completed = false;
         sock.onopen = () => {
             if (App.state.socket === sock && App.state.searchGeneration === generation) list.innerHTML = '';
         };
@@ -850,14 +856,16 @@ const App = {
             let data;
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.status === "DONE") {
+                completed = true;
                 if (resultCount === 0) {
-        list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-text">No results found</div></div>';
+                    list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-text">No results found</div></div>';
                 }
                 count.innerText = `${resultCount} results`;
                 document.getElementById('btnStopSearch').style.display = 'none';
                 return sock.close();
             }
             if (data.status === "ERROR") {
+                completed = true;
                 list.innerHTML = `<div class="text-center p-3 text-danger">${App.escapeHtml(data.msg || 'Search error')}</div>`;
                 count.innerText = 'Error';
                 document.getElementById('btnStopSearch').style.display = 'none';
@@ -870,6 +878,7 @@ const App = {
         };
         sock.onerror = () => {
             if (App.state.socket !== sock || App.state.searchGeneration !== generation) return;
+            completed = true;
             list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128268;</div><div class="empty-state-text">Search connection failed</div></div>';
             count.innerText = 'Error';
             document.getElementById('btnStopSearch').style.display = 'none';
@@ -881,6 +890,12 @@ const App = {
             if (App.state.socket === sock && App.state.searchGeneration === generation) {
                 App.state.socket = null;
                 document.getElementById('btnStopSearch').style.display = 'none';
+                // A server close without DONE/ERROR (e.g. handshake
+                // rejection) must not leave the skeleton "Searching..." UI.
+                if (!completed) {
+                    list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#9888;</div><div class="empty-state-text">Search connection closed unexpectedly</div></div>';
+                    count.innerText = resultCount ? `${resultCount} results` : 'Disconnected';
+                }
             }
         };
     },
@@ -1030,11 +1045,13 @@ const App = {
                         outputDiv.scrollTop = outputDiv.scrollHeight;
                         modalWrapper.querySelector('.modal-body').scrollTop = modalWrapper.querySelector('.modal-body').scrollHeight;
                     }
-                    if (data.exit_code !== undefined || data.status === "DONE" || data.error) {
+                    // Backend failures arrive as {"status":"ERROR","msg":...}.
+                    const errMsg = data.error || (data.status === 'ERROR' ? (data.msg || 'Execution failed') : null);
+                    if (data.exit_code !== undefined || data.status === "DONE" || errMsg) {
                         stopBtn.style.display = 'none';
                         App.state.activePid = null;
                         if (App.state.activeToolSocket === socket) App.state.activeToolSocket = null;
-                        if (data.error) outputDiv.innerText += `\nERROR: ${data.error}`;
+                        if (errMsg && outputDiv) outputDiv.innerText += `\nERROR: ${errMsg}`;
                         if (data.exit_code !== undefined) outputDiv.innerText += `\n[Process exited with code: ${data.exit_code}]`;
                         socket.close();
                         resolve();
@@ -1043,6 +1060,12 @@ const App = {
                 socket.onerror = () => {
                     if (App.state.activeToolSocket === socket) App.state.activeToolSocket = null;
                     if (outputDiv) outputDiv.innerText += '\n[Connection error]';
+                    resolve();
+                };
+                // A server close without DONE/ERROR (e.g. auth rejection
+                // close code 4001) must also unblock the chain.
+                socket.onclose = () => {
+                    if (App.state.activeToolSocket === socket) App.state.activeToolSocket = null;
                     resolve();
                 };
             }).then(() => runNext(index + 1));
@@ -1055,8 +1078,14 @@ const App = {
     terminateProcess: async () => {
         if (!App.state.activePid) return;
         try {
-            await api.terminateProcess(App.state.activePid);
-            ui.showToast("Termination signal sent");
+            const data = await api.terminateProcess(App.state.activePid);
+            // The endpoint answers 200 with {"status":"error"} for unknown/
+            // reused PIDs; surface that instead of a false "signal sent".
+            if (data && data.status === 'error') {
+                ui.showToast("Termination failed: " + (data.msg || 'unknown error'), 'danger');
+            } else {
+                ui.showToast("Termination signal sent");
+            }
         } catch (e) { ui.showToast("Termination failed: " + e.message, 'danger'); }
     },
 
@@ -1170,6 +1199,7 @@ const App = {
         if (!group) group = document.getElementById('favGroupSelect').value || "Default";
         try {
             await api.toggleFavorite(App.state.projectPath, path, action, group);
+            if (!App.state.projConfig.groups) App.state.projConfig.groups = {};
             if (!App.state.projConfig.groups[group]) App.state.projConfig.groups[group] = [];
             if (action === 'add') {
                 if (!App.state.projConfig.groups[group].includes(path)) App.state.projConfig.groups[group].push(path);
@@ -1755,21 +1785,17 @@ const App = {
     }),
 
     loadTreeChildren: async (node, childrenContainer) => {
-        try {
-            const data = await api.fetchChildren(node.path);
-            childrenContainer.innerHTML = '';
+        const data = await api.fetchChildren(node.path);
+        childrenContainer.innerHTML = '';
 
-            if (!data.children || data.children.length === 0) {
-                childrenContainer.innerHTML = '<div class="empty-state py-2"><div class="small text-muted">Empty folder</div></div>';
-                return;
-            }
-
-            data.children.forEach((child) => {
-                childrenContainer.appendChild(ui.renderTree(child));
-            });
-        } catch (e) {
-            throw e;
+        if (!data.children || data.children.length === 0) {
+            childrenContainer.innerHTML = '<div class="empty-state py-2"><div class="small text-muted">Empty folder</div></div>';
+            return;
         }
+
+        data.children.forEach((child) => {
+            childrenContainer.appendChild(ui.renderTree(child));
+        });
     },
 
     toggleSection: (sectionId) => {

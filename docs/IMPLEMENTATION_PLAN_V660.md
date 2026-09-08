@@ -3,6 +3,7 @@
 > 角色：本轮（v6.6.0）工作的完整记录 + 下一阶段的可执行计划
 > 组成：§1 现状分析 → §2 本轮已完成工作台账（内容+位置+验证）→ §3 单元测试体系（现有矩阵+新增 46 项明细+后续补测计划）→ §4 下一阶段计划（批次/顺序/位置/验收）→ §5 质量门禁与发布流程
 > 基线：846 passed / Ruff 0 errors / 版本 6.6.0
+> 更新：v6.6.1 追加轮后基线 **864 passed / 版本 6.6.1**，批次 2.0 范围扩充（见文末附录 A）；v6.6.1 修复台账见 `docs/CODE_REVIEW_V661.md`
 
 ---
 
@@ -101,6 +102,7 @@
 | 前端契约 | 1 | 43 | HTML/JS/CSS 字符串契约、SRI、CSP |
 | CLI / MCP / 打包 | 5 | ~90 | 9 子命令、磁盘级 reload、打包一致性、版本三处一致 |
 | v6.6.0 回归（新） | 1 | **46** | 见 3.2 |
+| v6.6.1 回归（新） | 1 | **18** | WS Origin 门禁、解析根查询、WS PID 卫生、CLI 相对路径/编码/退出码、全局设置界限、桌面+前端源码契约、CLI 测试配置隔离 |
 
 ### 3.2 新增 46 项明细（tests/test_v660_review_fixes.py）
 
@@ -218,3 +220,21 @@ python -m build --no-isolation      # wheel 检查 templates/static/gui
 | CLI 冒烟 | `fctx.py projects` 正常列示 |
 | Web 冒烟 | `GET /` 200；`GET /api/whoami` 200 `{"version":"6.6.0"}` |
 | 行为变更清单 | WS 4001 交付方式、CLI 无命令退出码、bulkActions 常显、MCP 截断提示——均有测试锚定与文档记录 |
+
+---
+
+## 附录 A：v6.6.1 追加轮（2026-09-09）
+
+又一轮多轨审查（核心库逐行 + Web 层 / 桌面+CLI+MCP / 前端三路并行，全部发现人工复核，含一次实测否决误报的 "critical" SRI 问题）产出 19 项生产修复 + 1 项测试隔离缺陷修复，18 项回归锚（`tests/test_v661_review_fixes.py`）。完整台账：`docs/CODE_REVIEW_V661.md`。要点：WS Origin 门禁（CSWSH）、解析根配置查询（杜绝幽灵注册）、WS 成功路径 PID 卫生 + 背压取消竞态、前端两条 WS 流的终态处理 + change 驱动控件（全选回归）、桌面暂存菜单/轮询单链/工具并发防护/统计 1MB 采样、CLI 项目相对路径 + GBK 编码守卫 + 退出码、MCP `to_thread` 全覆盖、conftest autouse 配置隔离（CLI/MCP 入口测试不再污染真实 `~/.filecortex/config.json`）。
+
+### 对批次 2.0 的范围扩充（v6.6.1 遗留并入）
+
+| 顺序 | 位置 | 修改 | 来源 |
+|------|------|------|------|
+| 4a | `file_search.py` `ctx_copy_file_to_os` | PowerShell 剪贴板调用后台线程化（主线程冷启动 1-3s 冻结），错误经 `after` 回主线程呈现 | v6.6.1 ⏳ |
+| 4b | `file_search.py` `on_close_window` | 窗体关闭时终止在途工具子进程（桌面版引入 ProcessManager 等价物或复用 core 注册表，对齐 Web lifespan 模式） | v6.6.1 ⏳ |
+| 2.1 #5 补充 | `file_search.py` 拆分 | 拆分时顺带补桌面四个 v6.6.1 修复的行为测试（当前以源码契约锚定） | v6.6.1 ℹ️ |
+
+### 对批次 3.x 的补充
+
+- regex+content 组合语义决策不变；另记录：`fctx.py` 无 include_dirs 入口，emoji 目录帧在 CLI 搜索中实际不可达（编码守卫仍保留，覆盖 `cmd_run` 工具输出与未来入口扩展）。

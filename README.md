@@ -1,6 +1,6 @@
-# FileCortex v6.6.0 (工作区编排助手)
+# FileCortex v6.6.1 (工作区编排助手)
 
-> **版本**: 6.6.0 | **日期**: 2026-09-06 | **测试**: 846 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 6.6.1 | **日期**: 2026-09-09 | **测试**: 864 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -38,6 +38,16 @@
 - **查重工具**: 大小预筛 + SHA256 策略。
 - **快速分类**: 自定义类别目录移动。
 
+### v6.6.1 审查修复轮
+- **WS Origin 门禁**: WebSocket 握手应用与 HTTP 中间件一致的同源策略，封堵跨站 WebSocket 劫持 (CSWSH)。
+- **解析根配置查询**: 工具执行端点 (HTTP/WS) 以 resolve 后的项目根查询配置，子目录输入不再产生幽灵项目条目。
+- **WS 成功路径 PID 卫生**: 工具正常结束后不再对已退出 PID 执行 taskkill（消除 PID 复用误杀风险）；背压取消竞态消除重复结果帧。
+- **前端健壮性**: 工具流处理 `{"status":"ERROR"}` 帧并在服务器关闭时兜底解锁；搜索 WS 异常关闭不再卡死 UI；全选/SELECT 控件改为 change 驱动；`_fetch` 单次读取响应体；openProject 竞态守卫。
+- **桌面版**: 暂存树专用右键菜单恢复可达；搜索轮询单链管理 + DONE 哨兵 TOCTOU 防护；工具执行并发防护；统计估算 1MB 采样外推（不再全量读入大文件）。
+- **CLI**: 相对路径锚定项目根；搜索结果相对路径显示（Windows 修复）；GBK 管道编码守卫；工具执行失败反映到退出码。
+- **MCP**: 阻塞磁盘 I/O 全部下放 `asyncio.to_thread`；`search_files` 描述补全 content 模式。
+- **测试隔离**: CLI/MCP 入口测试默认隔离到临时配置文件，不再污染开发者真实 `~/.filecortex/config.json`。
+
 ### 前端增强
 - **标签管理 (Tag Management)**: 前端 UI 支持添加/移除标签。
 - **文件创建 (File Creation)**: 文件创建模态框，支持从 UI 直接创建新文件。
@@ -53,6 +63,7 @@
 - [项目路线图](ROADMAP.md)
 - [测试说明](tests/README.md)
 - v6.6.0 审查报告：[架构审查](docs/ARCHITECTURE_REVIEW.md) | [定位与竞品分析](docs/POSITIONING_ANALYSIS.md) | [完整 Code Review](docs/CODE_REVIEW_V660.md) | [工程计划与测试台账](docs/IMPLEMENTATION_PLAN_V660.md)
+- v6.6.1 审查报告：[完整 Code Review 与修复台账](docs/CODE_REVIEW_V661.md)
 
 ---
 
@@ -124,8 +135,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **846 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作、v6.6.0 审查加固回归（UNC 长前缀、注册旁路、CancelledError、背压取消等）。
-- **测试结果**: 846 passed, 0 failed
+- **864 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作、v6.6.0 审查加固回归（UNC 长前缀、注册旁路、CancelledError、背压取消等）、v6.6.1 审查修复回归（WS Origin 门禁、解析根查询、PID 卫生、CLI 相对路径、源码契约等）。
+- **测试结果**: 864 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -195,7 +206,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.6.0 |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.6.1 |
 
 ---
 

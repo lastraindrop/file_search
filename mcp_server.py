@@ -122,12 +122,12 @@ async def search_files(
     mode: str = "smart",
     excludes: str = "",
 ) -> str:
-    """Search for files within a workspace using smart, exact, or regex modes.
+    """Search for files within a workspace using smart, exact, regex, or content modes.
 
     Args:
         project_path: The project root path to search within.
         query: The search query string.
-        mode: Search mode - "smart", "exact", or "regex".
+        mode: Search mode - "smart", "exact", "regex", or "content".
         excludes: Space-separated exclusion patterns.
 
     Returns:
@@ -204,9 +204,14 @@ async def get_file_context(
         )
 
     fmt_norm = fmt.strip().lower()
-    if fmt_norm == "xml":
-        return prefix + ContextFormatter.to_xml(safe_paths, root_dir=root)
-    return prefix + ContextFormatter.to_markdown(safe_paths, root_dir=root)
+
+    def _build() -> str:
+        if fmt_norm == "xml":
+            return ContextFormatter.to_xml(safe_paths, root_dir=root)
+        return ContextFormatter.to_markdown(safe_paths, root_dir=root)
+
+    # Disk I/O off the event loop (see search_files).
+    return prefix + await asyncio.to_thread(_build)
 
 
 @get_mcp().tool()
@@ -284,13 +289,17 @@ async def get_project_blueprint(
     if not root:
         return "Error: Project path is not registered or authorized."
 
-    try:
+    def _build_tree() -> str:
         return FileUtils.generate_ascii_tree(
             pathlib.Path(root),
             excludes_str=excludes,
             use_gitignore=True,
             max_depth=max_depth,
         )
+
+    try:
+        # scandir off the event loop (see search_files).
+        return await asyncio.to_thread(_build_tree)
     except Exception as e:
         return f"Error generating blueprint: {e}"
 
@@ -315,42 +324,48 @@ async def get_file_stats(
     if not root:
         return "Error: Project path is not registered or authorized."
 
-    lines = ["File Statistics:"]
-    total_size = 0
-    total_tokens = 0
+    def _compute_stats() -> list[str]:
+        lines = ["File Statistics:"]
+        total_size = 0
+        total_tokens = 0
 
-    for p in file_paths:
-        if not PathValidator.is_safe(p, root):
-            continue
-        path = pathlib.Path(p)
-        if not path.exists():
-            continue
+        for p in file_paths:
+            if not PathValidator.is_safe(p, root):
+                continue
+            path = pathlib.Path(p)
+            if not path.exists():
+                continue
 
-        try:
-            stat = path.stat()
-            size = stat.st_size
-            total_size += size
+            try:
+                stat = path.stat()
+                size = stat.st_size
+                total_size += size
 
-            content = ""
-            if path.is_file() and not FileUtils.is_binary(path):
-                content = FileUtils.read_text_smart(path, max_bytes=1024 * 1024)
-                tokens = FormatUtils.estimate_tokens(
-                    NoiseReducer.clean(content)
-                )
-                total_tokens += tokens
-            else:
                 tokens = 0
+                if path.is_file() and not FileUtils.is_binary(path):
+                    content = FileUtils.read_text_smart(path, max_bytes=1024 * 1024)
+                    tokens = FormatUtils.estimate_tokens(
+                        NoiseReducer.clean(content)
+                    )
+                    total_tokens += tokens
 
-            lines.append(
-                f"  {path.name}: {FormatUtils.format_size(size)}, "
-                f"{tokens} tokens, mtime={FormatUtils.format_datetime(stat.st_mtime)}"
-            )
-        except Exception:
-            logger.exception(f"MCP Stat error for {p}")
-            lines.append(f"  {path.name}: Error retrieving stats")
+                lines.append(
+                    f"  {path.name}: {FormatUtils.format_size(size)}, "
+                    f"{tokens} tokens, mtime={FormatUtils.format_datetime(stat.st_mtime)}"
+                )
+            except Exception:
+                logger.exception(f"MCP Stat error for {p}")
+                lines.append(f"  {path.name}: Error retrieving stats")
 
-    lines.append(f"\nTotal: {FormatUtils.format_size(total_size)}, {total_tokens} tokens")
-    return "\n".join(lines)
+        lines.append(
+            f"\nTotal: {FormatUtils.format_size(total_size)}, {total_tokens} tokens"
+        )
+        return lines
+
+    try:
+        return "\n".join(await asyncio.to_thread(_compute_stats))
+    except Exception as e:
+        return f"Error retrieving stats: {e}"
 
 
 def main() -> None:

@@ -19,7 +19,8 @@ def _validate_dict_size(v: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Dict not JSON-serializable: {e}") from e
     if len(serialized.encode("utf-8")) > MAX_DICT_JSON_BYTES:
         raise ValueError(
-            f"Dict too large: {len(serialized)} bytes > {MAX_DICT_JSON_BYTES} limit"
+            f"Dict too large: {len(serialized.encode('utf-8'))} bytes > "
+            f"{MAX_DICT_JSON_BYTES} limit"
         )
     return v
 
@@ -185,12 +186,18 @@ class GlobalSettingsRequest(BaseModel):
     """Request model for updating global settings."""
 
     preview_limit_mb: float | None = Field(default=None, gt=0, le=100)
-    allowed_extensions: str | None = None
+    allowed_extensions: str | None = Field(default=None, max_length=10_000)
     token_threshold: int | None = Field(default=None, ge=1, le=10_000_000)
     enable_noise_reducer: bool | None = None
-    theme: str | None = None
+    theme: str | None = Field(default=None, max_length=64)
     token_ratio: float | None = Field(default=None, gt=0, le=100)
+    # Size-bounded like every other dict field (BUG-W9 hardening parity).
     settings: dict[str, Any] | None = None
+
+    @field_validator("settings")
+    @classmethod
+    def _check_size(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return v if v is None else _validate_dict_size(v)
 
 
 class FavoriteRequest(BaseModel):

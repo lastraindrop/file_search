@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import ipaddress
 import os
 import pathlib
@@ -56,10 +57,32 @@ def _parse_allowed_origins(raw_value: str | None) -> list[str]:
 
 def _is_wildcard_origin(origins: list[str]) -> bool:
     """Checks if the origins list represents a wildcard (allow all)."""
-    return origins == ["*"] or "*" in origins
+    return "*" in origins
 
 
 ALLOWED_ORIGINS = _parse_allowed_origins(os.getenv("FCTX_ALLOWED_ORIGINS"))
+
+
+def _origin_allowed(origin: str) -> bool:
+    """Checks an Origin header against the loopback/allowlist policy.
+
+    Do NOT derive the expected origin from the client-controlled Host header
+    (``request.base_url``): a forged Origin+Host pair would pass as
+    "same-origin". A request is treated as same-origin only when the Origin
+    host is one of the loopback hosts (the default deployment; any loopback
+    port, matching the documented dev workflow) or matches an explicitly
+    configured origin.
+    """
+    if _is_wildcard_origin(ALLOWED_ORIGINS):
+        return True
+    try:
+        origin_host = (urlparse(origin).hostname or "").lower()
+    except ValueError:
+        return False
+    return (
+        origin_host in ("127.0.0.1", "localhost", "::1")
+        or origin in ALLOWED_ORIGINS
+    )
 
 
 def _is_local_request(request: Request) -> bool:
@@ -85,35 +108,13 @@ async def verify_api_token(
         if request.method == "OPTIONS":
             return await call_next(request)
         origin = request.headers.get("origin")
-        # Do NOT derive the expected origin from the client-controlled Host
-        # header (`request.base_url`): a forged Origin+Host pair would pass
-        # as "same-origin". Instead, treat a request as same-origin only
-        # when the Origin host is one of the loopback hosts (the default
-        # deployment) or matches an explicitly configured origin.
-        same_origin = False
-        if origin:
-            try:
-                parsed = urlparse(origin)
-                origin_host = (parsed.hostname or "").lower()
-                same_origin = (
-                    origin_host in ("127.0.0.1", "localhost", "::1")
-                    or origin in ALLOWED_ORIGINS
-                )
-            except ValueError:
-                same_origin = False
-        if (
-            origin
-            and not same_origin
-            and not _is_wildcard_origin(ALLOWED_ORIGINS)
-            and origin not in ALLOWED_ORIGINS
-        ):
+        if origin and not _origin_allowed(origin):
             return JSONResponse(
                 status_code=403,
                 content={"status": "error", "detail": "Origin not allowed"},
             )
         if API_TOKEN:
             token = request.headers.get("X-API-Token", "")
-            import hmac
             # Encode before comparing: compare_digest(str, str) raises
             # TypeError on non-ASCII header values (HTTP headers are
             # latin-1 decoded), which would surface as a 500.

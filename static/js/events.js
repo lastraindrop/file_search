@@ -21,6 +21,12 @@ export function bindStaticEvents(app) {
             return;
         }
         if (action === 'closeOperationSummary') return app.closeOperationSummary();
+        // Form controls act on 'change' (listener below): the click phase
+        // re-enters with no argument — for toggleSelectAll it would clobber
+        // the pending selection rebuild, and for SELECTs it rebuilds the
+        // options while the dropdown is open.
+        if (action === 'toggleSelectAll') return;
+        if (target.tagName === 'SELECT') return;
 
         const handler = app[action];
         if (typeof handler === 'function') handler.call(app);

@@ -406,14 +406,6 @@ export function renderVirtualSearchResults(results) {
     });
 }
 
-export function renderSearchResultItem(data, overlayMode = false) {
-    // L1: this function was dead code (search results use the virtual-scroll
-    // path renderVirtualSearchResults -> createSearchResultItem). Removed to
-    // shrink the XSS review surface and avoid confusion. Kept as a thin
-    // stub for backward-compatible imports if any.
-    return renderVirtualSearchResults([data]);
-}
-
 export function renderTree(node, options = {}) {
     const { initialExpand = false } = options;
     const container = document.createElement('div');

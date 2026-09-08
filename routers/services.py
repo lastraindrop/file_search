@@ -32,10 +32,10 @@ def get_project_config_for_path(
     path_str: str, dm: DataManager | None = None
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Returns the registered project root and its config for a path."""
+    dm = dm or get_dm()
     root = get_valid_project_root(path_str, dm)
     if not root:
         return None, None
-    dm = dm or get_dm()
     return root, dm.get_project_data(root)
 
 

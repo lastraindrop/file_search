@@ -212,7 +212,10 @@ def api_execute_tool(
         if not project_root:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        proj_config = dm.get_project_data(req.project_path)
+        # Look up the config by the RESOLVED root, not the raw client path:
+        # get_project_data() registers unknown keys on first sight, so a
+        # subdirectory input would otherwise create a phantom project entry.
+        proj_config = dm.get_project_data(project_root)
         template = proj_config.get("custom_tools", {}).get(req.tool_name)
         if not template:
             raise HTTPException(status_code=404, detail="Tool template not found")

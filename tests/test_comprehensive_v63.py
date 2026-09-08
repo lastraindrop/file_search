@@ -51,7 +51,10 @@ class TestCLI:
         from fctx import main as cli_main
 
         dm = DataManager()
-        dm.add_to_recent(str(mock_project))
+        # cmd_projects lists config.projects keys; registering (not merely
+        # add_to_recent) is required. This previously passed only because
+        # un-isolated tests polluted the real config with mock_project.
+        dm.get_project_data_obj(str(mock_project))
 
         with patch("sys.argv", ["fctx", "projects"]):
             cli_main()

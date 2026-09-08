@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import hmac
 import os
 import pathlib
 import threading
@@ -19,6 +20,7 @@ from file_cortex_core import (
     PathValidator,
     logger,
     search_generator,
+    terminate_process,
 )
 from routers.common import register_process, unregister_process
 from routers.services import (
@@ -38,12 +40,55 @@ def verify_ws_token(token: str | None) -> bool:
         return True
     if not token:
         return False
-    import hmac
     # Encode before comparing: non-ASCII tokens would raise TypeError
     # inside compare_digest(str, str).
     return hmac.compare_digest(
         token.encode("utf-8"), expected_token.encode("utf-8")
     )
+
+
+def _ws_handshake_allowed(websocket: WebSocket, token: str | None) -> bool:
+    """Applies the HTTP middleware's origin policy to WS handshakes.
+
+    The HTTP middleware never runs for WebSocket scopes and browsers exempt
+    WS from the same-origin policy, so a cross-site page could otherwise
+    drive both endpoints. Non-browser clients (CLI/MCP) send no Origin.
+    """
+    if not verify_ws_token(token):
+        return False
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    from web_app import _origin_allowed  # deferred: avoids import cycle
+
+    return _origin_allowed(origin)
+
+
+def _make_enqueue(
+    stop_event: threading.Event,
+    result_queue: asyncio.Queue,
+    main_loop: asyncio.AbstractEventLoop,
+):
+    """Builds a backpressure-aware enqueue bridge for a worker thread."""
+
+    def enqueue(item: dict[str, Any] | str) -> bool:
+        """Blocks the worker thread instead of accumulating unbounded output."""
+        while not stop_event.is_set():
+            future = asyncio.run_coroutine_threadsafe(result_queue.put(item), main_loop)
+            try:
+                future.result(timeout=0.1)
+                return True
+            except (TimeoutError, concurrent.futures.TimeoutError):
+                # NOTE: on Python 3.10 concurrent.futures.TimeoutError is NOT
+                # the builtin TimeoutError (unified in 3.11); catch both so
+                # backpressure still works on the 3.10 support tier.
+                if not future.cancel():
+                    # The put completed between timeout and cancel; retrying
+                    # would enqueue the same item twice.
+                    return True
+        return False
+
+    return enqueue
 
 
 @router.websocket("/ws/search")
@@ -59,7 +104,7 @@ async def websocket_search(
     dm: DataManager = _dm_dep,
 ) -> None:
     """Streams search results over WebSocket."""
-    if not verify_ws_token(token):
+    if not _ws_handshake_allowed(websocket, token):
         # Accept the handshake first: calling close() before accept() makes
         # Starlette reject the upgrade with a bare HTTP 403 and the custom
         # code 4001 never reaches the client.
@@ -84,20 +129,7 @@ async def websocket_search(
     result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue(maxsize=100)
     main_loop = asyncio.get_running_loop()
     stop_event = threading.Event()
-
-    def enqueue(item: dict[str, Any] | str) -> bool:
-        """Applies backpressure when the WebSocket consumer is slow."""
-        while not stop_event.is_set():
-            future = asyncio.run_coroutine_threadsafe(result_queue.put(item), main_loop)
-            try:
-                future.result(timeout=0.1)
-                return True
-            except (TimeoutError, concurrent.futures.TimeoutError):
-                # NOTE: on Python 3.10 concurrent.futures.TimeoutError is NOT
-                # the builtin TimeoutError (unified in 3.11); catch both so
-                # backpressure still works on the 3.10 support tier.
-                future.cancel()
-        return False
+    enqueue = _make_enqueue(stop_event, result_queue, main_loop)
 
     def run_search() -> None:
         try:
@@ -179,7 +211,7 @@ async def websocket_action_stream(
     dm: DataManager = _dm_dep,
 ) -> None:
     """Streams tool execution output over WebSocket."""
-    if not verify_ws_token(token):
+    if not _ws_handshake_allowed(websocket, token):
         # Accept before close so the 4001 code actually reaches the client
         # (same rationale as the /ws/search handler).
         await websocket.accept()
@@ -194,7 +226,10 @@ async def websocket_action_stream(
         await websocket.close()
         return
 
-    proj_config = dm.get_project_data(project_path)
+    # Look up the config by the RESOLVED root: get_project_data() registers
+    # unknown keys on first sight, so a raw subdirectory input would create
+    # a phantom project entry (with default tools).
+    proj_config = dm.get_project_data(project_root)
     # Defensive lookup: legacy/malformed configs may lack the `custom_tools` key.
     # Falls through to the 'Tool template not found' error path instead of KeyError.
     template = proj_config.get("custom_tools", {}).get(tool_name)
@@ -212,26 +247,12 @@ async def websocket_action_stream(
     stop_event = threading.Event()
     result_queue: asyncio.Queue[dict[str, Any] | str] = asyncio.Queue(maxsize=100)
     main_loop = asyncio.get_running_loop()
-
-    def enqueue(item: dict[str, Any] | str) -> bool:
-        """Blocks the reader thread instead of accumulating unlimited output."""
-        while not stop_event.is_set():
-            future = asyncio.run_coroutine_threadsafe(result_queue.put(item), main_loop)
-            try:
-                future.result(timeout=0.1)
-                return True
-            except (TimeoutError, concurrent.futures.TimeoutError):
-                # Python 3.10 compatibility: concurrent.futures.TimeoutError
-                # is a distinct type there (unified with TimeoutError in 3.11).
-                future.cancel()
-        return False
+    enqueue = _make_enqueue(stop_event, result_queue, main_loop)
 
     def terminate_current_process() -> None:
         if not current_pid[0]:
             return
         try:
-            from file_cortex_core.process_utils import terminate_process
-
             terminate_process(current_pid[0])
             unregister_process(current_pid[0])
         except Exception:
@@ -263,6 +284,9 @@ async def websocket_action_stream(
 
             proc.wait()
             unregister_process(proc.pid)
+            # The process finished normally: clear the PID so the finally
+            # clause below does not taskkill a dead (possibly reused) PID.
+            current_pid[0] = None
             enqueue({"exit_code": proc.returncode})
         except Exception as e:
             enqueue({"error": str(e)})

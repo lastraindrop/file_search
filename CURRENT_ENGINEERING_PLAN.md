@@ -1,6 +1,6 @@
 # FileCortex Current Engineering Plan
 
-> Version: 6.6.0 | Updated: 2026-09-06 | Verification baseline: 846 passed, Ruff 0 errors, wheel/sdist built
+> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 864 passed, Ruff 0 errors, wheel/sdist built
 
 ## Purpose
 
@@ -18,7 +18,9 @@ The P0/P1/P2 remediation tranche is complete.
 
 The v6.5.3 review-driven round is complete as well: Windows lock liveness probe, corrupt-config recovery, desktop preset Pydantic compatibility, case-only rename, case-faithful excludes, gitignore directory rules in the tree view, null-tolerant settings API, CLI exit codes, per-entry-point search-size alignment, WebSocket 3.10 backpressure compatibility, CORS preflight, and threaded desktop/MCP tool execution. See TECHNICAL_GUIDE §9.1 for the full fix archive.
 
-The v6.6.0 full-architecture review round is complete: UNC long-prefix bypass (validate_project/is_safe), note/tag auto-registration sandbox escape, MCP transport wiring, POSIX process-group self-kill, corrupt-config backup-before-rewrite, search CancelledError/future-drain and backpressure cancellation, manual-exclude separator parity, metadata fallback contract, WS error/closing-code delivery, origin hardening against Host spoofing, extract UNC source blocking, lifespan process cleanup, and a batch of frontend/desktop race and UX fixes. Full findings and follow-ups live in `docs/` (ARCHITECTURE_REVIEW, POSITIONING_ANALYSIS, CODE_REVIEW_V660, IMPLEMENTATION_PLAN_V660). Baseline: 846 passed, Ruff 0 errors.
+The v6.6.0 full-architecture review round is complete: UNC long-prefix bypass (validate_project/is_safe), note/tag auto-registration sandbox escape, MCP transport wiring, POSIX process-group self-kill, corrupt-config backup-before-rewrite, search CancelledError/future-drain and backpressure cancellation, manual-exclude separator parity, metadata fallback contract, WS error/closing-code delivery, origin hardening against Host spoofing, extract UNC source blocking, lifespan process cleanup, and a batch of frontend/desktop race and UX fixes. Full findings and follow-ups live in `docs/` (ARCHITECTURE_REVIEW, POSITIONING_ANALYSIS, CODE_REVIEW_V660, IMPLEMENTATION_PLAN_V660).
+
+The v6.6.1 review-driven bugfix round is complete on top: WebSocket origin gate (cross-site WS hijacking), resolved-root config lookups (no phantom project registration), WS success-path PID hygiene and backpressure cancel-race, frontend terminal-state handling for both WebSocket flows, change-driven form controls (select-all regression), desktop staging-menu/poller/tool-guard/stats-cap fixes, CLI project-relative paths + output-encoding + exit codes, MCP `to_thread` coverage, and CLI/MCP test isolation from the real user config. 18 regression tests added; ledger in `docs/CODE_REVIEW_V661.md`. Baseline: 864 passed, Ruff 0 errors.
 
 The next work is deliberate product improvement, not another broad stabilization rewrite.
 
