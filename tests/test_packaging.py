@@ -3,7 +3,10 @@
 import pathlib
 import re
 
-import tomllib
+try:  # Python 3.11+; the 3.10 CI tier installs the tomli backport
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+    import tomli as tomllib
 
 EXPECTED_TEST_COUNT = 882
 

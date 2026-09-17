@@ -712,7 +712,10 @@ class TestVersion:
         assert len(__version__) > 0
 
     def test_version_matches_pyproject(self):
-        import tomllib
+        try:  # Python 3.11+; the 3.10 CI tier installs the tomli backport
+            import tomllib
+        except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+            import tomli as tomllib
 
         from file_cortex_core import __version__
         pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
