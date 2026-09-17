@@ -9,29 +9,49 @@ export async function _fetch(url, options = {}) {
     const headers = { ...(options.headers || {}) };
     const token = _getApiToken();
     if (token) headers['X-API-Token'] = token;
-    const res = await fetch(url, { ...options, headers });
-    if (!res.ok) {
-        let detail = "Unknown error";
-        // Read the body ONCE as text: a failed res.json() consumes the
-        // stream, and a follow-up res.text() would throw
-        // "body stream already read" and mask the real error.
-        const raw = await res.text().catch(() => "");
-        try {
-            const data = JSON.parse(raw);
-            detail = data.detail || detail;
-        } catch {
-            detail = raw || detail;
+    // A hung request must not leave action buttons stuck in their disabled
+    // state forever ("Generating…", "Archiving…"): abort after a bounded
+    // wait. Callers may pass their own signal to opt out or override.
+    const timeoutMs = options.timeoutMs || 120000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const { timeoutMs: _ignored, ...fetchOptions } = options;
+    try {
+        const res = await fetch(url, {
+            ...fetchOptions,
+            headers,
+            signal: options.signal || controller.signal,
+        });
+        if (!res.ok) {
+            let detail = "Unknown error";
+            // Read the body ONCE as text: a failed res.json() consumes the
+            // stream, and a follow-up res.text() would throw
+            // "body stream already read" and mask the real error.
+            const raw = await res.text().catch(() => "");
+            try {
+                const data = JSON.parse(raw);
+                detail = data.detail || detail;
+            } catch {
+                detail = raw || detail;
+            }
+            // FastAPI 422 validation errors carry an ARRAY of {loc, msg} items;
+            // stringifying objects directly would render "[object Object]".
+            if (Array.isArray(detail)) {
+                detail = detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join("; ");
+            } else if (detail && typeof detail === "object") {
+                detail = JSON.stringify(detail);
+            }
+            throw new Error(detail);
         }
-        // FastAPI 422 validation errors carry an ARRAY of {loc, msg} items;
-        // stringifying objects directly would render "[object Object]".
-        if (Array.isArray(detail)) {
-            detail = detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join("; ");
-        } else if (detail && typeof detail === "object") {
-            detail = JSON.stringify(detail);
+        return res;
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            throw new Error('Request timed out. The server may still be working; check the server log.');
         }
-        throw new Error(detail);
+        throw e;
+    } finally {
+        clearTimeout(timer);
     }
-    return res;
 }
 
 async function _post(url, data) {

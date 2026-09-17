@@ -5,6 +5,7 @@ A tkinter-based workspace management tool for analyzing and organizing
 project files with context generation for LLM workflows.
 """
 
+import contextlib
 import os
 import pathlib
 import queue
@@ -469,9 +470,7 @@ class FileCortexApp:
         f_box.pack(fill=tk.X)
         ttk.Label(f_box, text="🔍 过滤:").pack(side=tk.LEFT)
         self.staging_filter_var = tk.StringVar()
-        self.staging_filter_var.trace_add(
-            "write", lambda *a: self.refresh_staging_ui(apply_filter=True)
-        )
+        self.staging_filter_var.trace_add("write", lambda *a: self._schedule_staging_filter())
         ttk.Entry(f_box, textvariable=self.staging_filter_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=2
         )
@@ -789,8 +788,9 @@ class FileCortexApp:
         self._refresh_tree()
         self.update_stats()
         self.trigger_search()
-
-        self.lbl_status.config(text=f"已就绪: {self.current_dir.name}")
+        # trigger_search() only sets the transient "扫描中..." status; the
+        # poller replaces it on completion. Do NOT overwrite it here with a
+        # premature "ready" while the scan is still running.
 
     def on_stage_all(self) -> None:
         """Adds all files from project to staging list."""
@@ -806,19 +806,45 @@ class FileCortexApp:
 
         stage_mode = "files" if mode == "yes" else "top_folders"
         manual_excludes = self.exclude_var.get().split()
+        use_gitignore = self.use_gitignore_var.get()
+        root_dir = self.current_dir
 
-        try:
-            items = FileUtils.get_project_items(
-                str(self.current_dir),
-                manual_excludes,
-                use_gitignore=self.use_gitignore_var.get(),
-                mode=stage_mode,
-            )
-            added = self.data_mgr.batch_stage(str(self.current_dir), items)
-            self.show_status(f"已成功添加 {added} 个项目到清单")
-            self.load_project(str(self.current_dir))
-        except Exception as e:
-            messagebox.showerror("错误", f"全选添加失败: {e}")
+        if getattr(self, "_stage_all_in_flight", False):
+            self.show_status("全选添加正在进行中", is_error=True)
+            return
+        self._stage_all_in_flight = True
+        self.show_status("正在扫描项目...")
+
+        def run_stage_all() -> None:
+            try:
+                items = FileUtils.get_project_items(
+                    str(root_dir),
+                    manual_excludes,
+                    use_gitignore=use_gitignore,
+                    mode=stage_mode,
+                )
+                added = self.data_mgr.batch_stage(str(root_dir), items)
+                error = None
+            except Exception as exc:
+                added = 0
+                error = exc
+            try:
+                self.root.after(
+                    0, lambda: self._finish_stage_all(added, error)
+                )
+            except Exception:
+                logger.exception("Failed to schedule stage-all completion")
+
+        threading.Thread(target=run_stage_all, daemon=True).start()
+
+    def _finish_stage_all(self, added: int, error: Exception | None) -> None:
+        """Applies an asynchronous stage-all result on the Tk main thread."""
+        self._stage_all_in_flight = False
+        if error is not None:
+            messagebox.showerror("错误", f"全选添加失败: {error}")
+            return
+        self.show_status(f"已成功添加 {added} 个项目到清单")
+        self.load_project(str(self.current_dir))
 
     def refresh_tools_ui(self) -> None:
         """Refreshes the tools tab buttons."""
@@ -970,12 +996,15 @@ class FileCortexApp:
                         self.tools_scroll.insert(
                             tk.END, f"  - {out_text.strip()}\n", "yellow"
                         )
-            self.tools_scroll.config(state=tk.DISABLED)
             self.tools_scroll.see(tk.END)
         except Exception:
             logger.exception(
                 "Failed to render tool results (window may have been closed)"
             )
+        finally:
+            # Keep the log read-only even when rendering failed midway.
+            with contextlib.suppress(Exception):
+                self.tools_scroll.config(state=tk.DISABLED)
 
     def ctx_execute_custom_tool(self, tool_name: str) -> None:
         """Executes a custom tool for the current context-menu selection."""
@@ -1336,7 +1365,16 @@ class FileCortexApp:
         elif tree == self.tree_proj:
             full_path = self.get_tree_path(sel[0])
         elif tree == self.tree_staging or tree == self.tree_fav:
-            full_path = pathlib.Path(tree.item(sel[0])["values"][0])
+            # Defensive: these trees are not bound to <<TreeviewSelect>> today,
+            # but the values-based lookup must not IndexError if that changes.
+            try:
+                vals = tree.item(sel[0])["values"]
+                if not vals:
+                    return
+                full_path = pathlib.Path(vals[0])
+            except (IndexError, ValueError):
+                logger.exception("Failed to resolve preview path from staging/fav")
+                return
 
         if not full_path or not full_path.exists():
             return
@@ -1358,30 +1396,85 @@ class FileCortexApp:
         self.btn_edit_save.config(text="✏️ 开启编辑")
         self.preview_frame.config(text="📄 内容预览 (只读)")
 
+        # DT-1 fix: never read the file synchronously on the Tk main thread
+        # (preview_limit_mb may allow 100MB, and arrow-keying through results
+        # reads one file per selection). Show a placeholder now and read in a
+        # worker; a per-selection request id discards stale completions.
+        self._preview_read_seq = getattr(self, "_preview_read_seq", 0) + 1
+        read_seq = self._preview_read_seq
         self.preview_text.config(state=tk.NORMAL)
         self.preview_text.delete("1.0", tk.END)
+        self.btn_edit_save.config(state=tk.DISABLED)
+
         if full_path.is_file():
-            if FileUtils.is_binary(full_path):
-                self.preview_text.insert(tk.END, "--- 二进制文件 ---")
-                self.btn_edit_save.config(state=tk.DISABLED)
-                self._last_loaded_preview = None
-            else:
+            self.preview_text.insert(tk.END, "正在读取...")
+            self.preview_text.config(state=tk.DISABLED)
+            self._last_loaded_preview = None
+            limit = get_preview_limit(self.data_mgr)
+
+            def run_preview_read() -> None:
                 try:
-                    limit = get_preview_limit(self.data_mgr)
-                    content = FileUtils.read_text_smart(full_path, max_bytes=limit)
-                    self.preview_text.insert(tk.END, content)
-                    self._last_loaded_preview = content
-                    self.btn_edit_save.config(state=tk.NORMAL)
-                except Exception as e:
-                    self.preview_text.insert(
-                        tk.END, f"--- Error reading file: {e} ---"
+                    is_binary = FileUtils.is_binary(full_path)
+                    content = (
+                        None
+                        if is_binary
+                        else FileUtils.read_text_smart(full_path, max_bytes=limit)
                     )
-                    self._last_loaded_preview = None
-                    self.btn_edit_save.config(state=tk.DISABLED)
-        else:
-            self.preview_text.insert(tk.END, f"目录: {full_path}")
+                    error = None
+                except Exception as exc:
+                    is_binary = False
+                    content = None
+                    error = exc
+                try:
+                    self.root.after(
+                        0,
+                        lambda: self._render_preview(
+                            read_seq, full_path, is_binary, content, error
+                        ),
+                    )
+                except Exception:
+                    logger.exception("Failed to schedule preview rendering")
+
+            threading.Thread(target=run_preview_read, daemon=True).start()
+            return
+
+        self.preview_text.insert(tk.END, f"目录: {full_path}")
+        self._last_loaded_preview = None
+        self.preview_text.config(state=tk.DISABLED)
+        self.preview_text.see("1.0")
+
+    def _render_preview(
+        self,
+        read_seq: int,
+        full_path: pathlib.Path,
+        is_binary: bool,
+        content: str | None,
+        error: Exception | None,
+    ) -> None:
+        """Renders an asynchronously read preview on the Tk main thread.
+
+        Ignores completions for selections that are no longer current (the
+        user arrowed to another file while this read was in flight).
+        """
+        if read_seq != getattr(self, "_preview_read_seq", 0):
+            return
+        if self.current_preview_path != full_path:
+            return
+
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete("1.0", tk.END)
+        if error is not None:
+            self.preview_text.insert(tk.END, f"--- Error reading file: {error} ---")
             self._last_loaded_preview = None
             self.btn_edit_save.config(state=tk.DISABLED)
+        elif is_binary:
+            self.preview_text.insert(tk.END, "--- 二进制文件 ---")
+            self._last_loaded_preview = None
+            self.btn_edit_save.config(state=tk.DISABLED)
+        else:
+            self.preview_text.insert(tk.END, content or "")
+            self._last_loaded_preview = content or ""
+            self.btn_edit_save.config(state=tk.NORMAL)
         self.preview_text.config(state=tk.DISABLED)
         self.preview_text.see("1.0")
 
@@ -1467,6 +1560,20 @@ class FileCortexApp:
         )
         self._copy_to_clipboard(tree_text)
         self.show_status("结构已复制")
+
+    def _schedule_staging_filter(self) -> None:
+        """Debounces the staging-filter trace.
+
+        Each keystroke would otherwise rebuild the tree with per-item stat()
+        calls and possibly a synchronous config write (vanished files).
+        """
+        after_id = getattr(self, "_staging_filter_after_id", None)
+        if after_id is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(after_id)
+        self._staging_filter_after_id = self.root.after(
+            200, lambda: self.refresh_staging_ui(apply_filter=True)
+        )
 
     def refresh_staging_ui(self, apply_filter: bool = False) -> None:
         """Refreshes the staging (file list) view.
@@ -1628,7 +1735,12 @@ class FileCortexApp:
         self.update_stats()
 
     def copy_all_staging_content(self) -> None:
-        """Copies all staged file contents to clipboard."""
+        """Copies all staged file contents to clipboard.
+
+        Runs the export (up to 500 files / 50MB of reads) in a background
+        thread so the Tk main loop stays responsive; the clipboard copy and
+        status update happen back on the main thread via ``root.after``.
+        """
         prefix = None
         tpl_name = self.selected_template_var.get()
         if tpl_name != "None" and self.current_proj_config:
@@ -1639,22 +1751,52 @@ class FileCortexApp:
         manual_excludes = [e.strip() for e in ex_str.split() if e.strip()]
 
         fmt = self.export_format_var.get()
-        if fmt == "xml":
-            final_text = ContextFormatter.to_xml(
-                self.staging_files,
-                self.current_dir,
-                prompt_prefix=prefix,
-                manual_excludes=manual_excludes,
-                use_gitignore=use_git,
-            )
-        else:
-            final_text = ContextFormatter.to_markdown(
-                self.staging_files,
-                self.current_dir,
-                prompt_prefix=prefix,
-                manual_excludes=manual_excludes,
-                use_gitignore=use_git,
-            )
+        staging_snapshot = list(self.staging_files)
+        root_dir = self.current_dir
+
+        if getattr(self, "_export_in_flight", False):
+            self.show_status("导出正在进行中", is_error=True)
+            return
+        self._export_in_flight = True
+        self.show_status("正在生成上下文...")
+
+        def run_export() -> None:
+            try:
+                if fmt == "xml":
+                    final_text = ContextFormatter.to_xml(
+                        staging_snapshot,
+                        root_dir,
+                        prompt_prefix=prefix,
+                        manual_excludes=manual_excludes,
+                        use_gitignore=use_git,
+                    )
+                else:
+                    final_text = ContextFormatter.to_markdown(
+                        staging_snapshot,
+                        root_dir,
+                        prompt_prefix=prefix,
+                        manual_excludes=manual_excludes,
+                        use_gitignore=use_git,
+                    )
+                error = None
+            except Exception as exc:
+                final_text = ""
+                error = exc
+            try:
+                self.root.after(
+                    0, lambda: self._finish_export(final_text, error)
+                )
+            except Exception:
+                logger.exception("Failed to schedule export completion")
+
+        threading.Thread(target=run_export, daemon=True).start()
+
+    def _finish_export(self, final_text: str, error: Exception | None) -> None:
+        """Applies an asynchronous export result on the Tk main thread."""
+        self._export_in_flight = False
+        if error is not None:
+            messagebox.showerror("错误", f"生成上下文失败: {error}")
+            return
         if final_text:
             self._copy_to_clipboard(final_text)
             self.show_status("内容已复制")
@@ -1838,11 +1980,16 @@ class FileCortexApp:
         self._show_path_collection_dialog(paths)
 
     def on_copy_staged_paths(self) -> None:
-        """Copies staged file paths to clipboard."""
-        paths = []
-        for item in self.tree_staging.get_children():
-            p_str = self.tree_staging.set(item, "path")
-            paths.append(pathlib.Path(p_str))
+        """Copies staged file paths to clipboard.
+
+        Uses the full staging list, not the (possibly filtered) tree view:
+        a user with an active filter still expects every staged path.
+        """
+        source = self.staging_files if self.staging_files else [
+            self.tree_staging.set(item, "path")
+            for item in self.tree_staging.get_children()
+        ]
+        paths = [pathlib.Path(p_str) for p_str in source]
         if not paths:
             return
         self._show_path_collection_dialog(paths)
@@ -1975,7 +2122,8 @@ class FileCortexApp:
         self.data_mgr.add_to_group(
             str(self.current_dir), group, safe_paths
         )
-        self.current_proj_config.current_group = group
+        if self.current_proj_config:
+            self.current_proj_config.current_group = group
         self.data_mgr.save()
         self.refresh_fav_tree()
         self.lbl_status.config(text=f"已将 {len(safe_paths)} 个项目添加至收藏组: {group}")
@@ -2061,8 +2209,6 @@ class FileCortexApp:
         L6: signals the search thread to stop, then destroys the root so all
         child Toplevels and daemon workers are released cleanly.
         """
-        import contextlib
-
         with contextlib.suppress(Exception):
             self.stop_event.set()
         with contextlib.suppress(Exception):

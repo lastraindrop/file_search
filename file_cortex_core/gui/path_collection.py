@@ -167,6 +167,12 @@ class PathCollectionDialog(tk.Toplevel):
 
     def _do_copy_and_close(self) -> None:
         """Formats paths and copies to clipboard, then closes."""
+        # Re-entrancy guard: update_idletasks() below can pump a queued
+        # double-click, re-entering this handler and double-copying before
+        # destroy() (which would then raise TclError on the dead widget).
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
         self.result = FormatUtils.collect_paths(
             [str(p) for p in self.paths],
             str(self.current_dir),
@@ -177,9 +183,11 @@ class PathCollectionDialog(tk.Toplevel):
         )
         self.clipboard_clear()
         self.clipboard_append(self.result)
-        # Process pending events so Tk takes CLIPBOARD ownership before the
+        # Flush pending layout work so Tk takes CLIPBOARD ownership before the
         # window dies; otherwise the clipboard content is lost on destroy.
-        self.update()
+        # update_idletasks() is deliberately used instead of update(): the
+        # latter also processes input events and could re-enter this handler.
+        self.update_idletasks()
         if self.status_callback:
             self.status_callback(len(self.paths))
         self.destroy()

@@ -30,6 +30,8 @@ from routers.schemas import (
     FileSaveRequest,
     OpenPathRequest,
     PathCollectionRequest,
+    ProgressNewRequest,
+    ProgressPollRequest,
     ProgressStatus,
 )
 from routers.services import (
@@ -445,32 +447,23 @@ def api_extract(req: FileExtractRequest, dm: DataManager = _dm_dep) -> dict[str,
 
 
 @fs_router.post("/api/fs/progress", response_model=ProgressStatus)
-def api_progress(payload: dict[str, Any]) -> dict[str, Any]:
+def api_progress(payload: ProgressPollRequest) -> dict[str, Any]:
     """Polls progress for a tracked task_id.
 
     Body: ``{"task_id": str}``. Returns the current :class:`ProgressStatus`
     snapshot, or 404 if the task_id is unknown.
     """
-    task_id = payload.get("task_id")
-    if not isinstance(task_id, str):
-        raise HTTPException(status_code=400, detail="task_id (str) required")
-    state = ProgressTracker.get(task_id)
+    state = ProgressTracker.get(payload.task_id)
     if state is None:
-        raise HTTPException(status_code=404, detail=f"Unknown task_id: {task_id}")
+        raise HTTPException(status_code=404, detail=f"Unknown task_id: {payload.task_id}")
     return state
 
 
 @fs_router.post("/api/fs/progress/new")
-def api_progress_new(payload: dict[str, Any]) -> dict[str, str]:
+def api_progress_new(payload: ProgressNewRequest) -> dict[str, str]:
     """Creates a new tracked task and returns its task_id.
 
     Body: ``{"total": int}``. Returns ``{"task_id": str}``.
     """
-    total = payload.get("total")
-    # Reject bools (bool is a subclass of int) and negative values.
-    if not isinstance(total, int) or isinstance(total, bool) or total < 0:
-        raise HTTPException(
-            status_code=400, detail="total (non-negative int) required"
-        )
-    task_id = ProgressTracker.new_task(total=total)
+    task_id = ProgressTracker.new_task(total=payload.total)
     return {"task_id": task_id}

@@ -1,6 +1,6 @@
 # FileCortex Developer Guide
 
-> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 863 passed, Ruff 0 errors
+> Version: 7.0.0 | Updated: 2026-09-17 | Verification baseline: 882 passed, Ruff 0 errors
 
 ## Project Model
 
@@ -50,6 +50,11 @@ All entry points should delegate to `file_cortex_core/`; do not create a second 
 16. Query project configuration with the **resolved** registered root, never the raw client path: `get_project_data()` auto-registers unknown keys, so a subdirectory input would create a phantom entry and resolve tools against defaults (v6.6.1 fix).
 17. Delegated `click` handlers must not re-enter for checkboxes or SELECTs — those are `change`-driven; the click phase runs before state settles and with no arguments (v6.6.1 fix). Tk's `bind()` **replaces** a previous handler on the same widget/event: partition widgets or chain with `add="+"` consciously (v6.6.1 fix).
 18. CLI path arguments are project-relative by contract: anchor relative paths to the resolved project root before `norm_path()` (which anchors to the CWD), and reflect execution failures in the process exit code (v6.6.1 fix).
+19. Nested `.gitignore` files participate with git's last-match-wins precedence: evaluate each chain entry in order and let a child `!pattern` override a parent match. Never flatten multiple specs with a single `PathSpec.match_file()` call — it cannot express cross-file negation (v7.0 fix).
+20. Windows shell quoting: `%%` collapsing only happens inside `.bat`/`.cmd` batch files; under `subprocess shell=True` (`cmd /c` command-line context) `%%` stays literal and corrupts paths containing `%`. Quote, but do not double percent signs (v7.0 fix).
+21. Long synchronous I/O belongs off the serving thread: Web endpoints use `asyncio.to_thread` for exports/stats, and desktop callbacks use a worker thread + `root.after` — the Tk main thread must never read files, run exports, or rebuild filtered trees synchronously (v7.0 fix).
+22. Queue-sentinel parity: every worker exit path (success, error, cancellation) leaves both an `("ERROR", msg)` where applicable **and** a terminal `("DONE", ...)`; consumers must be able to drain until DONE regardless of the outcome (v7.0 fix).
+23. Deployment is single-process by contract: `ProgressTracker` is in-process state, so uvicorn must run with `--workers 1` (container CMD, systemd unit, and NSSM script all encode this). Relocate config/logs with `FCTX_CONFIG_DIR` instead of sharing `~/.filecortex`; expose `/healthz` (unauthenticated) for orchestrator probes (v7.0).
 
 ## Configuration and Persistence
 
@@ -119,7 +124,7 @@ The temporary-directory override is useful on Windows hosts where the system dri
 
 Tests are layered by core behavior, API contracts, security, CLI persistence, MCP, file operations, and frontend source contracts. Add a behavior test near the responsible layer. Source-string frontend tests are useful regression guards but do not replace browser E2E tests for races and focus behavior.
 
-Review reports for the v6.6.0 hardening round (architecture, positioning, full bug list, and the batched forward plan with per-fix test mapping) live in [`docs/`](docs/): `ARCHITECTURE_REVIEW.md`, `POSITIONING_ANALYSIS.md`, `CODE_REVIEW_V660.md`, and `IMPLEMENTATION_PLAN_V660.md`. The v6.6.1 bugfix round's ledger is `docs/CODE_REVIEW_V661.md`.
+Review reports for the v6.6.0 hardening round (architecture, positioning, full bug list, and the batched forward plan with per-fix test mapping) live in [`docs/`](docs/): `ARCHITECTURE_REVIEW.md`, `POSITIONING_ANALYSIS.md`, `CODE_REVIEW_V660.md`, and `IMPLEMENTATION_PLAN_V660.md`. The v6.6.1 bugfix round's ledger is `docs/CODE_REVIEW_V661.md`. The v7.0.0 master review, 41-item finding ledger, and release-engineering plan (with the implementation delivery record) is `docs/MASTER_REVIEW_AND_LANDING_PLAN.md`.
 
 ## Style and Review Rules
 

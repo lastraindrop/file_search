@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Batch rename window for FileCortex GUI."""
 
+import contextlib
 import pathlib
 import re
 import tkinter as tk
@@ -61,6 +62,7 @@ class BatchRenameWindow(tk.Toplevel):
         self.pattern_var = tk.StringVar()
         self.replacement_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="regex")
+        self._preview_after_id = None
 
         self._init_ui()
         self.update_preview()
@@ -97,12 +99,12 @@ class BatchRenameWindow(tk.Toplevel):
         ttk.Label(grid_f, text="查找:").grid(row=0, column=0, sticky=tk.W, padx=2)
         self.entry_pattern = ttk.Entry(grid_f, textvariable=self.pattern_var)
         self.entry_pattern.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
-        self.pattern_var.trace_add("write", lambda *a: self.update_preview())
+        self.pattern_var.trace_add("write", lambda *a: self._schedule_preview())
 
         ttk.Label(grid_f, text="替换为:").grid(row=1, column=0, sticky=tk.W, padx=2)
         self.entry_repl = ttk.Entry(grid_f, textvariable=self.replacement_var)
         self.entry_repl.grid(row=1, column=1, sticky=tk.EW, padx=5, pady=2)
-        self.replacement_var.trace_add("write", lambda *a: self.update_preview())
+        self.replacement_var.trace_add("write", lambda *a: self._schedule_preview())
 
         grid_f.columnconfigure(1, weight=1)
 
@@ -141,8 +143,21 @@ class BatchRenameWindow(tk.Toplevel):
         ).pack(side=tk.RIGHT, padx=5)
         ttk.Button(btn_f, text="取消", command=self.destroy).pack(side=tk.RIGHT, padx=5)
 
+    def _schedule_preview(self) -> None:
+        """Debounces preview rebuilds triggered by per-keystroke traces.
+
+        Each rebuild runs FileOps.batch_rename(dry_run=True) — regex compile
+        plus N path validations — which is too heavy for every character on
+        large selections.
+        """
+        if self._preview_after_id is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._preview_after_id)
+        self._preview_after_id = self.after(250, self.update_preview)
+
     def update_preview(self) -> None:
         """Updates the rename preview table."""
+        self._preview_after_id = None
         pattern = self.pattern_var.get()
         replacement = self.replacement_var.get()
         mode = self.mode_var.get()

@@ -1,8 +1,8 @@
 # FileCortex 测试说明
 
-> **测试数**: 864 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 6.6.1
+> **测试数**: 882 | **状态**: All Passed | **Ruff**: 0 errors | **版本**: 7.0.0
 
-本项目包含 **864** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
+本项目包含 **882** 项核心全自动化的 `pytest` 测试，采用 **领域驱动深度加固 (Domain-Driven Hardening)** 架构，实现了从底层 IO 到上层 API 契约、前端契约、CLI 与 MCP 的全方位覆盖。
 
 ## 测试分层架构
 
@@ -31,7 +31,8 @@
 | **v6.5.3 修复回归** | `test_bugfix_v653.py` | 12 | Windows 锁存活探测/对话框预设/损坏配置自愈/大小写重命名/设置 null 宽容/gitignore 目录规则/大小写排除/ZIP 正斜杠 |
 | **v6.6.0 审查加固回归** | `test_v660_review_fixes.py` | 46 | UNC 长前缀/note-tag 注册旁路/MCP transport/进程组脱离/坏配置备份/CancelledError/背压取消/子路径排除/元数据契约/WS ERROR 帧/查重哨兵/Origin 加固/Schema 边界/CLI 退出码 |
 | **v6.6.1 审查修复回归** | `test_v661_review_fixes.py` | 18 | WS Origin 门禁(CSWSH)/解析根配置查询/WS 成功路径 PID 卫生/CLI 项目相对路径+相对显示+limit 夹取+执行失败退出码/全局设置界限/桌面+前端源码契约/CLI 测试配置隔离 |
-| **总计** | **28 文件** | **864** | **100% 关键路径** |
+| **v7.0 发行工程与修复** | `test_v7_release_engineering.py` | 18 | FCTX_CONFIG_DIR 重定位/healthz 免鉴权/**嵌套 .gitignore 链**/CLI 相对导出沙盒/DuplicateWorker ERROR→DONE 哨兵/progress schema/前端竞态源码契约 |
+| **总计** | **29 文件** | **882** | **100% 关键路径** |
 
 ## 参数对齐测试矩阵
 

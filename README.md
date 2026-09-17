@@ -1,6 +1,6 @@
-# FileCortex v6.6.1 (工作区编排助手)
+# FileCortex v7.0.0 (工作区编排助手)
 
-> **版本**: 6.6.1 | **日期**: 2026-09-09 | **测试**: 864 passed | **代码质量**: Ruff 0 errors | **Google Style**: 全规范审计完成
+> **版本**: 7.0.0 | **日期**: 2026-09-17 | **测试**: 882 passed | **代码质量**: Ruff 0 errors
 
 ## 核心理念
 - **Orchestration over Collection**: 从简单的"收集"进化为对工作区的"编排"。
@@ -37,6 +37,17 @@
 - **批量操作**: 批量重命名、批量删除、批量归档 (ZIP)。
 - **查重工具**: 大小预筛 + SHA256 策略。
 - **快速分类**: 自定义类别目录移动。
+
+### v7.0.0 发行工程与修复轮
+- **可部署发行**: Dockerfile + docker-compose（非 root、healthz 探活、单 worker 固化）、systemd 单元、Windows NSSM 脚本、clean-install 冒烟脚本（`scripts/`）。
+- **配置目录可重定位**: `FCTX_CONFIG_DIR` 环境变量（配置与日志同步跟随），容器/多实例部署不再共享 `~/.filecortex`。
+- **免鉴权健康端点**: `GET /healthz` 供编排系统探活；`/api/*` 门禁不变。
+- **嵌套 .gitignore**: 逐目录 `.gitignore` 按 git "后者覆盖前者" 语义生效（父 `*.log` + 子 `!error.log` 正确组合），搜索/树/导出/flatten 全线一致。
+- **Web 导出异步化**: `/api/generate`、`/api/project/stats` 改走 `asyncio.to_thread`，大导出不再占用事件循环。
+- **桌面响应性**: 预览读取、上下文导出、全选添加、暂存过滤、批重命名预览全部后台化/去抖，主线程不再做重 IO。
+- **前端一致性**: openProject 取消在途搜索并 flush 暂存；fetch 超时熔断；Modal 实例去重；全选可见性修正；虚拟列表 ResizeObserver；stats 竞态守卫；预览清空卫生。
+- **CLI 沙盒收口**: `fctx export` 相对输出路径越界（`../`）被拒绝（显式绝对路径仍允许）。
+- **MCP/队列契约**: DuplicateWorker 与 SearchWorker 的 ERROR→DONE 哨兵对齐；progress 端点补 Pydantic schema。
 
 ### v6.6.1 审查修复轮
 - **WS Origin 门禁**: WebSocket 握手应用与 HTTP 中间件一致的同源策略，封堵跨站 WebSocket 劫持 (CSWSH)。
@@ -76,7 +87,23 @@
 ### 安装
 ```bash
 pip install -r requirements.txt
+# 或作为库/命令安装（推荐）:
+pipx install file-cortex
 ```
+
+### 部署拓扑（v7.0 起）
+
+| 拓扑 | 命令 | 说明 |
+|------|------|------|
+| **本机单用户** | `fctx-web` → http://127.0.0.1:8000 | 零配置，仅回环可访问 |
+| **LAN 团队服务器 (Docker)** | `docker compose -f docker/docker-compose.yml up -d` | 必填 `FCTX_API_TOKEN`；单 worker 硬约束 |
+| **Windows 服务** | `scripts\install_service_windows.bat <token>` | NSSM 注册为系统服务 |
+| **Linux 服务** | `scripts/filecortex.service` → `/etc/systemd/system/` | `Restart=on-failure`，单进程 |
+| **CI/headless** | `fctx open/search/export` + MCP stdio | 无 GUI 依赖 |
+
+> **配置目录**: 默认 `~/.filecortex`；容器/多实例部署用 `FCTX_CONFIG_DIR` 重定位（日志同步跟随）。
+> **健康检查**: `GET /healthz`（免鉴权）供容器编排探活；`/api/*` 仍受 token 门禁。
+> **发布门禁**: `bash scripts/smoke_install.sh`（clean-venv 安装 → CLI → Web 冒烟）。
 
 ### 桌面版
 ```bash
@@ -135,8 +162,8 @@ python -m pytest
 ```
 
 ### 测试覆盖
-- **864 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作、v6.6.0 审查加固回归（UNC 长前缀、注册旁路、CancelledError、背压取消等）、v6.6.1 审查修复回归（WS Origin 门禁、解析根查询、PID 卫生、CLI 相对路径、源码契约等）。
-- **测试结果**: 864 passed, 0 failed
+- **882 项核心测试**: 涵盖内核逻辑、安全沙盒、API 契约、搜索矩阵、WebSocket 实时流、前端模块化契约、CLI、MCP、Windows 兼容性、进程管理、OOM 保护、批量 copy/事务 extract 文件操作、v6.6.0 审查加固回归（UNC 长前缀、注册旁路、CancelledError、背压取消等）、v6.6.1 审查修复回归（WS Origin 门禁、解析根查询、PID 卫生、CLI 相对路径、源码契约等）、v7.0 发行工程回归（FCTX_CONFIG_DIR、healthz、嵌套 gitignore、CLI 导出沙盒、哨兵契约）。
+- **测试结果**: 882 passed, 0 failed
 - **代码质量**: Ruff 0 errors, Google Style 全审计项通过
 
 ### 代码质量检查
@@ -206,7 +233,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | `api_token` | `<meta name="fctx-api-token">` | env `FCTX_API_TOKEN` | - |
 | `wsSearch` | `state.js:config.endpoints` | ws_routes.py `/ws/search` | - |
 | `wsExecute` | `state.js:config.endpoints` | ws_routes.py `/ws/actions/execute` | - |
-| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 6.6.1 |
+| `__version__` | `index.html` `{{ version }}` | `__init__.py` | 7.0.0 |
 
 ---
 
@@ -214,6 +241,7 @@ build_exe.py            # PyInstaller 打包脚本 (入口 main())
 | 变量 | 说明 | 默认值 |
 |-----|------|-------|
 | FCTX_API_TOKEN | API 认证 Token；绑定非 localhost 时必填 | (仅 localhost 可省略) |
+| FCTX_CONFIG_DIR | 配置/日志目录重定位（容器挂载卷） | `~/.filecortex` |
 | FCTX_ALLOWED_ORIGINS | 允许的跨域来源，逗号分隔 | localhost/127.0.0.1/::1 的 8000 端口 |
 | FCTX_PROD | 生产模式 (隐藏错误详情) | (无) |
 | FCTX_EXEC_TIMEOUT | 工具执行超时(秒) | 300 |

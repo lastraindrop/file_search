@@ -1,0 +1,16 @@
+[Unit]
+Description=FileCortex Web (single worker: in-process progress tracker)
+After=network.target
+
+[Service]
+User=filecortex
+# 必填：非回环绑定需要 token；同机反向代理场景也应保持设置
+Environment=FCTX_API_TOKEN=<strong-token>
+Environment=FCTX_CONFIG_DIR=/var/lib/filecortex
+# 单进程是硬约束：多 worker 会使 /api/fs/progress 轮询返回 404
+ExecStart=/opt/filecortex/bin/fctx-web --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

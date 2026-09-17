@@ -103,7 +103,6 @@ class DuplicateFinderWindow(tk.Toplevel):
             text="永久删除选中的冗余文件",
             command=self.delete_selected,
             state=tk.DISABLED,
-            style="Danger.TButton",
         )
         self.btn_delete.pack(side=tk.RIGHT, padx=5)
         ttk.Button(btn_f, text="停止并关闭", command=self.on_close).pack(
@@ -124,9 +123,16 @@ class DuplicateFinderWindow(tk.Toplevel):
         self.worker.start()
 
     def poll_results(self) -> None:
-        """Polls for duplicate scan results."""
+        """Polls for duplicate scan results.
+
+        Drains at most ``MAX_DRAIN_PER_TICK`` queued results per tick: a tree
+        with thousands of duplicate groups must not insert everything in one
+        main-thread burst (the search poller applies the same cap).
+        """
+        max_drain = getattr(self, "MAX_DRAIN_PER_TICK", 100)
+        drained = 0
         try:
-            while True:
+            while drained < max_drain:
                 try:
                     res = self.result_queue.get_nowait()
                     if isinstance(res, tuple):
@@ -144,6 +150,7 @@ class DuplicateFinderWindow(tk.Toplevel):
                             messagebox.showerror("错误", f"扫描失败: {res[1]}")
                             self.destroy()
                         return
+                    drained += 1
 
                     h = res["hash"]
                     sz = res["size"]
@@ -251,6 +258,16 @@ class DuplicateFinderWindow(tk.Toplevel):
         ):
             from ..actions import FileOps
 
+            # Build a path -> tree item index once: the previous per-delete
+            # full-tree rescan was O(n^2) and left duplicate_groups stale.
+            item_by_path: dict[str, str] = {}
+            for group in self.tree.get_children():
+                for child in self.tree.get_children(group):
+                    vals = self.tree.item(child)["values"]
+                    if vals:
+                        item_by_path[str(vals[0])] = child
+
+            deleted_set = set()
             deleted_count = 0
             for p_str in to_delete:
                 try:
@@ -263,16 +280,28 @@ class DuplicateFinderWindow(tk.Toplevel):
                         continue
                     FileOps.delete_file(p_str)
                     deleted_count += 1
-                    # Find and remove item from tree
-                    for group in self.tree.get_children():
-                        for child in self.tree.get_children(group):
-                            if (
-                                self.tree.item(child)["values"]
-                                and self.tree.item(child)["values"][0] == p_str
-                            ):
-                                self.tree.delete(child)
+                    deleted_set.add(p_str)
+                    child = item_by_path.pop(p_str, None)
+                    if child is not None and self.tree.exists(child):
+                        group = self.tree.parent(child)
+                        self.tree.delete(child)
+                        # Drop now-empty groups from both the tree and the
+                        # in-memory model so the group count stays truthful.
+                        if group and not self.tree.get_children(group):
+                            self.tree.delete(group)
+                            for h_key, paths in list(self.duplicate_groups.items()):
+                                if all(str(pp) in deleted_set for pp in paths):
+                                    self.duplicate_groups.pop(h_key, None)
                 except Exception as e:
                     messagebox.showerror("错误", f"删除 {p_str} 失败: {e}")
+
+            # Keep the model in sync with what actually left the disk.
+            for h_key, paths in list(self.duplicate_groups.items()):
+                remaining = [pp for pp in paths if str(pp) not in deleted_set]
+                if remaining:
+                    self.duplicate_groups[h_key] = remaining
+                else:
+                    self.duplicate_groups.pop(h_key, None)
 
             messagebox.showinfo("成功", f"已清理 {deleted_count} 个冗余文件！")
             self.smart_select("oldest")  # Refresh selection if any groups remain

@@ -31,6 +31,14 @@ export function createVirtualList(container, createItem, rowHeight = DEFAULT_ROW
     };
 
     scrollHost.addEventListener('scroll', schedule, { passive: true });
+    // Panel resizes (layout.js drag) change clientHeight without a scroll
+    // event; without an observer the visible slice would stay stale until
+    // the next scroll.
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined') {
+        observer = new ResizeObserver(schedule);
+        observer.observe(scrollHost);
+    }
 
     return {
         setItems(nextItems) {
@@ -40,6 +48,7 @@ export function createVirtualList(container, createItem, rowHeight = DEFAULT_ROW
         destroy() {
             if (frameId !== null) cancelAnimationFrame(frameId);
             scrollHost.removeEventListener('scroll', schedule);
+            if (observer) observer.disconnect();
         },
     };
 }

@@ -5,6 +5,7 @@ Provides multi-mode file search with background threading support.
 """
 
 import atexit
+import contextlib
 import os
 import pathlib
 import queue
@@ -37,10 +38,27 @@ DEFAULT_MAX_SIZE_MB: Final = 5
 # ``_submit_content_task`` / ``_reinit_shared_pool``).
 SHARED_SEARCH_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
 _SEARCH_POOL_LOCK = threading.Lock()
-atexit.register(
-    SHARED_SEARCH_POOL.shutdown, wait=False,
-    **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
-)
+
+
+def _register_pool_atexit(pool: ThreadPoolExecutor) -> None:
+    """Registers an atexit hook that shuts ``pool`` down once.
+
+    ``atexit.register`` cannot be undone, so each reinitialized pool would
+    otherwise accumulate one more hook. The wrapper is idempotent per-pool
+    and skips pools that are already gone, which keeps the hook count stable
+    in the common case (no reinit) and bounded across reinits.
+    """
+    def _shutdown() -> None:
+        with contextlib.suppress(Exception):
+            pool.shutdown(
+                wait=False,
+                **({"cancel_futures": True} if sys.version_info >= (3, 9) else {}),
+            )
+
+    atexit.register(_shutdown)
+
+
+_register_pool_atexit(SHARED_SEARCH_POOL)
 
 
 def _reinit_shared_pool() -> ThreadPoolExecutor:
@@ -60,10 +78,7 @@ def _reinit_shared_pool() -> ThreadPoolExecutor:
             logger.exception("Failed to shut down stale search pool during reinit.")
         new_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
         SHARED_SEARCH_POOL = new_pool
-        atexit.register(
-            new_pool.shutdown, wait=False,
-            **({"cancel_futures": True} if sys.version_info >= (3, 9) else {})
-        )
+        _register_pool_atexit(new_pool)
         return new_pool
 
 
@@ -284,6 +299,14 @@ def search_generator(
         positive_tags=positive_tags or [],
         negative_tags=negative_tags or [],
     )
+
+    # Content search needs actual text: without it a full-tree walk would
+    # read every file for nothing. Tag-only filtering still works in path
+    # modes, but there is no content to match here.
+    if query.mode == "content" and not query.text.strip() and not (
+        query.positive_tags or query.negative_tags
+    ):
+        return
 
     root_path = pathlib.Path(root_dir)
     # Patterns are matched with fnmatch, which is already case-insensitive on

@@ -81,6 +81,11 @@ def get_children(path_str: str, dm: DataManager | None = None) -> list[dict[str,
     project_root_path = pathlib.Path(project_root)
     excludes = proj_config.get("excludes", "").split()
     git_spec = FileUtils.get_gitignore_spec(str(project_root_path))
+    # Nested .gitignore files along the path apply with git's last-match-wins
+    # precedence (a child "!error.log" may re-include a parent "*.log").
+    git_chain = FileUtils.get_gitignore_chain(project_root_path, path)
+    if not git_chain and git_spec.patterns:
+        git_chain = [(project_root_path, git_spec)]
 
     children = []
     try:
@@ -105,8 +110,8 @@ def get_children(path_str: str, dm: DataManager | None = None) -> list[dict[str,
                     entry_is_dir = False
                 # Pass the directory flag so directory-only gitignore rules
                 # (e.g. "build/") hide directories exactly like walk_filtered.
-                if FileUtils.should_ignore(
-                    entry.name, rel, excludes, git_spec, entry_is_dir
+                if FileUtils._should_ignore_entry(
+                    entry.name, entry.path, rel, excludes, git_chain, entry_is_dir
                 ):
                     continue
                 children.append(get_node_info(pathlib.Path(entry.path), project_root))

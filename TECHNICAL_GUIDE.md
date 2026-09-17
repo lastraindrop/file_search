@@ -1,6 +1,6 @@
 # FileCortex Technical Guide
 
-> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 864 passed, Ruff 0 errors
+> Version: 7.0.0 | Updated: 2026-09-17 | Verification baseline: 882 passed, Ruff 0 errors
 
 ## 1. What the System Does
 
@@ -239,7 +239,7 @@ Token estimates are heuristic, not model-tokenizer exact. Future context-compile
 
 ## 9. Testing Strategy
 
-The suite has 864 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
+The suite has 882 tests across unit, integration, Web/API, CLI, MCP, security, packaging, file-operation, and frontend contract layers.
 
 Important regression families:
 
@@ -255,6 +255,7 @@ Important regression families:
 | v6.5.3 fixes | Windows lock probe, preset Pydantic compat, corrupt-config recovery, case-only rename, null-setting tolerance, gitignore directory rules, case-faithful excludes, ZIP slash names, CLI exit codes, search-size alignment, WS 3.10 backpressure, threaded desktop tools |
 | v6.6.0 fixes | UNC long-prefix bypass, note/tag registration gate, MCP transport wiring, POSIX process-group detach, corrupt-config backup, search CancelledError/cancelled-future drain, backpressure stop responsiveness, sub-path excludes, metadata fallback contract, WS ERROR frame, duplicate cancel sentinel, WS 4001 delivery, origin/Host hardening, byte-wise token compare, lifespan process cleanup, extract UNC source + dir hygiene, schema Literal/bounds, CLI exit-2, literal rename replacement, timeout-env fallback |
 | v6.6.1 fixes | WS origin gate (CSWSH), resolved-root config lookup (no phantom registration), WS success-path PID hygiene + backpressure cancel race, frontend terminal states + change-driven controls, desktop staging-menu/poller/tool-guard/stats-cap, CLI relative paths/encoding/exit codes, MCP to_thread, CLI test config isolation |
+| v7.0 fixes | FCTX_CONFIG_DIR relocation, unauthenticated `/healthz`, nested `.gitignore` chain (git last-match-wins), CLI relative-export sandbox, duplicate-worker ERROR→DONE parity, progress endpoint schemas, async Web export/stats, desktop background preview/export/stage-all/filter/rename-preview, frontend openProject search-cancel + staging flush, fetch timeout, modal dedup, select-all visibility, ResizeObserver virtual list, stats ordering guard |
 
 ### 9.1 v6.5.3 Fix Archive (process and results)
 
@@ -309,6 +310,21 @@ The v6.6.1 round re-ran the multi-track review (core read line-by-line; Web laye
 
 Verification result: `864 passed` (846 baseline + 18 new), `ruff check .` clean, packaging count guard updated to 864. Deferred items (desktop main-thread I/O incl. the PowerShell clipboard path, desktop tool-process lifetime on window close) are folded into `docs/IMPLEMENTATION_PLAN_V660.md` §4 batch 2.0 (appendix A).
 
+### 9.4 v7.0.0 Release-Engineering & Review Round (process and results)
+
+The v7.0.0 round acted on the independent master review (`docs/MASTER_REVIEW_AND_LANDING_PLAN.md`, 41 findings) with the release-engineering plan (§5) executed in the same pass. 26 production fixes plus deployment artifacts landed; anchored in `tests/test_v7_release_engineering.py` (18 tests). Key mechanisms:
+
+- **Deployable distribution (L1)**: `docker/Dockerfile` (non-root, HEALTHCHECK on `/healthz`, single-worker CMD), `docker/docker-compose.yml` (token required), `scripts/filecortex.service`, `scripts/install_service_windows.bat` (NSSM), `scripts/smoke_install.{sh,ps1}` (clean venv → wheel → CLI → Web, run by the Build CI workflow and verified locally: SMOKE-OK).
+- **Relocatable config (L1)**: `get_app_dir()` honors `FCTX_CONFIG_DIR` (config + logs), so containers/multi-instance deployments mount a volume instead of sharing `~/.filecortex`. `GET /healthz` answers without a token for orchestrator probes; `/api/*` remains gated.
+- **Nested gitignore (BE-1)**: `FileUtils.get_gitignore_chain()` builds the per-directory chain from root to target; `_match_gitignore_chain()` evaluates every pattern in order so a child `!error.log` overrides a parent `*.log` (git last-match-wins). `walk_filtered`, `flatten_paths`, `generate_ascii_tree`, and the tree endpoint all use the same helper.
+- **Windows shell quoting (BE-2)**: `win_quote` no longer doubles `%` — `%%` folding only exists in batch files, and under `cmd /c` it corrupted paths containing `%` (verified against `cmd.exe` before fixing).
+- **CLI sandbox (BE-3)**: relative `fctx export -o` paths must stay inside the project root; explicit absolute outputs remain allowed.
+- **Queue/schema parity (BE-4/5/6/7/8)**: content-mode empty queries short-circuit, `DuplicateWorker` emits ERROR→DONE like `SearchWorker`, progress endpoints gained `ProgressPollRequest`/`ProgressNewRequest`, pool reinit registers an idempotent atexit wrapper, and `update_project_settings` writes back through the empty-key guard.
+- **Serving-thread hygiene (WEB-2, DT-1/2/8/12)**: `/api/generate` and `/api/project/stats` run via `asyncio.to_thread`; desktop preview reads, context exports, stage-all scans, staging-filter traces, and rename dry-run previews are backgrounded or debounced.
+- **Frontend consistency (FE batch)**: `openProject` cancels in-flight searches (`stopSearchInFlight`) and flushes debounced staging before re-reading; `_fetch` arms an AbortController timeout; bootstrap modals use `getOrCreateInstance`; select-all visibility checks the section container; the virtual list observes panel resizes; stats responses carry an ordering guard; clipboard success is checked; previews clear on rename/delete; empty-query debounce is silent; the context menu measures its real size.
+
+Verification result: `882 passed` (864 baseline + 18 new), `ruff check .` clean, packaging count guard updated to 882, wheel/sdist built, clean-install smoke green. Remaining low-severity items (FE-12 render batching, WEB-4 children IO, DT-7 cross-thread `after` normalization, CN-2/3/4) are documented in the master review's delivery ledger.
+
 Run on Windows with a writable temporary directory when needed:
 
 ```powershell
@@ -321,17 +337,18 @@ python -m build --no-isolation
 
 ## 10. Known Limits and Next Engineering Work
 
-- JSON configuration is local-process coordination, not a multi-user database.
+- JSON configuration is local-process coordination, not a multi-user database. Relocate it with `FCTX_CONFIG_DIR` in containerized deployments.
 - Route handlers still contain application orchestration that should move to services; the per-route registered-root + containment checks should converge into a single authorization dependency (Phase 2, batch 2.1).
 - `DataManager` still performs a full lock-read-merge-write cycle per small mutation; dirty-flag + debounced saves are scheduled (Phase 2, batch 2.0).
 - The WebSocket tool stream has no execution timeout (the HTTP path enforces `FCTX_EXEC_TIMEOUT`); parity is scheduled (Phase 2, batch 2.0).
 - `stream_tool` (shell mode) can leak shell grandchild processes holding the output pipe on some platforms; Job Object / process-group handling is scheduled (Phase 2, batch 2.0).
-- Desktop Tkinter still performs some synchronous file I/O on the UI thread (large staging exports, staging-filter traces, the PowerShell clipboard copy); backgrounding is scheduled (Phase 2, batch 2.0), and tool subprocesses are not yet terminated on window close.
+- Desktop tool subprocesses are still not terminated on window close (backgrounded IO landed in v7.0; process-lifetime ownership is Phase 2 batch 2.0). A few low-severity desktop items remain: cross-thread `root.after()` from workers, `copy_project_tree` synchronous scan, duplicate-finder single-tick batching (capped in v7.0 but not chunked UI updates).
 - Frontend source contracts do not replace Playwright E2E coverage (Phase 2).
-- Tool output and search are bounded but can still consume I/O on very large local workspaces.
+- Tool output and search are bounded but can still consume I/O on very large local workspaces; `get_children` resolves every entry individually (WEB-4, deferred).
 - Token counts are heuristic and context selection is deterministic/manual, not semantic ranking.
 - Windows config-lock probing requires the lock holder to be a local process; remote-process liveness cannot be probed with the Win32 API and is treated conservatively.
-- The Web progress tracker is process-internal; multi-worker deployments are unsupported (see README deployment note).
+- The Web progress tracker is process-internal; multi-worker deployments are unsupported (enforced in the Docker CMD, systemd unit, and README deployment note).
 - Search regex mode matches path names only; a combined regex-content semantic is a documented Phase 3 decision.
+- MCP tools return errors as `"Error: ..."` strings; protocol-level `isError` markers are pending an SDK-version decision (CN-3).
 
-See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases, [ROADMAP.md](ROADMAP.md) for the prioritized feature list, [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) for the batched execution plan, [docs/CODE_REVIEW_V660.md](docs/CODE_REVIEW_V660.md) for the v6.6.0 findings ledger, and [docs/CODE_REVIEW_V661.md](docs/CODE_REVIEW_V661.md) for the v6.6.1 findings ledger.
+See [CURRENT_ENGINEERING_PLAN.md](CURRENT_ENGINEERING_PLAN.md) for delivery phases, [ROADMAP.md](ROADMAP.md) for the prioritized feature list, [docs/MASTER_REVIEW_AND_LANDING_PLAN.md](docs/MASTER_REVIEW_AND_LANDING_PLAN.md) for the v7.0 master review + landing plan, [docs/IMPLEMENTATION_PLAN_V660.md](docs/IMPLEMENTATION_PLAN_V660.md) for the batched execution plan, [docs/CODE_REVIEW_V660.md](docs/CODE_REVIEW_V660.md) for the v6.6.0 findings ledger, and [docs/CODE_REVIEW_V661.md](docs/CODE_REVIEW_V661.md) for the v6.6.1 findings ledger.

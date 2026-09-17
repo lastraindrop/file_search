@@ -1,0 +1,26 @@
+# FileCortex LAN 团队服务器部署（单容器单 worker）
+# 用法:
+#   $env:FCTX_API_TOKEN = "<strong-token>"   # PowerShell
+#   docker compose up -d
+services:
+  filecortex:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: filecortex:7.0.0
+    ports:
+      - "8000:8000"
+    environment:
+      # 非回环绑定强制 token（web_app.py main() 会校验；容器以 uvicorn 直接启动时
+      # 也请务必设置，否则任何能访问端口的人都拥有完整文件操作权限）
+      FCTX_API_TOKEN: ${FCTX_API_TOKEN:?set a strong FCTX_API_TOKEN first}
+      FCTX_ALLOWED_ORIGINS: "http://localhost:8000"
+      FCTX_PROD: "1"
+    volumes:
+      - fc-config:/data
+      # 按需挂载工作区（读写或只读）
+      - ${FCTX_WORKSPACE:-../workspace}:/workspaces
+    restart: unless-stopped
+
+volumes:
+  fc-config:

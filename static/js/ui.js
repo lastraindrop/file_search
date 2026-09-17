@@ -334,7 +334,7 @@ export function showActionModal({ title, bodyHtml, confirmText = 'Confirm', onCo
     // swallow subsequent confirm clicks.
     confirmBtn.disabled = false;
     state.actionModalHandler = onConfirm;
-    new bootstrap.Modal(document.getElementById('actionModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('actionModal')).show();
 }
 
 export function closeActionModal() {

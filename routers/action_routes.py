@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pathlib
 import subprocess
@@ -40,10 +41,15 @@ _dm_dep = Depends(get_dm)
 
 
 @action_router.post("/api/generate")
-def generate_context(
+async def generate_context(
     req: GenerateRequest, dm: DataManager = _dm_dep
 ) -> dict[str, Any]:
-    """Generates formatted context for files."""
+    """Generates formatted context for files.
+
+    The export can read up to 500 files / 50MB: run it on a worker thread so
+    a large request cannot occupy the event loop or a threadpool slot for its
+    whole duration (matching the MCP tools' ``asyncio.to_thread`` policy).
+    """
     noise_reducer = (
         dm.config.global_settings.enable_noise_reducer
         if req.apply_noise_reducer is None
@@ -63,28 +69,37 @@ def generate_context(
     prompt_prefix = None
     if proj_config and req.template_name:
         prompt_prefix = proj_config.get("prompt_templates", {}).get(req.template_name)
-    if req.export_format == "xml":
-        content = ContextFormatter.to_xml(
-            req.files,
-            root_dir=root,
-            prompt_prefix=prompt_prefix,
-            include_blueprint=req.include_blueprint,
-            apply_noise_reducer=noise_reducer,
-        )
-    else:
-        content = ContextFormatter.to_markdown(
+
+    def _build() -> str:
+        if req.export_format == "xml":
+            return ContextFormatter.to_xml(
+                req.files,
+                root_dir=root,
+                prompt_prefix=prompt_prefix,
+                include_blueprint=req.include_blueprint,
+                apply_noise_reducer=noise_reducer,
+            )
+        return ContextFormatter.to_markdown(
             req.files,
             root_dir=root,
             prompt_prefix=prompt_prefix,
             apply_noise_reducer=noise_reducer,
         )
 
-    return {"content": content, "tokens": FormatUtils.estimate_tokens(content)}
+    content = await asyncio.to_thread(_build)
+    return {
+        "content": content,
+        "tokens": await asyncio.to_thread(FormatUtils.estimate_tokens, content),
+    }
 
 
 @action_router.post("/api/project/stats")
-def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str, int]:
-    """Gets aggregate token stats for selected files."""
+async def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str, int]:
+    """Gets aggregate token stats for selected files.
+
+    Reads up to 1MB per file for token estimation: run it off the event loop
+    (see generate_context).
+    """
     if not req.project_path:
         raise HTTPException(status_code=403, detail="A registered project path is required")
     root = get_valid_project_root(req.project_path, dm)
@@ -93,26 +108,25 @@ def get_staging_stats(req: StatsRequest, dm: DataManager = _dm_dep) -> dict[str,
     if any(not is_path_safe(path, root) for path in req.paths):
         raise HTTPException(status_code=403, detail="All stats paths must stay inside the project")
 
-    manual_excludes = []
-    use_git = True
     proj_data = dm.get_project_data(root)
     ex_str = proj_data.get("excludes", "")
     manual_excludes = [e.strip() for e in ex_str.split() if e.strip()]
 
-    all_files = FileUtils.flatten_paths(req.paths, root, manual_excludes, use_git)
+    def _compute() -> dict[str, int]:
+        all_files = FileUtils.flatten_paths(req.paths, root, manual_excludes, True)
+        total_tokens = 0
+        for f_str in all_files:
+            p = pathlib.Path(f_str)
+            if p.is_file() and p.exists() and not FileUtils.is_binary(p):
+                try:
+                    total_tokens += FormatUtils.estimate_tokens(
+                        FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
+                    )
+                except Exception as e:
+                    logger.debug(f"Stats calculation failed for {f_str}: {e}")
+        return {"total_tokens": total_tokens, "file_count": len(all_files)}
 
-    total_tokens = 0
-    for f_str in all_files:
-        p = pathlib.Path(f_str)
-        if p.is_file() and p.exists() and not FileUtils.is_binary(p):
-            try:
-                total_tokens += FormatUtils.estimate_tokens(
-                    FileUtils.read_text_smart(p, max_bytes=1024 * 1024)
-                )
-            except Exception as e:
-                logger.debug(f"Stats calculation failed for {f_str}: {e}")
-
-    return {"total_tokens": total_tokens, "file_count": len(all_files)}
+    return await asyncio.to_thread(_compute)
 
 
 @action_router.get("/api/global/settings")

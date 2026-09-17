@@ -26,22 +26,31 @@ class FileUtils:
         git_spec: pathspec.PathSpec | None = None,
         include_dirs: bool = False,
         stop_event: threading.Event | None = None,
+        use_nested_gitignore: bool = True,
     ) -> Generator[tuple[pathlib.Path, pathlib.Path], None, None]:
         """Walks a project tree yielding filtered (full_path, rel_path) tuples.
 
         Directories are pruned based on ignore rules. Files are checked against
         the same ignore rules. Only non-ignored entries are yielded.
 
+        When ``use_nested_gitignore`` is true (default) every ``.gitignore``
+        along the path is applied with git's last-match-wins precedence, not
+        just the root one. ``git_spec`` remains accepted for backwards
+        compatibility and is used as the root spec when no .gitignore file is
+        found on disk at the root.
+
         Args:
             root: Root directory to walk.
             excludes: Manual exclusion patterns.
-            git_spec: Compiled gitignore spec.
+            git_spec: Compiled gitignore spec (legacy root-only parameter).
             include_dirs: Whether to yield directory entries.
             stop_event: Optional threading.Event for early cancellation.
+            use_nested_gitignore: Honor per-directory .gitignore files.
 
         Yields:
             Tuple of (full_path: pathlib.Path, rel_path: pathlib.Path).
         """
+        root = pathlib.Path(root)
         for cur_root, dirs, files in os.walk(root):
             if stop_event is not None and stop_event.is_set():
                 break
@@ -59,12 +68,32 @@ class FileUtils:
                 else:
                     rel_root = pathlib.Path(os.path.basename(cur_root))
 
+            if use_nested_gitignore and git_spec is not None:
+                chain = FileUtils.get_gitignore_chain(root, cur_root_path)
+                if not chain and git_spec.patterns:
+                    # No .gitignore files on disk (or only the root one was
+                    # passed pre-compiled): keep legacy root-only behavior.
+                    chain = [(root, git_spec)]
+            else:
+                chain = [(root, git_spec)] if git_spec else None
+
+            def _ignored(
+                name: str,
+                full: pathlib.Path,
+                rel: pathlib.Path,
+                is_dir: bool,
+                current_chain: list[tuple[pathlib.Path, pathspec.PathSpec]] | None = None,
+            ) -> bool:
+                if use_nested_gitignore and git_spec is not None:
+                    return FileUtils._should_ignore_entry(
+                        name, full, rel, excludes, current_chain, is_dir
+                    )
+                return FileUtils.should_ignore(name, rel, excludes, git_spec, is_dir)
+
             dirs[:] = [
                 d
                 for d in dirs
-                if not FileUtils.should_ignore(
-                    d, rel_root / d, excludes, git_spec, True
-                )
+                if not _ignored(d, cur_root_path / d, rel_root / d, True, chain)
             ]
 
             if include_dirs:
@@ -74,9 +103,7 @@ class FileUtils:
             for f in files:
                 full_path = cur_root_path / f
                 rel_path = rel_root / f
-                if not FileUtils.should_ignore(
-                    f, rel_path, excludes, git_spec, False
-                ):
+                if not _ignored(f, full_path, rel_path, False, chain):
                     yield (full_path, rel_path)
 
     @staticmethod
@@ -169,12 +196,12 @@ class FileUtils:
         return FileUtils._get_cached_gitignore_spec(str(root_dir), mtime)
 
     @staticmethod
-    @lru_cache(maxsize=32)
+    @lru_cache(maxsize=256)
     def _get_cached_gitignore_spec(root_dir: str, mtime: float) -> pathspec.PathSpec:
         """Internal cached gitignore spec reader.
 
         Args:
-            root_dir: Root directory path.
+            root_dir: Directory path.
             mtime: .gitignore modification time.
 
         Returns:
@@ -189,6 +216,109 @@ class FileUtils:
             except Exception:
                 logger.warning(f"Failed to read gitignore at {gitignore_path}", exc_info=True)
         return pathspec.PathSpec.from_lines("gitwildmatch", lines)
+
+    @staticmethod
+    def _dir_gitignore_spec(directory: pathlib.Path) -> pathspec.PathSpec:
+        """Returns the compiled .gitignore spec for one directory.
+
+        Returns an empty spec when the directory carries no .gitignore file so
+        callers can treat the result uniformly.
+        """
+        gitignore_path = directory / ".gitignore"
+        mtime = 0.0
+        if gitignore_path.exists():
+            with contextlib.suppress(Exception):
+                mtime = gitignore_path.stat().st_mtime
+        return FileUtils._get_cached_gitignore_spec(str(directory), mtime)
+
+    @staticmethod
+    def get_gitignore_chain(
+        root_dir: pathlib.Path | str, target_dir: pathlib.Path | str
+    ) -> list[tuple[pathlib.Path, pathspec.PathSpec]]:
+        """Returns the nested .gitignore chain from root_dir down to target_dir.
+
+        Git evaluates every .gitignore file along the directory path (parent
+        rules first, child rules later). Each entry is a ``(base_dir, spec)``
+        pair; patterns are relative to their own base directory. Rules in a
+        child .gitignore can override parent rules, matching git semantics.
+
+        Args:
+            root_dir: Project root directory.
+            target_dir: Directory whose chain is requested (inclusive).
+
+        Returns:
+            Ordered list of (base_dir, compiled_spec), parents first. Empty
+            when no .gitignore exists along the path.
+        """
+        root = pathlib.Path(root_dir)
+        target = pathlib.Path(target_dir)
+        try:
+            rel = target.relative_to(root)
+        except ValueError:
+            rel = pathlib.Path(".")
+        chain: list[tuple[pathlib.Path, pathspec.PathSpec]] = []
+        candidates = [root, *(root / part for part in rel.parts if part not in (".", ""))]
+        for directory in candidates:
+            spec = FileUtils._dir_gitignore_spec(directory)
+            if spec.patterns:
+                chain.append((directory, spec))
+        return chain
+
+    @staticmethod
+    def _match_gitignore_chain(
+        full_path: pathlib.Path | str,
+        is_dir: bool,
+        chain: list[tuple[pathlib.Path, pathspec.PathSpec]],
+    ) -> bool:
+        """Evaluates a path against a nested gitignore chain.
+
+        Applies last-match-wins across the concatenation of all specs in the
+        chain (parent files first), which is git's actual precedence rule.
+        ``PathSpec.match_file()`` alone cannot express cross-file overrides
+        (e.g. a child ``!error.log`` re-including a parent ``*.log``), so the
+        individual patterns are evaluated in order instead.
+
+        Args:
+            full_path: Absolute path of the file/directory being tested.
+            is_dir: Whether the path is a directory.
+            chain: Ordered (base_dir, spec) pairs from get_gitignore_chain.
+
+        Returns:
+            True if the path is ignored by the effective rules.
+        """
+        abs_path = str(full_path)
+        result = False
+        for base, spec in chain:
+            try:
+                rel = os.path.relpath(abs_path, base).replace("\\", "/")
+            except ValueError:
+                continue
+            if rel == ".." or rel.startswith("../"):
+                continue
+            if is_dir and not rel.endswith("/"):
+                rel += "/"
+            for pattern in spec.patterns:
+                if pattern.include is not None and pattern.match_file(rel):
+                    result = pattern.include
+        return result
+
+    @staticmethod
+    def _should_ignore_entry(
+        name: str,
+        full_path: pathlib.Path | str,
+        rel_path: pathlib.Path,
+        manual_excludes: list[str],
+        git_chain: list[tuple[pathlib.Path, pathspec.PathSpec]] | None,
+        is_dir: bool,
+    ) -> bool:
+        """Manual excludes + nested gitignore chain in one check."""
+        for pattern in manual_excludes:
+            rel_posix = str(rel_path).replace("\\", "/")
+            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(rel_posix, pattern):
+                return True
+        if git_chain:
+            return FileUtils._match_gitignore_chain(full_path, is_dir, git_chain)
+        return False
 
     @staticmethod
     def should_ignore(
@@ -305,6 +435,13 @@ class FileUtils:
                         break
 
                     curr_root_path = pathlib.Path(curr_root).resolve()
+                    chain = (
+                        FileUtils.get_gitignore_chain(root, curr_root_path)
+                        if (root and use_gitignore)
+                        else None
+                    )
+                    if root and use_gitignore and not chain and git_spec and git_spec.patterns:
+                        chain = [(root, git_spec)]
 
                     valid_dirs = []
                     for d in dirs:
@@ -317,8 +454,8 @@ class FileUtils:
                             else:
                                 rel = d_path
 
-                            if not FileUtils.should_ignore(
-                                d, rel, excludes, git_spec, True
+                            if not FileUtils._should_ignore_entry(
+                                d, d_path, rel, excludes, chain, True
                             ):
                                 valid_dirs.append(d)
                         else:
@@ -342,8 +479,8 @@ class FileUtils:
                             pass
 
                         rel = f_path.relative_to(root) if (root and is_rel) else f_path
-                        if not FileUtils.should_ignore(
-                            f, rel, excludes, git_spec, False
+                        if not FileUtils._should_ignore_entry(
+                            f, f_path, rel, excludes, chain, False
                         ):
                             unique_files.add(str(f_path))
 
@@ -511,18 +648,27 @@ class FileUtils:
         excludes = [e.strip() for e in excludes_str.split() if e.strip()]
         git_spec = FileUtils.get_gitignore_spec(root_dir) if use_gitignore else None
 
-        def _build_tree(path: pathlib.Path, prefix: str = "", depth: int = 0) -> None:
+        def _build_tree(
+            path: pathlib.Path,
+            prefix: str = "",
+            depth: int = 0,
+        ) -> None:
             if depth > max_depth:
                 lines.append(f"{prefix}└── [Max Depth Reached ({max_depth}) ...]")
                 return
             try:
+                chain = None
+                if use_gitignore:
+                    chain = FileUtils.get_gitignore_chain(root_dir, path)
+                    if not chain and git_spec and git_spec.patterns:
+                        chain = [(root_dir, git_spec)]
                 with os.scandir(path) as it:
                     entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
                 valid_entries = []
                 for entry in entries:
                     rel_path = pathlib.Path(entry.path).relative_to(root_dir)
-                    if not FileUtils.should_ignore(
-                        entry.name, rel_path, excludes, git_spec
+                    if not FileUtils._should_ignore_entry(
+                        entry.name, entry.path, rel_path, excludes, chain, entry.is_dir()
                     ):
                         valid_entries.append(entry)
 

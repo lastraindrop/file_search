@@ -266,7 +266,12 @@ def _setup_logging() -> logging.Logger:
     console_handler.setFormatter(log_format)
     logger.addHandler(console_handler)
 
-    log_dir = pathlib.Path.home() / ".filecortex" / "logs"
+    log_dir_override = os.environ.get("FCTX_CONFIG_DIR", "").strip()
+    log_dir = (
+        pathlib.Path(log_dir_override) / "logs"
+        if log_dir_override
+        else pathlib.Path.home() / ".filecortex" / "logs"
+    )
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
@@ -290,11 +295,17 @@ _CONFIG_FILE: pathlib.Path | None = None
 
 
 def get_app_dir() -> pathlib.Path:
-    """Returns the application data directory, creating it if necessary."""
-    home = pathlib.Path.home()
-    app_dir = home / ".filecortex"
+    """Returns the application data directory, creating it if necessary.
+
+    Honors the ``FCTX_CONFIG_DIR`` environment variable so containerized and
+    multi-instance deployments can relocate the configuration + log store
+    (e.g. a mounted volume) without touching the user profile. Falls back to
+    ``~/.filecortex`` when unset.
+    """
+    override = os.environ.get("FCTX_CONFIG_DIR", "").strip()
+    app_dir = pathlib.Path(override) if override else pathlib.Path.home() / ".filecortex"
     try:
-        app_dir.mkdir(exist_ok=True)
+        app_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
         logger.exception("Failed to create app directory")
     return app_dir
@@ -758,7 +769,13 @@ class DataManager:
                 else:
                     logger.warning(f"Blocked attempt to modify protected project key: {k}")
             proj = ProjectConfig.model_validate(candidate)
-            self.config.projects[PathValidator.norm_path(project_path)] = proj
+            # Write back through the same guard as every other mutation:
+            # a direct norm_path() write would silently accept an empty key
+            # if a caller ever bypasses the registration gate.
+            norm_key = PathValidator.norm_path(project_path)
+            if not norm_key:
+                raise ValueError("Project path must not be empty.")
+            self.config.projects[norm_key] = proj
             self.save()
 
     def update_custom_tools(self, project_path: str, tools: dict[str, str]) -> None:

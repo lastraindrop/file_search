@@ -241,6 +241,16 @@ async def whoami() -> dict[str, str]:
     return {"version": __version__, "status": "ok"}
 
 
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    """Unauthenticated liveness probe for container/service health checks.
+
+    Deliberately outside the /api/ auth gate and free of version details so
+    orchestrators can probe it without holding the API token.
+    """
+    return {"status": "ok"}
+
+
 def main() -> None:
     """Entry point for the web server."""
     parser = argparse.ArgumentParser(description="FileCortex Web Server")

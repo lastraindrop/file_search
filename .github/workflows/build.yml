@@ -1,0 +1,46 @@
+name: Build & Smoke
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Inspect wheel contents
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          required = [
+              "templates/index.html",
+              "static/css/style.css",
+              "static/js/main.js",
+              "file_cortex_core/gui/duplicate_finder.py",
+          ]
+          missing = [r for r in required if not any(n.endswith(r) for n in names)]
+          assert not missing, f"wheel missing: {missing}"
+          print("wheel contents OK")
+          PY
+
+      - name: Clean-install smoke test
+        run: bash scripts/smoke_install.sh dist/*.whl

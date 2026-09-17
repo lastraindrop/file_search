@@ -1,6 +1,6 @@
 # FileCortex Current Engineering Plan
 
-> Version: 6.6.1 | Updated: 2026-09-09 | Verification baseline: 864 passed, Ruff 0 errors, wheel/sdist built
+> Version: 7.0.0 | Updated: 2026-09-17 | Verification baseline: 882 passed, Ruff 0 errors, wheel/sdist built, clean-install smoke verified
 
 ## Purpose
 
@@ -21,6 +21,8 @@ The v6.5.3 review-driven round is complete as well: Windows lock liveness probe,
 The v6.6.0 full-architecture review round is complete: UNC long-prefix bypass (validate_project/is_safe), note/tag auto-registration sandbox escape, MCP transport wiring, POSIX process-group self-kill, corrupt-config backup-before-rewrite, search CancelledError/future-drain and backpressure cancellation, manual-exclude separator parity, metadata fallback contract, WS error/closing-code delivery, origin hardening against Host spoofing, extract UNC source blocking, lifespan process cleanup, and a batch of frontend/desktop race and UX fixes. Full findings and follow-ups live in `docs/` (ARCHITECTURE_REVIEW, POSITIONING_ANALYSIS, CODE_REVIEW_V660, IMPLEMENTATION_PLAN_V660).
 
 The v6.6.1 review-driven bugfix round is complete on top: WebSocket origin gate (cross-site WS hijacking), resolved-root config lookups (no phantom project registration), WS success-path PID hygiene and backpressure cancel-race, frontend terminal-state handling for both WebSocket flows, change-driven form controls (select-all regression), desktop staging-menu/poller/tool-guard/stats-cap fixes, CLI project-relative paths + output-encoding + exit codes, MCP `to_thread` coverage, and CLI/MCP test isolation from the real user config. 18 regression tests added; ledger in `docs/CODE_REVIEW_V661.md`. Baseline: 864 passed, Ruff 0 errors.
+
+The v7.0.0 release-engineering round is complete: deployable distributions (Dockerfile/compose/systemd/NSSM + clean-install smoke in `scripts/`), `FCTX_CONFIG_DIR` and `GET /healthz` for container orchestration, nested `.gitignore` semantics across all walkers, asynchronous Web export/stats endpoints, desktop main-thread IO removal (preview/export/stage-all/filter/rename-preview), a frontend consistency batch (search/openProject races, fetch timeout, modal dedup, select-all visibility, ResizeObserver), CLI export sandbox, and queue-sentinel/schema parity. 18 regression tests added; full assessment in `docs/MASTER_REVIEW_AND_LANDING_PLAN.md`. Baseline: 882 passed, Ruff 0 errors, clean-install smoke green.
 
 The next work is deliberate product improvement, not another broad stabilization rewrite.
 

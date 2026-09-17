@@ -9,6 +9,9 @@ const App = {
     config,
     escapeHtml,
 
+    // Request-ordering guards (initialized here so `++` never yields NaN).
+    _statsSeq: 0,
+
     // API Bindings
     ...api,
 
@@ -29,7 +32,7 @@ const App = {
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(searchTimer);
                 searchTimer = setTimeout(
-                    () => App.startSearch(),
+                    () => App.startSearch(true),
                     App.config.ui.searchDebounceMs
                 );
             });
@@ -87,7 +90,7 @@ const App = {
             }
             if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
                 const helpModal = document.getElementById('helpModal');
-                if (helpModal) new bootstrap.Modal(helpModal).show();
+                if (helpModal) bootstrap.Modal.getOrCreateInstance(helpModal).show();
             }
             if (e.key === 'Escape') {
                 App.hideContextMenu();
@@ -227,6 +230,17 @@ const App = {
         // config onto project B's tree.
         const requestSeq = ++App.state.openProjectSeq;
 
+        // Cancel any in-flight search: an old socket must not keep streaming
+        // the previous project's results into the newly opened workspace.
+        App.stopSearchInFlight();
+
+        // Flush the debounced staging write BEFORE reloading: openProject
+        // re-reads staging_list from the server, and a pending add/remove
+        // within the 500ms debounce window would otherwise be reverted
+        // (the same race categorizeStaged already fixed with flushNow()).
+        await App.syncStagingToBackend.flushNow();
+        if (requestSeq !== App.state.openProjectSeq) return;
+
         App.state.selectedFiles.clear();
         App.updateBulkUI();
 
@@ -318,7 +332,7 @@ const App = {
         document.getElementById('set-token-ratio').value = s.token_ratio || App.config.defaults.tokenRatio;
         document.getElementById('set-allowed-exts').value = s.allowed_extensions || "";
         document.getElementById('set-noise-reducer').checked = Boolean(s.enable_noise_reducer);
-        new bootstrap.Modal(document.getElementById('settingsModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('settingsModal')).show();
     },
 
     saveGlobalSettings: async () => {
@@ -369,7 +383,7 @@ const App = {
             tmplEditor.appendChild(App._createKeyValueRow('template', name, text));
         });
 
-        new bootstrap.Modal(document.getElementById('projectSettingsModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('projectSettingsModal')).show();
     },
 
     _createKeyValueRow: (prefix, key, value) => {
@@ -436,11 +450,14 @@ const App = {
     },
 
     previewFile: async (path) => {
-        if (App.state.isEditing && App.state.currentFile !== path) {
+        if (App.state.isEditing) {
+            // Re-clicking the SAME file must also confirm: _doPreviewFile
+            // re-fetches from disk and would discard unsaved edits silently.
+            const sameFile = App.state.currentFile === path;
             ui.showActionModal({
                 title: 'Unsaved Changes',
                 confirmText: 'Discard',
-                bodyHtml: '<p>Discard unsaved changes and switch file?</p>',
+                bodyHtml: `<p>Discard unsaved changes and ${sameFile ? 'reload this file' : 'switch file'}?</p>`,
                 onConfirm: async () => {
                     App.state.isEditing = false;
                     ui.closeActionModal();
@@ -508,10 +525,24 @@ const App = {
         }
     },
 
+    clearPreviewPane: () => {
+        // Blank the preview + file header after the underlying file moved or
+        // vanished, so stale content is not read as the new state.
+        const nameEl = document.getElementById('currentFileName');
+        if (nameEl) nameEl.innerText = '';
+        const codeEl = document.getElementById('codePreview');
+        if (codeEl) codeEl.innerText = '';
+        const editor = document.getElementById('codeEditor');
+        if (editor) editor.value = '';
+        App.state.rawContent = '';
+        App.state.currentFileEditable = false;
+    },
+
     copyPath: async () => {
         if (!App.state.currentFile) return;
         try {
-            await copyToClipboard(App.state.currentFile);
+            const ok = await copyToClipboard(App.state.currentFile);
+            if (!ok) throw new Error('Clipboard unavailable');
             const btn = document.getElementById('btnCopyPath');
             if (btn) {
                 // Persist the original label in a data attribute: a second
@@ -542,6 +573,10 @@ const App = {
         const note = document.getElementById('noteInput').value.trim();
         try {
             await api.saveFileNote(App.state.projectPath, App.state.currentFile, note);
+            // The read path defaults missing notes to {}; mirror that here so
+            // a config payload without the key cannot report a false failure
+            // after the server has already persisted the note.
+            if (!App.state.projConfig.notes) App.state.projConfig.notes = {};
             App.state.projConfig.notes[App.state.currentFile] = note;
             App.hideFileNote();
             ui.showToast("Note saved", 'success');
@@ -649,6 +684,9 @@ const App = {
                     App.openProject();
                     App.state.currentFile = null;
                     document.getElementById('fileControls').style.display = 'none';
+                    // The preview pane still shows the old file: clear it so
+                    // stale content is not mistaken for the renamed file.
+                    App.clearPreviewPane();
                 } catch (e) { ui.showToast("Rename failed: " + e.message, 'danger'); }
             }
         });
@@ -670,6 +708,7 @@ const App = {
                     if (App.state.currentFile === targetPath) {
                         App.state.currentFile = null;
                         document.getElementById('fileControls').style.display = 'none';
+                        App.clearPreviewPane();
                     }
                     ui.showToast("File deleted", 'success');
                     ui.showOperationSummary({ title: 'File deleted', completed: 1 });
@@ -801,11 +840,15 @@ const App = {
         });
     },
 
-    startSearch: () => {
+    startSearch: (silent = false) => {
         if (!App.state.projectPath) return;
         const query = document.getElementById('searchInput').value;
 
         if (!query.trim()) {
+            // Debounced input events fire while the user is still typing (or
+            // clearing the box): only explicit triggers (button/Enter) should
+            // warn about an empty query.
+            if (silent === true) return;
             ui.showToast("Enter a search query first.", "warning");
             return;
         }
@@ -900,6 +943,18 @@ const App = {
         };
     },
 
+    stopSearchInFlight: () => {
+        // Invalidate any running search without touching the overlay: used by
+        // openProject before the results state is rebuilt from scratch.
+        App.state.searchGeneration++;
+        if (App.state.socket) {
+            App.state.socket.close();
+            App.state.socket = null;
+        }
+        const btn = document.getElementById('btnStopSearch');
+        if (btn) btn.style.display = 'none';
+    },
+
     stopSearch: () => {
         App.state.searchGeneration++;
         if (App.state.socket) {
@@ -961,7 +1016,7 @@ const App = {
         const modalBody = document.getElementById('toolResultModalBody');
         const modalHeader = document.querySelector('#toolResultModal .modal-header');
 
-        const bsModal = new bootstrap.Modal(modalWrapper);
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modalWrapper);
         bsModal.show();
 
         const paths = Array.from(App.state.staging);
@@ -1219,6 +1274,7 @@ const App = {
     },
 
     _updateStatsImpl: async () => {
+        const seq = ++App._statsSeq;
         const count = App.state.staging.size;
         const label = document.getElementById('tokenEstimate');
         if (!label) return;
@@ -1232,6 +1288,9 @@ const App = {
 
         try {
             const data = await api.fetchStats(App.state.projectPath, Array.from(App.state.staging));
+            // A slow response for an older staging state must not overwrite
+            // the badge computed for the newest one.
+            if (seq !== App._statsSeq) return;
             const threshold = (App.state.globalSettings && App.state.globalSettings.token_threshold)
                 || App.config.defaults.tokenThreshold;
             label.innerText = `${data.file_count} Files | ${data.total_tokens.toLocaleString()} Tokens`;
@@ -1271,7 +1330,8 @@ const App = {
                 export_format: format,
                 include_blueprint: includeBlueprint
             });
-            await copyToClipboard(data.content);
+            const ok = await copyToClipboard(data.content);
+            if (!ok) throw new Error('Clipboard unavailable');
             ui.showToast("Context copied", 'success');
         } catch (e) { ui.showToast("Failed to generate context: " + e.message, 'danger'); }
         finally {
@@ -1324,8 +1384,8 @@ const App = {
                 if (cb) cb.checked = checked;
             }
         });
-        const searchList = document.getElementById('searchResultsList');
-        if (searchList && searchList.style.display !== 'none' && App.state.searchResults.length) {
+        const searchSection = document.getElementById('section-searchResults');
+        if (searchSection && searchSection.style.display !== 'none' && App.state.searchResults.length) {
             App.state.searchResults.forEach(r => {
                 if (r && r.path && checked) App.state.selectedFiles.add(r.path);
             });
@@ -1349,8 +1409,8 @@ const App = {
                 const path = item.getAttribute('data-path');
                 if (path) selectablePaths.add(path);
             });
-            const searchList = document.getElementById('searchResultsList');
-            if (searchList && searchList.style.display !== 'none' && App.state.searchResults.length) {
+            const searchSection = document.getElementById('section-searchResults');
+            if (searchSection && searchSection.style.display !== 'none' && App.state.searchResults.length) {
                 App.state.searchResults.forEach(r => { if (r && r.path) selectablePaths.add(r.path); });
             }
             let selectable = selectablePaths.size;
@@ -1644,7 +1704,7 @@ const App = {
             ui.showToast("No files selected or staged!", "warning");
             return;
         }
-        const modal = new bootstrap.Modal(document.getElementById('pathCollectorModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('pathCollectorModal'));
         modal.show();
     },
 
@@ -1666,7 +1726,8 @@ const App = {
                 dir_suffix: dir_suffix
             });
             if (data.result) {
-                await copyToClipboard(data.result);
+                const ok = await copyToClipboard(data.result);
+                if (!ok) throw new Error('Clipboard unavailable');
                 ui.showToast(`✅ ${paths.length} paths copied to clipboard!`, "success");
                 const modalEl = document.getElementById('pathCollectorModal');
                 const modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -1692,13 +1753,17 @@ const App = {
         if (menu) {
             const extractAction = menu.querySelector('[data-context-action="extract"]');
             if (extractAction) extractAction.hidden = getFileExt(path) !== 'zip';
+            // Show first so offsetWidth/offsetHeight can be measured (they
+            // are 0 while display:none); then clamp to the viewport.
+            menu.style.display = 'block';
+            menu.style.left = '0px';
+            menu.style.top = '0px';
             let left = e.clientX;
             let top = e.clientY;
-            const menuW = 180;
-            const menuH = 200;
+            const menuW = menu.offsetWidth || 180;
+            const menuH = menu.offsetHeight || 200;
             if (left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
             if (top + menuH > window.innerHeight) top = window.innerHeight - menuH - 10;
-            menu.style.display = 'block';
             menu.style.left = Math.max(0, left) + 'px';
             menu.style.top = Math.max(0, top) + 'px';
         }
@@ -1727,13 +1792,19 @@ const App = {
                 try {
                     await App.addToFavorites();
                 } finally {
-                    App.state.currentFile = savedFile;
+                    // Only restore if unchanged: the user may have previewed
+                    // another file while the POST was in flight, and blindly
+                    // restoring would desync currentFile from the pane.
+                    if (App.state.currentFile === path) {
+                        App.state.currentFile = savedFile;
+                    }
                 }
                 break;
             }
             case 'copyPath':
                 try {
-                    await copyToClipboard(path);
+                    const ok = await copyToClipboard(path);
+                    if (!ok) throw new Error('Clipboard unavailable');
                     ui.showToast("Path Copied");
                 } catch (_) { ui.showToast("Copy failed", 'danger'); }
                 break;

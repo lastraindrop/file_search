@@ -1,6 +1,16 @@
 # FileCortex Roadmap
 
-> Current version: 6.6.1 | Updated: 2026-09-09 | Current verification: 864 passed, Ruff 0 errors
+> Current version: 7.0.0 | Updated: 2026-09-17 | Current verification: 882 passed, Ruff 0 errors
+
+## Delivered in 7.0.0 (Release Engineering & Review Round)
+
+- [x] Deployable distributions: Dockerfile + docker-compose (non-root, healthz probe, single-worker enforced), systemd unit, Windows NSSM script, clean-install smoke scripts (`scripts/`), Build/Docker CI workflows.
+- [x] `FCTX_CONFIG_DIR` relocates config + logs (containers/multi-instance); unauthenticated `GET /healthz` liveness endpoint.
+- [x] Nested `.gitignore` chain with git last-match-wins semantics across search, tree, export, and flatten (child `!error.log` overrides parent `*.log`).
+- [x] Web export/stats endpoints off the event loop (`asyncio.to_thread`); desktop preview/export/stage-all/filter/rename-preview moved off the Tk main thread or debounced.
+- [x] Frontend: openProject cancels in-flight search + flushes staging; fetch timeout; Modal instance dedup; select-all visibility fix; ResizeObserver virtual list; stats ordering guard; preview hygiene; clipboard truthiness.
+- [x] CLI relative export sandbox (`../` escapes rejected); duplicate-worker ERROR→DONE sentinel parity; progress endpoint schemas.
+- [x] 18 new regression tests (`tests/test_v7_release_engineering.py`); full master review + landing plan in `docs/MASTER_REVIEW_AND_LANDING_PLAN.md`.
 
 ## Delivered in 6.6.1 (Review-Driven Bugfix Round)
 
@@ -107,6 +117,7 @@
 
 | Version | Date | Release snapshot |
 |---|---|---|
+| 7.0.0 | 2026-09-17 | Release engineering + review fixes: Docker/systemd/NSSM/smoke, FCTX_CONFIG_DIR, /healthz, nested gitignore, async exports, desktop background IO, frontend consistency batch, CLI sandbox, sentinel parity; 882 passed. |
 | 6.6.1 | 2026-09-09 | Review-driven bugfix round: WS origin gate (CSWSH), resolved-root config lookup, WS PID hygiene + backpressure race, frontend terminal states + change-driven controls, desktop staging menu/poller/tool-guard/stats-cap, CLI relative paths + encoding + exit codes, MCP to_thread, CLI test isolation; 864 passed. |
 | 6.6.0 | 2026-09-06 | Review-driven hardening: UNC bypass, note/tag registration bypass, MCP transport, POSIX process groups, search CancelledError/cancelled-future drain, origin/lock/auth polish; 846 passed. |
 | 6.5.3 | 2026-08-23 | Review-driven bugfix round: Windows lock probe, corrupt-config recovery, case-only rename, gitignore/tree parity, CLI exit codes, WS 3.10 compat; 800 passed. |

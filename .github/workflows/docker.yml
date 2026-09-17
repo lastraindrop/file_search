@@ -1,0 +1,46 @@
+name: Docker
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f docker/Dockerfile -t filecortex:ci .
+
+      - name: Run container (token required for non-loopback bind)
+        run: |
+          docker run -d --name filecortex-ci \
+            -e FCTX_API_TOKEN=ci-smoke-token \
+            -p 18000:8000 \
+            filecortex:ci
+
+      - name: Wait for health and verify auth
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:18000/healthz; then
+              echo; echo "health OK"; exit 0
+            fi
+            sleep 2
+          done
+          echo "container did not become healthy"; docker logs filecortex-ci; exit 1
+
+      - name: Verify token-protected endpoint accepts the token
+        run: |
+          curl -sf -H "X-API-Token: ci-smoke-token" http://127.0.0.1:18000/api/whoami | grep -q '"status"'
+
+      - name: Verify unauthenticated request is rejected
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:18000/api/whoami)
+          test "$code" = "401" || { echo "expected 401, got $code"; exit 1; }
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f filecortex-ci || true

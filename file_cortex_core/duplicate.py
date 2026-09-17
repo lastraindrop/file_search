@@ -137,3 +137,7 @@ class DuplicateWorker(threading.Thread):
         except Exception as e:
             logger.exception("Duplicate scan failed")
             self.result_queue.put(("ERROR", str(e)))
+            # Contract parity with SearchWorker: every exit path leaves a
+            # terminal DONE sentinel so a consumer that drains until DONE
+            # (rather than stopping at ERROR) cannot hang forever.
+            self.result_queue.put(("DONE", False))

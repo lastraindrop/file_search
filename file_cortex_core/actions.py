@@ -1024,7 +1024,16 @@ class ActionBridge:
             is_shell = any(c in template for c in shell_metas) or (force_shell is True)
 
             def win_quote(s: str) -> str:
-                return f'"{s.replace(chr(34), chr(92) + chr(34)).replace("%", "%%")}"'
+                # NOTE: do NOT double '%' here. '%%' collapsing only happens
+                # inside .bat/.cmd batch files; subprocess shell=True runs
+                # ``cmd /c <command>`` (command-line context) where '%%' stays
+                # literal and would corrupt every path containing '%'.
+                # A lone '%' is literal unless it forms a valid '%NAME%'
+                # reference, so the common case is now correct. A path that
+                # literally contains '%NAME%' can still be expanded by cmd;
+                # that residual case is accepted (documented) because no
+                # quoting trick can express it in command-line context.
+                return f'"{s.replace(chr(34), chr(92) + chr(34))}"'
 
             if not is_shell and force_shell is not False:
                 first_word = template.split(None, 1)[0].strip('"')

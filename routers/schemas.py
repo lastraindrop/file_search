@@ -312,3 +312,15 @@ class ProcessTerminateRequest(BaseModel):
     """Request model for terminating processes."""
 
     pid: int
+
+
+class ProgressPollRequest(BaseModel):
+    """Request model for polling a tracked task's progress."""
+
+    task_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ProgressNewRequest(BaseModel):
+    """Request model for creating a new tracked task."""
+
+    total: int = Field(..., ge=0)

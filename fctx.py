@@ -211,9 +211,16 @@ def cmd_export(args: argparse.Namespace, data_mgr: DataManager) -> bool:
         )
 
     if args.output:
-        out_path = pathlib.Path(args.output)
-        if not out_path.is_absolute():
-            out_path = pathlib.Path(proj_root) / out_path
+        raw_output = pathlib.Path(args.output)
+        explicit_absolute = raw_output.is_absolute()
+        out_path = raw_output if explicit_absolute else pathlib.Path(proj_root) / raw_output
+        # Relative outputs must stay inside the registered workspace: a
+        # "../x.md" must not silently escape the sandbox. An absolute path is
+        # an explicit user choice (same trust level as the CLI user itself)
+        # and is allowed.
+        if not explicit_absolute and not PathValidator.is_safe(out_path, proj_root):
+            print("ERROR: Relative output path escapes the project root.")
+            return False
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(content, encoding="utf-8")
         tokens = FormatUtils.estimate_tokens(content)
