@@ -36,7 +36,3 @@ jobs:
         # `continue-on-error` keeps this informative without failing CI.
         continue-on-error: true
         run: black --check .
-
-      - name: Type check with pyright
-        uses: jreese/actions/pyright@v1
-        if: false
