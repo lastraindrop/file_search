@@ -615,6 +615,11 @@ class FileOps:
             ValueError: If a source is neither a file nor a directory, or if a
                 directory would be copied into itself or one of its descendants.
         """
+        if isinstance(srcs, str):
+            # Defensive: a bare string would be iterated character-by-character,
+            # producing one bogus "source" per character. Coerce instead of
+            # failing with a confusing per-character error.
+            srcs = [srcs]
         dst_dir = pathlib.Path(dst_dir_str).resolve()
         root = pathlib.Path(project_root).resolve()
 

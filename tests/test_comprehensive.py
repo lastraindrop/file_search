@@ -148,7 +148,11 @@ class TestPathValidatorAdvanced:
     """Extended tests for PathValidator."""
 
     def test_validate_project_unc_blocked(self):
-        """UNC paths raise PermissionError."""
+        """UNC paths raise PermissionError (Windows-only semantics)."""
+        import os
+
+        if os.name != "nt":
+            pytest.skip("UNC path semantics are Windows-specific")
         with pytest.raises(PermissionError, match="UNC"):
             PathValidator.validate_project("\\\\server\\share")
 

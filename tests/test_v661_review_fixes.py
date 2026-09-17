@@ -193,13 +193,17 @@ class TestCliReviewFixes:
 
     def test_resolve_in_project_anchors_relative_paths(self):
         """Relative args anchor to the project root; absolutes pass through."""
+        import os
+
         import fctx
 
         root = PathValidator.norm_path("E:/some/proj")
         resolved = fctx._resolve_in_project("src/main.py", root)
         assert resolved == root + "/src/main.py"
-        absolute = fctx._resolve_in_project("E:/other/file.py", root)
-        assert absolute == PathValidator.norm_path("E:/other/file.py")
+        # Use a host-absolute input: "E:/..." is only absolute on Windows.
+        abs_input = "E:/other/file.py" if os.name == "nt" else "/other/file.py"
+        absolute = fctx._resolve_in_project(abs_input, root)
+        assert absolute == PathValidator.norm_path(abs_input)
 
     def test_cmd_stage_accepts_project_relative_path(
         self, clean_config, mock_project, tmp_path, monkeypatch, capsys

@@ -190,7 +190,11 @@ class TestMCPRegisterSecurity:
             PathValidator.validate_project(system_dir)
 
     def test_mcp_register_rejects_unc_path(self):
-        """UNC path should be blocked."""
+        """UNC path should be blocked (Windows-only semantics)."""
+        import os
+
+        if os.name != "nt":
+            pytest.skip("UNC path semantics are Windows-specific")
         with pytest.raises(PermissionError, match="UNC"):
             PathValidator.validate_project("\\\\server\\share")
 

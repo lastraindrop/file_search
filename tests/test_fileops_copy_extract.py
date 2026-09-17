@@ -112,7 +112,7 @@ class TestCopyItem:
         """A non-existent source raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             FileOps.copy_item(
-                str(mock_project / "nope.txt"),
+                [str(mock_project / "nope.txt")],
                 str(mock_project / "src"),
                 str(mock_project),
             )
